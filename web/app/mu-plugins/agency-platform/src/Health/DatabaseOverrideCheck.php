@@ -173,13 +173,26 @@ final class DatabaseOverrideCheck {
 		return false;
 	}
 
+	/**
+	 * A value counts as "empty" if it's an empty/blank string, null, an
+	 * empty array, OR a non-empty array whose leaves are ALL themselves
+	 * empty (recursively) — e.g. `['typography' => ['fontSize' => '']]`
+	 * carries no real customization even though the array isn't literally
+	 * `[]`. Mirrors the depth-agnostic traversal in has_non_empty_css_key().
+	 */
 	private static function is_empty_value( mixed $value ): bool {
 		if ( is_string( $value ) ) {
 			return '' === trim( $value );
 		}
 
 		if ( is_array( $value ) ) {
-			return array() === $value;
+			foreach ( $value as $item ) {
+				if ( ! self::is_empty_value( $item ) ) {
+					return false;
+				}
+			}
+
+			return true;
 		}
 
 		return null === $value;

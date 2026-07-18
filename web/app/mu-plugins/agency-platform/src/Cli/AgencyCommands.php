@@ -126,12 +126,10 @@ final class AgencyCommands {
 
 		// LEAD_WEBHOOK_URL itself is consumed directly as an environment
 		// variable by SiteIntegrations\LeadDelivery\WebhookLeadDelivery —
-		// nothing caches it into a wp_options row today. delete_option() is
-		// a no-op (returns false) when the option doesn't exist, so this
-		// stays safe/idempotent if a later task ever introduces such a
-		// cache under this option name.
-		delete_option( 'agency_lead_webhook_url' );
-		$summary[] = 'Cleared any cached LEAD_WEBHOOK_URL-derived option (none present today; call is a no-op).';
+		// nothing caches it into a wp_options row today, so there is
+		// nothing to clear here. If a later task ever introduces such a
+		// cache, add its deletion here at that point (don't speculate on
+		// an option name nothing writes yet).
 
 		update_option( 'blog_public', 0 );
 		$summary[] = 'Set "blog_public" to 0 (discourage search engines from indexing).';
@@ -162,10 +160,17 @@ final class AgencyCommands {
 
 		$failures = array();
 
-		if ( in_array( $environment, array( 'development', 'staging' ), true ) ) {
-			if ( ! defined( 'AGENCY_DISABLE_OUTBOUND_WEBHOOKS' ) || true !== AGENCY_DISABLE_OUTBOUND_WEBHOOKS ) {
-				$failures[] = 'AGENCY_DISABLE_OUTBOUND_WEBHOOKS must be defined and true when WP_ENVIRONMENT_TYPE is "development" or "staging".';
-			}
+		// $environment is guaranteed non-production here (the early return
+		// above handles 'production'), so this invariant applies to every
+		// non-production value WP_ENVIRONMENT_TYPE can hold — 'development'
+		// and 'staging' explicitly, but also 'local' (a valid core
+		// environment type; see config/application.php) and any other
+		// custom, non-production value a project might introduce.
+		if ( ! defined( 'AGENCY_DISABLE_OUTBOUND_WEBHOOKS' ) || true !== AGENCY_DISABLE_OUTBOUND_WEBHOOKS ) {
+			$failures[] = sprintf(
+				'AGENCY_DISABLE_OUTBOUND_WEBHOOKS must be defined and true when WP_ENVIRONMENT_TYPE is not "production" (current: "%s").',
+				$environment
+			);
 		}
 
 		if ( array() === $failures ) {

@@ -149,6 +149,89 @@ final class DatabaseOverrideClassifyTest extends TestCase {
 		self::assertCount( 1, $result['overrides'] );
 	}
 
+	public function test_global_styles_with_nested_all_blank_leaves_is_expected(): void {
+		// A nested array whose every leaf is blank (empty string/null/empty
+		// array, at any depth) carries no real customization, even though
+		// the array itself isn't literally `[]`.
+		$result = DatabaseOverrideCheck::classify(
+			array(
+				array(
+					'post_type'    => 'wp_global_styles',
+					'post_name'    => 'wp-global-styles-site-theme',
+					'post_status'  => 'publish',
+					'post_content' => json_encode(
+						array(
+							'version'                     => 2,
+							'isGlobalStylesUserThemeJSON' => true,
+							'settings'                    => array(
+								'typography' => array(
+									'fontSize' => '',
+									'nested'   => array(
+										'also' => null,
+									),
+								),
+							),
+						)
+					),
+				),
+			)
+		);
+
+		self::assertSame( array(), $result['overrides'] );
+		self::assertCount( 1, $result['expected'] );
+	}
+
+	public function test_global_styles_with_nested_real_value_is_an_override(): void {
+		// Same shape as above, but one leaf actually carries a value —
+		// that's a real customization and must not be masked by the
+		// all-blank-leaves exemption.
+		$result = DatabaseOverrideCheck::classify(
+			array(
+				array(
+					'post_type'    => 'wp_global_styles',
+					'post_name'    => 'wp-global-styles-site-theme',
+					'post_status'  => 'publish',
+					'post_content' => json_encode(
+						array(
+							'version'                     => 2,
+							'isGlobalStylesUserThemeJSON' => true,
+							'settings'                    => array(
+								'typography' => array(
+									'fontSize' => '16px',
+									'nested'   => array(
+										'also' => null,
+									),
+								),
+							),
+						)
+					),
+				),
+			)
+		);
+
+		self::assertCount( 1, $result['overrides'] );
+		self::assertSame( array(), $result['expected'] );
+	}
+
+	public function test_global_styles_with_malformed_content_is_an_override(): void {
+		// Non-JSON/unparseable post_content is unexpected for this post
+		// type; classify() treats it conservatively as a customization so
+		// it surfaces for human review rather than being silently ignored.
+		$result = DatabaseOverrideCheck::classify(
+			array(
+				array(
+					'post_type'    => 'wp_global_styles',
+					'post_name'    => 'wp-global-styles-site-theme',
+					'post_status'  => 'publish',
+					'post_content' => 'not valid json {{{',
+				),
+			)
+		);
+
+		self::assertCount( 1, $result['overrides'] );
+		self::assertSame( array(), $result['expected'] );
+	}
+
 	public function test_wp_block_is_reported_as_synced_pattern_not_override(): void {
 		$result = DatabaseOverrideCheck::classify(
 			array(
