@@ -28,7 +28,7 @@ WooCommerce markup override → `site-theme/woocommerce/`
 ## Hard rules the architecture tests enforce
 
 - No closures in `add_action`/`add_filter` anywhere in production code — named class methods only (`HookOwnershipTest`).
-- `functions.php` stays ≤50 significant lines and only calls `ThemeBootstrap::boot()`; root template delegates stay ≤10 significant lines and register no hooks (`ThemeBootstrapTest`).
+- `functions.php` stays ≤50 lines and only calls `ThemeBootstrap::boot()`; root template delegates stay ≤10 significant lines and register no hooks (`ThemeBootstrapTest`).
 - No `components/`, `layouts/`, `inc/`, `includes/`, `helpers/`, `misc/`, `common/`, `lib/`, or `utils/` directories in the theme or any plugin (`DirectoryRulesTest`).
 - Every block needs a valid `block.json`: name `agency/<folder>`, integer `apiVersion`, `file:` asset references that resolve inside the block (`BlockManifestTest`).
 - WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) may only appear in `site-commerce/`, `site-theme/woocommerce/`, `tests/commerce/`, or a reviewed entry in `tests/Architecture/woocommerce-allowlist.php` (`WooCommerceIsolationTest`).

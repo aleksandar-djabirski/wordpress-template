@@ -186,6 +186,9 @@ Expected failure (stylelint, `scale-unlimited/declaration-strict-value`):
 web/app/themes/site-theme/blocks/reference-callout/style.css
  X:Y  ✖  Use design tokens: var(--wp--preset--color--*) / var(--wp--custom--*) instead of raw colors (see theme.json).  scale-unlimited/declaration-strict-value
 ```
+(`X:Y` and the surrounding report formatting depend on the installed
+stylelint version; the rule name and message text above are quoted
+verbatim from `.stylelintrc.json`.)
 
 Revert: remove the added rule.
 
@@ -255,14 +258,22 @@ ddev wp post delete <ID> --force
 
 **Requires DDEV/CI context** — needs a live database + `test:integration`.
 
-Mutation — temporarily remove `'manage_options'` from
+Mutation — temporarily remove `'unfiltered_html'` from
 `AgencyPlatform\Roles\RolesProvider::NEVER_GRANT` in
-`web/app/mu-plugins/agency-platform/src/Roles/RolesProvider.php`. (A raw
-`wp cap add client_editor manage_options` will not reproduce this failure:
+`web/app/mu-plugins/agency-platform/src/Roles/RolesProvider.php`. This is
+the one `NEVER_GRANT` entry that's actually live for `client_editor`: core's
+`editor` role is granted `unfiltered_html` by default on a single-site
+install, so `client_editor_capabilities()` (which starts from `editor`'s
+capability set) genuinely strips it via this exclusion — removing the
+exclusion genuinely restores the capability. (`'manage_options'` is NOT a
+usable mutation here: core's `editor` role never has `manage_options` to
+begin with, so unsetting an absent key from a desired-capability array is a
+no-op and the test would still pass. A raw `wp cap add client_editor
+unfiltered_html` also would not reproduce this failure:
 `RolesProvider::register_role()` re-syncs the role's capabilities against
 its computed desired set on every `init`, so a capability outside
 `NEVER_GRANT`'s exclusion is stripped back out on the very next request —
-this mutation is the guardrail's actual failure mode.)
+the array mutation above is the guardrail's actual failure mode.)
 
 Check (filtered directly with phpunit, since `composer test:integration`
 is a two-step script and `--` argument forwarding across composer script
@@ -273,14 +284,15 @@ ddev exec env WP_INTEGRATION=1 vendor/bin/phpunit --testsuite integration \
   --filter test_client_editor_lacks_every_never_grant_capability
 ```
 
-Expected failure (`ClientEditorCapabilitiesTest::test_client_editor_lacks_every_never_grant_capability`):
+Expected failure (`ClientEditorCapabilitiesTest::test_client_editor_lacks_every_never_grant_capability`,
+quoting the test's own assertion message verbatim):
 ```
 1) Tests\Integration\Permissions\ClientEditorCapabilitiesTest::test_client_editor_lacks_every_never_grant_capability
-client_editor must not have the 'manage_options' capability.
+client_editor must not have the 'unfiltered_html' capability.
 Failed asserting that true is false.
 ```
 
-Revert: restore `'manage_options'` in `NEVER_GRANT`.
+Revert: restore `'unfiltered_html'` in `NEVER_GRANT`.
 
 ---
 
