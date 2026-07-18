@@ -52,6 +52,7 @@ CSS first, then native HTML/ARIA, then block-local JS declared via `block.json` 
 ## Commands
 
 Run PHP/Composer commands via `ddev composer <script>`; npm runs natively.
+When changing npm dependencies, regenerate the lock with `npx -y npm@10 install` — CI runs Node 22/npm 10, and locks written by newer npm majors can fail its `npm ci` sync check.
 
 - `ddev composer verify:fast` — validate, audit, phpcs, phpstan, deptrac, architecture + unit tests. No database. Run before every commit.
 - `ddev composer verify` — `verify:fast` + `test:integration` (needs the DDEV database).
