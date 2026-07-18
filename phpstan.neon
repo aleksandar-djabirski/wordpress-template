@@ -21,9 +21,19 @@ parameters:
         - tests/e2e/*
 
     # szepeviktor/phpstan-wordpress's extension.neon already bootstraps
-    # WordPress core stubs/constants; keep this empty rather than layering
-    # in an extra bootstrap chain.
-    bootstrapFiles: []
+    # WordPress core stubs/constants via its own `bootstrapFiles` (NEON
+    # merges this list across included configs rather than replacing it, so
+    # this addition doesn't drop the WordPress core stubs it already loads).
+    #
+    # WP_CLI is only referenced behind a `defined('WP_CLI') && WP_CLI` runtime
+    # guard (src/Cli/AgencyCommands.php) since mu-plugins can't declare a
+    # hard dependency on the wp-cli/wp-cli-bundle package. WP_CLI isn't
+    # autoloaded via Composer's PSR-4 map (it's a stub-only dev package), so
+    # it must be a `bootstrapFiles` entry, not `stubFiles` — `stubFiles`
+    # only refines types for symbols PHPStan can already see; it can't
+    # introduce a brand-new class.
+    bootstrapFiles:
+        - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
 
     # WooCommerce symbols are only used inside site-commerce and the theme's
     # woocommerce/ template overrides (see deptrac.yaml); load the stubs so

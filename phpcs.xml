@@ -54,10 +54,18 @@
         <exclude name="Squiz.Commenting"/>
     </rule>
 
-    <!-- Text-domain checks: the theme's text domain is `site-theme`. -->
+    <!--
+        Text-domain checks: one text domain per source-controlled package
+        in this repo (agency-platform mu-plugin, the three site-* plugins,
+        and the theme).
+    -->
     <rule ref="WordPress.WP.I18n">
         <properties>
             <property name="text_domain" type="array">
+                <element value="agency-platform"/>
+                <element value="site-core"/>
+                <element value="site-integrations"/>
+                <element value="site-commerce"/>
                 <element value="site-theme"/>
             </property>
         </properties>
