@@ -1,0 +1,75 @@
+deptrac:
+  paths:
+    - ./web/app/mu-plugins/agency-platform/src
+    - ./web/app/plugins/site-core/src
+    - ./web/app/plugins/site-integrations/src
+    - ./web/app/plugins/site-commerce/src
+    - ./web/app/themes/site-theme
+
+  exclude_files:
+    - '#.*/vendor/.*#'
+    - '#.*/web/wp/.*#'
+    - '#.*/node_modules/.*#'
+    - '#.*/build/.*#'
+
+  layers:
+    - name: AgencyPlatform
+      collectors:
+        - type: directory
+          value: web/app/mu-plugins/agency-platform/src/.*
+
+    # SiteCoreContracts is the ONLY site-core namespace theme/integrations/
+    # commerce may depend on (see SiteCore\Contracts\* in the naming contract).
+    - name: SiteCoreContracts
+      collectors:
+        - type: directory
+          value: web/app/plugins/site-core/src/Contracts/.*
+
+    # Everything else under site-core/src, excluding Contracts (which has its
+    # own layer above so it can be depended on independently of internals).
+    - name: SiteCore
+      collectors:
+        - type: bool
+          must:
+            - type: directory
+              value: web/app/plugins/site-core/src/.*
+          must_not:
+            - type: directory
+              value: web/app/plugins/site-core/src/Contracts/.*
+
+    - name: SiteIntegrations
+      collectors:
+        - type: directory
+          value: web/app/plugins/site-integrations/src/.*
+
+    - name: SiteCommerce
+      collectors:
+        - type: directory
+          value: web/app/plugins/site-commerce/src/.*
+
+    - name: SiteTheme
+      collectors:
+        - type: directory
+          value: web/app/themes/site-theme/.*
+
+  ruleset:
+    AgencyPlatform: []
+    SiteCoreContracts: []
+    SiteCore:
+      - SiteCoreContracts
+    SiteIntegrations:
+      - SiteCore
+      - SiteCoreContracts
+    SiteCommerce:
+      - SiteCore
+      - SiteCoreContracts
+    SiteTheme:
+      - SiteCoreContracts
+
+  analyser:
+    types:
+      - class
+      - class_superglobal
+      - use
+      - file
+      - function_call

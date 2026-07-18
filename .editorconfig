@@ -1,0 +1,28 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# WordPress coding standards (enforced by phpcs.xml) require tab indentation.
+[*.php]
+indent_style = tab
+indent_size = 4
+
+[*.md]
+trim_trailing_whitespace = false
+
+[*.{yml,yaml,json}]
+indent_style = space
+indent_size = 2
+
+[*.{css,scss,js,jsx,ts,tsx}]
+indent_style = space
+indent_size = 2
+
+[COMMIT_EDITMSG]
+max_line_length = 0

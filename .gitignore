@@ -1,0 +1,81 @@
+# ------------------------------------------------------------------
+# Environment
+# ------------------------------------------------------------------
+/.env
+/.env.local
+*.log
+
+# ------------------------------------------------------------------
+# Composer / PHP
+# ------------------------------------------------------------------
+/vendor
+composer.phar
+auth.json
+.phpunit.result.cache
+.phpunit.cache
+.deptrac.cache
+
+# ------------------------------------------------------------------
+# Node
+# ------------------------------------------------------------------
+/node_modules
+npm-debug.log*
+
+# ------------------------------------------------------------------
+# WordPress core (installed by Composer via roots/wordpress)
+# ------------------------------------------------------------------
+web/wp
+web/.htaccess
+
+# WordPress runtime/generated content
+web/app/uploads/*
+!web/app/uploads/.gitkeep
+web/app/upgrade
+web/app/cache
+
+# ------------------------------------------------------------------
+# Composer-installed plugins & mu-plugins: ignore everything by default,
+# then un-ignore our own source-controlled code. Composer-installed
+# third-party plugins (e.g. WooCommerce, if added later) stay ignored.
+# ------------------------------------------------------------------
+web/app/plugins/*
+!web/app/plugins/site-core
+!web/app/plugins/site-integrations
+!web/app/plugins/site-commerce
+
+web/app/mu-plugins/*
+!web/app/mu-plugins/agency-platform
+!web/app/mu-plugins/bedrock-autoloader.php
+
+# ------------------------------------------------------------------
+# Theme build artifacts
+# ------------------------------------------------------------------
+web/app/themes/site-theme/build/
+web/app/themes/site-theme/blocks/*/build/
+
+# ------------------------------------------------------------------
+# Testing
+# ------------------------------------------------------------------
+playwright-report/
+test-results/
+
+# ------------------------------------------------------------------
+# DDEV — everything is auto-generated except config.yaml, which is
+# hand-maintained and tracked intentionally.
+# ------------------------------------------------------------------
+.ddev/*
+!.ddev/config.yaml
+
+# ------------------------------------------------------------------
+# Internal SDD scratch (spec/design docs used to build this repo,
+# not part of the shipped project)
+# ------------------------------------------------------------------
+.superpowers/
+
+# ------------------------------------------------------------------
+# OS / editor
+# ------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

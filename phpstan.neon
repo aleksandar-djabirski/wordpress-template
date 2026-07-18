@@ -1,0 +1,34 @@
+includes:
+    - vendor/szepeviktor/phpstan-wordpress/extension.neon
+
+parameters:
+    level: 6
+
+    paths:
+        - web/app/mu-plugins/agency-platform/src
+        - web/app/plugins/site-core/src
+        - web/app/plugins/site-integrations/src
+        - web/app/plugins/site-commerce/src
+        - web/app/themes/site-theme
+        - tests
+
+    excludePaths:
+        - vendor/*
+        - web/wp/*
+        - web/app/themes/site-theme/build/*
+        - web/app/themes/site-theme/blocks/*/build/*
+        - node_modules/*
+        - tests/e2e/*
+
+    # szepeviktor/phpstan-wordpress's extension.neon already bootstraps
+    # WordPress core stubs/constants; keep this empty rather than layering
+    # in an extra bootstrap chain.
+    bootstrapFiles: []
+
+    # WooCommerce symbols are only used inside site-commerce and the theme's
+    # woocommerce/ template overrides (see deptrac.yaml); load the stubs so
+    # those files type-check without pulling all of WooCommerce into scope.
+    stubFiles:
+        - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
+
+    treatPhpDocTypesAsCertain: false

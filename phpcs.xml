@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<ruleset name="AgencyStarter">
+    <description>Coding standard for the agency-starter Bedrock project.</description>
+
+    <!-- Only scan our own source-controlled code, never vendor/core/build output. -->
+    <file>web/app/mu-plugins/agency-platform</file>
+    <file>web/app/plugins/site-core</file>
+    <file>web/app/plugins/site-integrations</file>
+    <file>web/app/plugins/site-commerce</file>
+    <file>web/app/themes/site-theme</file>
+    <file>scripts</file>
+    <file>tests</file>
+
+    <arg name="extensions" value="php"/>
+    <arg value="sp"/>
+    <arg name="colors"/>
+
+    <!-- Third-party / generated / vendored code -->
+    <exclude-pattern>*/vendor/*</exclude-pattern>
+    <exclude-pattern>*/web/wp/*</exclude-pattern>
+    <exclude-pattern>*/node_modules/*</exclude-pattern>
+    <exclude-pattern>*/build/*</exclude-pattern>
+    <exclude-pattern>*/web/app/themes/site-theme/blocks/*/build/*</exclude-pattern>
+    <exclude-pattern>tests/e2e/*</exclude-pattern>
+
+    <config name="testVersion" value="8.2-"/>
+
+    <!--
+        WordPress-Extra (WPCS 3.x) already includes WordPress-Core; we
+        intentionally do NOT include WordPress-Docs, since docblock
+        completeness is enforced by human/AI review and PHPStan rather than
+        phpcs, and it fights our PSR-4 file layout.
+    -->
+    <rule ref="WordPress-Extra">
+        <!--
+            PSR-4 autoloaded classes (web/app/*/src/**) are named after the
+            class/interface they declare (e.g. TestimonialsProvider.php),
+            not WordPress core's "class-testimonials-provider.php" convention.
+        -->
+        <exclude name="WordPress.Files.FileName"/>
+
+        <!--
+            This project targets modern PHP; short array syntax (`[]`) is the
+            project standard, not WP core's long `array()` convention.
+        -->
+        <exclude name="Generic.Arrays.DisallowShortArraySyntax"/>
+        <exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+
+        <!--
+            No WordPress-Docs ruleset is included above, but explicitly
+            exclude Squiz.Commenting requirements too in case a future
+            ruleset bump pulls them in via WordPress-Extra.
+        -->
+        <exclude name="Squiz.Commenting"/>
+    </rule>
+
+    <!-- Text-domain checks: the theme's text domain is `site-theme`. -->
+    <rule ref="WordPress.WP.I18n">
+        <properties>
+            <property name="text_domain" type="array">
+                <element value="site-theme"/>
+            </property>
+        </properties>
+    </rule>
+</ruleset>
