@@ -68,7 +68,7 @@ ddev composer test:architecture
 Expected failure (`HookOwnershipTest::test_no_closures_are_registered_as_hooks`):
 ```
 Architecture rule broken: Closure passed to add_action()/add_filter()
-Offending file:           web/app/plugins/site-core/src/Plugin.php:<line> (init)
+Offending file:           web/app/plugins/site-core/src/Plugin.php:<line> (add_action)
 Why this rule exists:     Anonymous callbacks cannot be unhooked, identified in stack traces, or unit-tested in isolation; every hook needs a named owner.
 Where the code belongs:   Replace the closure with a [ self::class, 'method' ] / [ $this, 'method' ] callback on a named class method.
 How to validate the fix:  ddev composer test:architecture
