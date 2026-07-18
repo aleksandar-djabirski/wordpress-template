@@ -48,10 +48,12 @@ web/app/mu-plugins/*
 !web/app/mu-plugins/bedrock-autoloader.php
 
 # ------------------------------------------------------------------
-# Theme build artifacts
+# Theme build artifacts — DECISION (Task 7): committed, not ignored.
+# blocks/reference-callout/build/ (wp-scripts output) ships in git so
+# agents and fresh clones get a working block editor without running
+# `npm run build` first; CI's freshness check (Task 11) rebuilds and
+# diffs against the committed copy.
 # ------------------------------------------------------------------
-web/app/themes/site-theme/build/
-web/app/themes/site-theme/blocks/*/build/
 
 # ------------------------------------------------------------------
 # Testing

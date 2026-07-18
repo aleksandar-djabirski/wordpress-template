@@ -11,11 +11,16 @@ Demonstrates:
 - Consuming a `SiteCore\Contracts\*` public API from the theme.
 - Listing in `AgencyPlatform\Editor\EditorRestrictions::ALLOWED_BLOCKS`.
 
-`build/index.js` (the `editorScript`) does not exist yet — a later task's
-`npm run build` (`@wordpress/scripts`) produces it from a not-yet-written
-`index.js` (`RichText` for `heading`/`content`, `ToggleControl` for
-`showTestimonial`). Until then the block registers and renders fine on the
-front end; only its editor UI is missing.
+`build/index.js` (the `editorScript`) is produced by the root `npm run
+build` script, which invokes `wp-scripts build` on this directory's
+`index.js` with `--output-path=./build` — i.e. per-block, entry-point-form
+(`wp-scripts build web/app/themes/site-theme/blocks/reference-callout/index.js
+--output-path=.../reference-callout/build`) rather than
+`--webpack-src-dir`/`--webpack-copy-php`, so nothing shadow-copies
+`render.php` into a second build-owned location. The build output
+(`build/index.js` + `build/index.asset.php`) is committed to git — see
+`.gitignore`'s Task 7 note — so a fresh clone has a working block editor
+without running `npm install`/`npm run build` first.
 
 ## Template for a new block
 

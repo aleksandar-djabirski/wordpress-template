@@ -80,7 +80,7 @@
 	text-decoration: none;
 }
 
-@media (min-width: 782px) {
+@media (width >= 782px) {
 	.site-header__toggle {
 		display: none;
 	}

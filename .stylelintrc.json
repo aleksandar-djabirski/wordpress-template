@@ -1,0 +1,25 @@
+{
+  "extends": "stylelint-config-standard",
+  "plugins": ["stylelint-declaration-strict-value"],
+  "rules": {
+    "scale-unlimited/declaration-strict-value": [
+      ["/color$/", "fill", "stroke", "background", "background-color", "border-color"],
+      {
+        "ignoreValues": ["currentColor", "transparent", "inherit", "initial", "unset", "none"],
+        "message": "Use design tokens: var(--wp--preset--color--*) / var(--wp--custom--*) instead of raw colors (see theme.json)."
+      }
+    ],
+    "selector-class-pattern": [
+      "^[a-z0-9]+(-[a-z0-9]+)*(__[a-z0-9]+(-[a-z0-9]+)*)?(--[a-z0-9]+(-[a-z0-9]+)*)?$",
+      {
+        "message": "Expected class selector to be a lowercase, hyphenated name, optionally with a BEM __element or --modifier (e.g. \"site-header__toggle\")."
+      }
+    ],
+    "custom-property-pattern": [
+      "^([a-z0-9]+)(-[a-z0-9]+)*(--([a-z0-9]+)(-[a-z0-9]+)*)*$",
+      {
+        "message": "Expected custom property name to be kebab-case, with WordPress's \"--\" namespace separators allowed (e.g. \"--wp--preset--color--base\")."
+      }
+    ]
+  }
+}

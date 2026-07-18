@@ -28,7 +28,8 @@ video {
 }
 
 /* Visually hidden, but available to assistive tech (e.g. the header
-   toggle's "Menu" label). */
+   toggle's "Menu" label). clip-path replaces the deprecated clip
+   property; inset(50%) collapses the box to a point the same way. */
 .screen-reader-text {
 	position: absolute;
 	width: 1px;
@@ -36,7 +37,7 @@ video {
 	margin: -1px;
 	padding: 0;
 	overflow: hidden;
-	clip: rect(0, 0, 0, 0);
+	clip-path: inset(50%);
 	white-space: nowrap;
 	border: 0;
 }

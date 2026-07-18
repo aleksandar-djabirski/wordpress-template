@@ -1,0 +1,30 @@
+{
+  "name": "agency-starter",
+  "private": true,
+  "description": "AI-first WordPress agency starter — frontend toolchain (block build, linting, e2e/visual/accessibility tests).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "wp-scripts build web/app/themes/site-theme/blocks/reference-callout/index.js --output-path=web/app/themes/site-theme/blocks/reference-callout/build",
+    "start": "wp-scripts start web/app/themes/site-theme/blocks/reference-callout/index.js --output-path=web/app/themes/site-theme/blocks/reference-callout/build",
+    "lint": "npm run lint:js && npm run lint:css",
+    "lint:js": "wp-scripts lint-js web/app/themes/site-theme/blocks web/app/themes/site-theme/parts",
+    "lint:css": "stylelint \"web/app/themes/site-theme/**/*.css\" --ignore-pattern \"web/app/themes/site-theme/**/build/**\"",
+    "test:e2e": "playwright test tests/e2e",
+    "test:visual": "playwright test tests/visual",
+    "test:accessibility": "playwright test tests/accessibility"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "^33.0.0",
+    "@wordpress/blocks": "^15.24.0",
+    "@wordpress/block-editor": "^16.0.0",
+    "@wordpress/components": "^37.0.0",
+    "@wordpress/i18n": "^6.24.0",
+    "stylelint": "^17.14.0",
+    "stylelint-config-standard": "^40.0.0",
+    "stylelint-declaration-strict-value": "^1.11.1",
+    "@playwright/test": "^1.61.1",
+    "@axe-core/playwright": "^4.12.1"
+  }
+}

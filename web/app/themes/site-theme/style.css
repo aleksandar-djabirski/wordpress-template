@@ -14,6 +14,12 @@ Text Domain: site-theme
 
 This file intentionally contains only the theme header comment above.
 Global CSS lives in assets/global/ (base.css, typography.css); part and
-block CSS live alongside their PHP (parts/*/*.css, blocks/*/*.css) and are
-enqueued by SiteTheme\Bootstrap\ThemeBootstrap::enqueue_assets().
+block CSS live alongside their PHP under parts/ and blocks/ (for example
+parts/site-header/site-header.css, blocks/reference-callout/style.css)
+and are enqueued by SiteTheme\Bootstrap\ThemeBootstrap::enqueue_assets().
+
+Note for maintainers: keep this comment free of a literal asterisk
+immediately followed by a slash — that two-character sequence closes a
+CSS comment early and breaks any CSS-aware tool (this file is parsed as
+CSS by stylelint even though WordPress only reads its header fields).
 */

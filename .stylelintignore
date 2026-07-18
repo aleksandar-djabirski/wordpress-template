@@ -1,0 +1,3 @@
+web/app/themes/site-theme/**/build/**
+node_modules/
+vendor/
