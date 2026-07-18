@@ -19,4 +19,14 @@
             <directory>tests/Integration</directory>
         </testsuite>
     </testsuites>
+    <php>
+        <!--
+            Only consulted by vendor/wp-phpunit/wp-phpunit's own
+            wp-tests-config.php, which is only required by
+            tests/Integration/bootstrap.php (the `integration` suite) — see
+            tests/bootstrap.php. Harmless for the `architecture`/`unit`
+            suites, which never load wp-phpunit at all.
+        -->
+        <env name="WP_PHPUNIT__TESTS_CONFIG" value="tests/wp-tests-config.php"/>
+    </php>
 </phpunit>

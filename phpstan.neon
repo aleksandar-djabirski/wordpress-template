@@ -20,6 +20,23 @@ parameters:
         - node_modules/*
         - tests/e2e/*
 
+        # The `integration` suite (tests/Integration/*) and its supporting
+        # tests/wp-tests-config.php extend/reference symbols that only exist
+        # once wp-phpunit/wp-phpunit has actually booted a real WordPress
+        # install at runtime: WP_UnitTestCase and its factories, the
+        # tests_add_filter() helper, etc. None of those are part of
+        # php-stubs/wordpress-stubs (they live in the wp-phpunit *package*,
+        # not WordPress core), so phpstan has no way to see them short of
+        # hand-maintained stub files that would drift from wp-phpunit's own
+        # code and fight the tool rather than reflect a real type-safety
+        # gap. Excluding this suite from static analysis (rather than
+        # lowering `level` or adding brittle stubs) is the intentional
+        # trade-off; its actual verification is running it for real inside
+        # DDEV/CI (`composer test:integration`), where a live WordPress
+        # install and PHPUnit itself catch what phpstan can't see here.
+        - tests/Integration/*
+        - tests/wp-tests-config.php
+
     # szepeviktor/phpstan-wordpress's extension.neon already bootstraps
     # WordPress core stubs/constants via its own `bootstrapFiles` (NEON
     # merges this list across included configs rather than replacing it, so

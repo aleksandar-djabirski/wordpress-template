@@ -10,4 +10,4 @@
 
 | Block | Title | Folder | Render | Editor script | Style | Editor style | Patterns | Templates | Tests |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `agency/reference-callout` | Reference Callout | `web/app/themes/site-theme/blocks/reference-callout` | `render.php` | `build/index.js` | `style.css` | `editor.css` | `web/app/themes/site-theme/patterns/reference-landing-section.php` | — | `tests/Unit/AgencyPlatform/EditorRestrictionsPolicyTest.php` |
+| `agency/reference-callout` | Reference Callout | `web/app/themes/site-theme/blocks/reference-callout` | `render.php` | `build/index.js` | `style.css` | `editor.css` | `web/app/themes/site-theme/patterns/reference-landing-section.php` | — | `tests/Integration/Permissions/ClientEditorCapabilitiesTest.php`<br>`tests/Unit/AgencyPlatform/EditorRestrictionsPolicyTest.php` |

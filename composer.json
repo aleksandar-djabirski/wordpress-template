@@ -93,7 +93,10 @@
         "audit": "composer audit --abandoned=report",
         "test:architecture": "phpunit --testsuite architecture",
         "test:unit": "phpunit --testsuite unit",
-        "test:integration": "phpunit --testsuite integration",
+        "test:integration": [
+            "@putenv WP_INTEGRATION=1",
+            "phpunit --testsuite integration"
+        ],
         "verify:fast": [
             "composer validate --strict",
             "@audit",

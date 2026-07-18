@@ -4,31 +4,23 @@
  *
  * The `architecture` and `unit` suites run without a live WordPress
  * install and only need Composer's autoloader. The `integration` suite
- * needs a real WordPress test environment (wp-phpunit/wp-phpunit); that
- * bootstrap is added by a later task. Until then, this file guards the
- * difference so `composer test:architecture` and `composer test:unit` stay
- * green without WordPress installed, and integration tests fail loudly
- * (missing bootstrap) rather than silently pretending to pass.
+ * needs a real WordPress test environment (wp-phpunit/wp-phpunit) — booted
+ * by tests/Integration/bootstrap.php instead.
+ *
+ * PHPUnit 9 has no per-testsuite bootstrap option, so this single shared
+ * file has to pick a path at runtime. It gates on the WP_INTEGRATION
+ * environment variable rather than sniffing `--testsuite` out of
+ * $_SERVER['argv']: the `test:integration` Composer script sets
+ * WP_INTEGRATION=1 via `@putenv` before invoking phpunit (see
+ * composer.json), so this stays correct regardless of how the `integration`
+ * testsuite ends up selected (name, group filter, a re-run of one file,
+ * ...) — an argv string match would silently stop matching the moment any
+ * of those change.
  */
 
 declare(strict_types=1);
 
-// PHPUnit puts the CLI arguments it was invoked with in $_SERVER['argv'];
-// detect `--testsuite integration` (or `--testsuite=integration`) so we can
-// require a WordPress-aware bootstrap once a later task adds one.
-$is_integration_suite = false;
-
-foreach ( $_SERVER['argv'] ?? array() as $index => $arg ) {
-	if ( '--testsuite' === $arg && isset( $_SERVER['argv'][ $index + 1 ] ) ) {
-		$is_integration_suite = str_contains( (string) $_SERVER['argv'][ $index + 1 ], 'integration' );
-		break;
-	}
-
-	if ( str_starts_with( (string) $arg, '--testsuite=' ) ) {
-		$is_integration_suite = str_contains( $arg, 'integration' );
-		break;
-	}
-}
+$is_integration_suite = '1' === getenv( 'WP_INTEGRATION' );
 
 // The `architecture`/`unit` suites run without a live WordPress install, so
 // load minimal WordPress function stubs before Composer's autoloader is put
@@ -42,12 +34,5 @@ if ( ! $is_integration_suite ) {
 require_once dirname( __DIR__ ) . '/vendor/autoload.php';
 
 if ( $is_integration_suite ) {
-	$integration_bootstrap = __DIR__ . '/Integration/bootstrap.php';
-
-	if ( is_file( $integration_bootstrap ) ) {
-		require_once $integration_bootstrap;
-	}
-
-	// Else: no WordPress test bootstrap exists yet. Integration tests are
-	// added in a later task alongside tests/Integration/bootstrap.php.
+	require_once __DIR__ . '/Integration/bootstrap.php';
 }
