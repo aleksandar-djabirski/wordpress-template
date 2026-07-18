@@ -14,8 +14,6 @@ sync with an external system. Follow the same fake-vs-real pattern as
 — a safe, log-only fake for development/staging, and a real HTTP-calling
 implementation gated to production via `wp_get_environment_type()`.
 
-## Current status
-
-Empty by design. This is a skeleton (Task 5): no payment, shipping, or sync
-adapter exists yet. Add them here, per-project, once real commerce behavior
-is in scope — never elsewhere in this plugin.
+Empty by design (Task 5 skeleton): no payment, shipping, or sync adapter
+exists yet. Add them here, per-project, once real commerce behavior is in
+scope — never elsewhere in this plugin.

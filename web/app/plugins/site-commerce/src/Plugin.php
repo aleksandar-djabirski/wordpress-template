@@ -58,8 +58,17 @@ final class Plugin {
 	 * WooCommerce isn't active, so this plugin has deliberately stayed a
 	 * no-op rather than fataling or half-registering commerce behavior
 	 * against APIs that don't exist.
+	 *
+	 * Gated on `activate_plugins` (the conventional WordPress capability
+	 * for "can act on plugin state") so only users who could actually
+	 * install/activate WooCommerce see it — not every logged-in admin
+	 * screen visitor.
 	 */
 	public static function render_missing_woocommerce_notice(): void {
+		if ( ! current_user_can( 'activate_plugins' ) ) {
+			return;
+		}
+
 		printf(
 			'<div class="notice notice-warning is-dismissible"><p>%s</p></div>',
 			esc_html__( 'Site Commerce is inactive: WooCommerce is not active.', 'site-commerce' )

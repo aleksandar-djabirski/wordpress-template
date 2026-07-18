@@ -22,7 +22,7 @@ final class PluginGuardTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		unset( $GLOBALS['_test_filters'] );
+		unset( $GLOBALS['_test_filters'], $GLOBALS['_test_current_user_caps'] );
 	}
 
 	public function test_maybe_boot_registers_only_the_admin_notice_when_woocommerce_is_absent(): void {
@@ -74,5 +74,25 @@ final class PluginGuardTest extends TestCase {
 			$GLOBALS['_test_filters'] ?? array(),
 			'The missing-WooCommerce admin notice must not register once WooCommerce is present.'
 		);
+	}
+
+	public function test_missing_woocommerce_notice_is_suppressed_for_users_without_activate_plugins(): void {
+		$GLOBALS['_test_current_user_caps'] = array();
+
+		ob_start();
+		Plugin::render_missing_woocommerce_notice();
+		$output = ob_get_clean();
+
+		self::assertSame( '', $output, 'Users who cannot activate plugins should see no notice output.' );
+	}
+
+	public function test_missing_woocommerce_notice_renders_for_users_who_can_activate_plugins(): void {
+		$GLOBALS['_test_current_user_caps'] = array( 'activate_plugins' );
+
+		ob_start();
+		Plugin::render_missing_woocommerce_notice();
+		$output = ob_get_clean();
+
+		self::assertStringContainsString( 'Site Commerce is inactive: WooCommerce is not active.', $output );
 	}
 }
