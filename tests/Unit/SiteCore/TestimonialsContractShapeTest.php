@@ -61,11 +61,32 @@ final class TestimonialsContractShapeTest extends TestCase {
 			9 => array( 'testimonial_author' => 'John Roe' ),
 		);
 		// Deliberately no $GLOBALS['_test_thumbnails'] entry for post 9:
-		// get_post_thumbnail_id() stub returns false, same as WordPress
-		// does for a post with no featured image.
+		// get_post_thumbnail_id() stub returns '' (matching real
+		// WordPress), same as for a post with no featured image.
 
 		$testimonials = Testimonials::latest();
 
 		self::assertNull( $testimonials[0]['thumbnail_id'] );
+	}
+
+	public function test_a_numeric_string_thumbnail_id_is_cast_to_int(): void {
+		$GLOBALS['_test_posts']     = array(
+			(object) array(
+				'ID'           => 11,
+				'post_title'   => 'Numeric-string thumbnail edge case',
+				'post_content' => 'Covers get_post_thumbnail_id() returning a numeric string.',
+			),
+		);
+		$GLOBALS['_test_post_meta'] = array(
+			11 => array( 'testimonial_author' => 'Sam Smith' ),
+		);
+		// A numeric string (rather than an int) reproduces how meta-backed
+		// WordPress values often arrive in practice.
+		$GLOBALS['_test_thumbnails'] = array( 11 => '42' );
+
+		$testimonials = Testimonials::latest();
+
+		self::assertSame( 42, $testimonials[0]['thumbnail_id'] );
+		self::assertIsInt( $testimonials[0]['thumbnail_id'] );
 	}
 }

@@ -16,7 +16,7 @@ final class TestimonialsProviderRegistrationTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 
-		unset( $GLOBALS['_test_registered'] );
+		unset( $GLOBALS['_test_registered'], $GLOBALS['_test_current_user_caps'] );
 	}
 
 	public function test_register_post_type_registers_the_testimonial_cpt_with_the_documented_shape(): void {
@@ -54,5 +54,15 @@ final class TestimonialsProviderRegistrationTest extends TestCase {
 		self::assertNotInstanceOf( \Closure::class, $args['auth_callback'] );
 		self::assertIsArray( $args['auth_callback'] );
 		self::assertSame( 'can_edit_author_meta', $args['auth_callback'][1] );
+	}
+
+	public function test_can_edit_author_meta_reflects_the_current_users_edit_posts_capability(): void {
+		$provider = new TestimonialsProvider();
+
+		$GLOBALS['_test_current_user_caps'] = array();
+		self::assertFalse( $provider->can_edit_author_meta() );
+
+		$GLOBALS['_test_current_user_caps'] = array( 'edit_posts' );
+		self::assertTrue( $provider->can_edit_author_meta() );
 	}
 }

@@ -29,9 +29,9 @@ final class LeadSubmissionHandler {
 	 */
 	public function process( array $raw ): array {
 		$lead = array(
-			'name'    => sanitize_text_field( trim( (string) ( $raw['name'] ?? '' ) ) ),
-			'email'   => sanitize_email( (string) ( $raw['email'] ?? '' ) ),
-			'message' => sanitize_textarea_field( (string) ( $raw['message'] ?? '' ) ),
+			'name'    => sanitize_text_field( trim( $this->string_from( $raw, 'name' ) ) ),
+			'email'   => sanitize_email( $this->string_from( $raw, 'email' ) ),
+			'message' => sanitize_textarea_field( $this->string_from( $raw, 'message' ) ),
 		);
 
 		$errors = $this->validate( $lead );
@@ -64,6 +64,21 @@ final class LeadSubmissionHandler {
 		return array(
 			'ok' => $delivery->deliver( $lead ),
 		);
+	}
+
+	/**
+	 * Reads $raw[$key] as a string, treating anything non-scalar (array,
+	 * object, ...) as empty rather than coercing it — e.g. (string) on an
+	 * array yields the literal string "Array" plus a PHP warning, which
+	 * would otherwise sail straight through the non-empty-string checks
+	 * below as if it were legitimate input.
+	 *
+	 * @param array<string, mixed> $raw
+	 */
+	private function string_from( array $raw, string $key ): string {
+		$value = $raw[ $key ] ?? null;
+
+		return is_scalar( $value ) ? (string) $value : '';
 	}
 
 	/**

@@ -60,6 +60,19 @@ final class LeadSubmissionHandlerTest extends TestCase {
 		self::assertArrayHasKey( 'message', $result['errors'] );
 	}
 
+	public function test_rejects_non_scalar_name_input_without_coercing_it_to_a_string(): void {
+		$result = ( new LeadSubmissionHandler() )->process(
+			array(
+				'name'    => array( 'x' ),
+				'email'   => 'a@b.com',
+				'message' => 'hi',
+			)
+		);
+
+		self::assertFalse( $result['ok'] );
+		self::assertArrayHasKey( 'name', $result['errors'] );
+	}
+
 	public function test_fails_closed_when_no_delivery_filter_is_registered(): void {
 		$result = ( new LeadSubmissionHandler() )->process(
 			array(

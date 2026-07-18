@@ -188,13 +188,30 @@ if ( ! function_exists( 'get_post_thumbnail_id' ) ) {
 	// moment this is called, and WP_Post doesn't exist in this stubbed,
 	// no-WordPress test environment.
 	/**
+	 * Real WordPress returns '' (not false) when a post has no featured
+	 * image — get_post_meta( $post_id, '_thumbnail_id', true ) falls
+	 * through to its own "no value" default, which is ''. This stub
+	 * matches that so tests model the real no-thumbnail case correctly.
+	 *
 	 * @param mixed $post
-	 * @return int|false
+	 * @return int|string
 	 */
 	function get_post_thumbnail_id( $post = null ) {
 		$post_id = is_object( $post ) ? (int) ( $post->ID ?? 0 ) : (int) $post;
 
-		return $GLOBALS['_test_thumbnails'][ $post_id ] ?? false;
+		return $GLOBALS['_test_thumbnails'][ $post_id ] ?? '';
+	}
+}
+
+if ( ! function_exists( 'current_user_can' ) ) {
+	/**
+	 * Reads a fixed set of granted capabilities from
+	 * $GLOBALS['_test_current_user_caps'] rather than modeling any real
+	 * user/role system — enough for pure policy checks like
+	 * TestimonialsProvider::can_edit_author_meta() to be unit-testable.
+	 */
+	function current_user_can( string $capability ): bool {
+		return in_array( $capability, $GLOBALS['_test_current_user_caps'] ?? array(), true );
 	}
 }
 

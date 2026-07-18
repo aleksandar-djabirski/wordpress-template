@@ -64,7 +64,11 @@ final class Testimonials {
 				'title'        => $post->post_title,
 				'content'      => $post->post_content,
 				'author'       => (string) get_post_meta( $post_id, self::META_AUTHOR, true ),
-				'thumbnail_id' => ( false === $thumbnail_id || 0 === $thumbnail_id ) ? null : $thumbnail_id,
+				// get_post_thumbnail_id() returns '' (not false) when a post
+				// has no featured image — empty() catches that alongside the
+				// 0/false/null cases, and the cast guarantees int rather than
+				// leaking a numeric string into the int|null contract.
+				'thumbnail_id' => empty( $thumbnail_id ) ? null : (int) $thumbnail_id,
 			);
 		}
 
