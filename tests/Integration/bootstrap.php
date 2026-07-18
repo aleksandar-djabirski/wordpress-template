@@ -22,21 +22,11 @@
 
 declare(strict_types=1);
 
-/**
- * Reads an environment variable, falling back to $fallback when it is unset
- * or empty. A named helper (rather than `getenv( $name ) ?: $fallback`
- * inline everywhere) so this file never needs the short ternary operator,
- * which the project's phpcs ruleset disallows.
- */
-function agency_starter_integration_env( string $name, string $fallback ): string {
-	$value = getenv( $name );
-
-	if ( false === $value || '' === $value ) {
-		return $fallback;
-	}
-
-	return $value;
-}
+// agency_starter_integration_env() lives in its own file because
+// tests/wp-tests-config.php needs it too, including inside the separate
+// install.php process wp-phpunit spawns (which never loads this bootstrap).
+// See env-helper.php's docblock.
+require_once __DIR__ . '/env-helper.php';
 
 /**
  * Confirms the configured test database is reachable, exiting with one

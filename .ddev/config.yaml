@@ -17,3 +17,18 @@ database:
   version: "10.11"
 nodejs_version: "22"
 disable_settings_management: true
+
+# The `integration` PHPUnit suite (wp-phpunit) installs its WordPress test
+# tables into a database named `wordpress_test`, connecting as the `db` user —
+# the same database name CI's MariaDB service provides (see
+# .github/workflows/ci.yml). DDEV only creates the default `db` database and
+# grants the `db` user privileges on `db.*`, so without this hook the
+# documented `ddev composer test:integration` fails: the `db` user cannot reach
+# `wordpress_test` (and lacks the global privilege to CREATE it). Create the
+# database and grant the `db` user on every start. `CREATE DATABASE IF NOT
+# EXISTS` makes it idempotent — a no-op once the database already exists. Runs
+# in the web container, whose `mysql` client points at the `db` service; root
+# credentials are DDEV's fixed root/root.
+hooks:
+  post-start:
+    - exec: "mysql -uroot -proot -e \"CREATE DATABASE IF NOT EXISTS wordpress_test; GRANT ALL PRIVILEGES ON wordpress_test.* TO 'db'@'%'; FLUSH PRIVILEGES;\""

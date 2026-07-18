@@ -24,13 +24,18 @@
  * variables — a bare CI runner should set them explicitly rather than rely
  * on the DDEV-shaped fallback.
  *
- * agency_starter_integration_env() (the getenv()-with-a-fallback helper
- * used below) is defined by tests/Integration/bootstrap.php, the only file
- * that ever loads this one (directly or, as here, via wp-phpunit's own
- * wp-tests-config.php) — see that file's docblock.
+ * agency_starter_integration_env() (the getenv()-with-a-fallback helper used
+ * below) comes from tests/Integration/env-helper.php, require_once'd directly
+ * below. It cannot be assumed to already exist: besides the main PHPUnit
+ * process (which loads it via tests/Integration/bootstrap.php), this config is
+ * also loaded standalone by the child process wp-phpunit spawns to install the
+ * test database (`system( WP_PHP_BINARY . ' install.php ' . $config )`), which
+ * never loads that bootstrap — see env-helper.php's docblock.
  */
 
 declare(strict_types=1);
+
+require_once __DIR__ . '/Integration/env-helper.php';
 
 define( 'DB_NAME', agency_starter_integration_env( 'WP_TESTS_DB_NAME', 'wordpress_test' ) );
 define( 'DB_USER', agency_starter_integration_env( 'WP_TESTS_DB_USER', 'db' ) );

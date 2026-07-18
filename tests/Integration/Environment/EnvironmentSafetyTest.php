@@ -36,7 +36,7 @@ final class EnvironmentSafetyTest extends IntegrationTestCase {
 	 */
 	private static array $recorded_http_requests = array();
 
-	protected function set_up(): void {
+	public function set_up(): void {
 		parent::set_up();
 
 		self::$recorded_http_requests = array();
@@ -44,7 +44,7 @@ final class EnvironmentSafetyTest extends IntegrationTestCase {
 		add_filter( 'pre_http_request', array( self::class, 'record_and_block_http_request' ), 10, 3 );
 	}
 
-	protected function tear_down(): void {
+	public function tear_down(): void {
 		remove_filter( 'pre_http_request', array( self::class, 'record_and_block_http_request' ), 10 );
 
 		parent::tear_down();
