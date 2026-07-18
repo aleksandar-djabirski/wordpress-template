@@ -215,4 +215,67 @@ if ( ! function_exists( 'current_user_can' ) ) {
 	}
 }
 
+// --- HTTP / JSON, used by SiteIntegrations\LeadDelivery\WebhookLeadDelivery -
+// The WP_Error stand-in lives in its own file, wp-error-stub.php (required by
+// tests/bootstrap.php alongside this one): phpcs's
+// Universal.Files.SeparateFunctionsFromOO.Mixed sniff forbids a single file
+// mixing function declarations (this whole file) with an OO declaration
+// (the WP_Error class).
+
+if ( ! function_exists( 'is_wp_error' ) ) {
+	function is_wp_error( mixed $thing ): bool {
+		return $thing instanceof WP_Error;
+	}
+}
+
+if ( ! function_exists( 'wp_remote_post' ) ) {
+	/**
+	 * Records the exact url/args passed into
+	 * $GLOBALS['_test_remote_post_calls'] (so a test can assert on them) and
+	 * returns whatever the test pre-loaded into
+	 * $GLOBALS['_test_remote_post_response'] — a WP_Error, or a response
+	 * array shaped like a real wp_remote_post() response. Defaults to a
+	 * bare 200 response so tests that don't care about the response don't
+	 * need to set one up.
+	 *
+	 * @param array<string, mixed> $args
+	 * @return array<string, mixed>|WP_Error
+	 */
+	function wp_remote_post( string $url, array $args = array() ) {
+		$GLOBALS['_test_remote_post_calls'][] = array(
+			'url'  => $url,
+			'args' => $args,
+		);
+
+		return $GLOBALS['_test_remote_post_response'] ?? array(
+			'response' => array( 'code' => 200 ),
+		);
+	}
+}
+
+if ( ! function_exists( 'wp_remote_retrieve_response_code' ) ) {
+	/**
+	 * @param array<string, mixed>|WP_Error $response
+	 */
+	function wp_remote_retrieve_response_code( $response ): int|string {
+		return is_array( $response ) ? ( $response['response']['code'] ?? '' ) : '';
+	}
+}
+
+if ( ! function_exists( 'wp_json_encode' ) ) {
+	function wp_json_encode( mixed $data, int $options = 0, int $depth = 512 ): string|false {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- stand-in for the real wp_json_encode(), which itself wraps json_encode().
+		return json_encode( $data, $options, $depth );
+	}
+}
+
+if ( ! function_exists( 'esc_url_raw' ) ) {
+	/**
+	 * @param array<int, string>|null $protocols
+	 */
+	function esc_url_raw( string $url, ?array $protocols = null ): string {
+		return $url;
+	}
+}
+
 // phpcs:enable Generic.CodeAnalysis.UnusedFunctionParameter

@@ -36,6 +36,7 @@ foreach ( $_SERVER['argv'] ?? array() as $index => $arg ) {
 // instead (via tests/Integration/bootstrap.php) and must never see these.
 if ( ! $is_integration_suite ) {
 	require_once __DIR__ . '/support/wp-stubs.php';
+	require_once __DIR__ . '/support/wp-error-stub.php';
 }
 
 require_once dirname( __DIR__ ) . '/vendor/autoload.php';
