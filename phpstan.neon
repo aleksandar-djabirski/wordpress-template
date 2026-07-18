@@ -32,13 +32,19 @@ parameters:
     # it must be a `bootstrapFiles` entry, not `stubFiles` — `stubFiles`
     # only refines types for symbols PHPStan can already see; it can't
     # introduce a brand-new class.
+    #
+    # WooCommerce symbols (WooCommerce, WC_Product, WC_Order, etc.) are only
+    # used inside site-commerce and the theme's woocommerce/ template
+    # overrides (see deptrac.yaml). They also aren't autoloaded via
+    # Composer's PSR-4 map — same situation as WP_CLI above — so they must
+    # be a `bootstrapFiles` entry too, not `stubFiles`: `stubFiles` only
+    # overrides phpdoc on symbols PHPStan can already see, it can't
+    # introduce a brand-new class for analysis (this was flagged as a bug
+    # in the original wiring; verified by a throwaway WC_Product-typed
+    # probe file that failed to resolve under `stubFiles` and resolved once
+    # moved here).
     bootstrapFiles:
         - vendor/php-stubs/wp-cli-stubs/wp-cli-stubs.php
-
-    # WooCommerce symbols are only used inside site-commerce and the theme's
-    # woocommerce/ template overrides (see deptrac.yaml); load the stubs so
-    # those files type-check without pulling all of WooCommerce into scope.
-    stubFiles:
         - vendor/php-stubs/woocommerce-stubs/woocommerce-stubs.php
 
     treatPhpDocTypesAsCertain: false

@@ -18,12 +18,6 @@ declare(strict_types=1);
 // than a no-arg shorthand) keeps them accurate stand-ins.
 // phpcs:disable Generic.CodeAnalysis.UnusedFunctionParameter
 
-if ( ! function_exists( 'add_action' ) ) {
-	function add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
-		return true;
-	}
-}
-
 if ( ! function_exists( 'add_filter' ) ) {
 	/**
 	 * Real WordPress stores registered callbacks in a global WP_Hook
@@ -40,6 +34,21 @@ if ( ! function_exists( 'add_filter' ) ) {
 		);
 
 		return true;
+	}
+}
+
+if ( ! function_exists( 'add_action' ) ) {
+	/**
+	 * Real WordPress implements add_action() as a thin alias over
+	 * add_filter() — actions and filters share a single hook registry
+	 * internally (actions are just filters whose return value is
+	 * discarded). This stub mirrors that exactly, rather than being a
+	 * separate no-op, so a test can add_action() a callback (e.g. an
+	 * admin-notice hook) and assert on it via the same
+	 * $GLOBALS['_test_filters'] recorder add_filter() populates above.
+	 */
+	function add_action( string $hook_name, callable $callback, int $priority = 10, int $accepted_args = 1 ): bool {
+		return add_filter( $hook_name, $callback, $priority, $accepted_args );
 	}
 }
 
