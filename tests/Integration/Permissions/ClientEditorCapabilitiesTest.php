@@ -96,13 +96,29 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		}
 	}
 
+	/**
+	 * Core gates Application Passwords globally behind
+	 * wp_is_application_passwords_supported() — `is_ssl() || 'local' ===
+	 * wp_get_environment_type()` — and BOTH are false in this suite (the
+	 * PHPUnit CLI has no HTTPS, and WP_ENVIRONMENT_TYPE is 'development', not
+	 * 'local'; see tests/wp-tests-config.php). So without forcing the global
+	 * gate open, availability is false for everyone regardless of role, which
+	 * would make this test pass vacuously (never reaching the product's
+	 * per-user filter) and its administrator counterpart fail outright. Forcing
+	 * the global gate true makes both tests exercise the thing under test:
+	 * AgencyPlatform\Security\ApplicationPasswords::restrict_to_administrators.
+	 */
 	public function test_application_passwords_are_unavailable_to_client_editor(): void {
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+
 		$client_editor = $this->make_client_editor();
 
 		self::assertFalse( wp_is_application_passwords_available_for_user( $client_editor ) );
 	}
 
 	public function test_application_passwords_are_available_to_administrators(): void {
+		add_filter( 'wp_is_application_passwords_available', '__return_true' );
+
 		$admin = $this->make_admin();
 
 		self::assertTrue( wp_is_application_passwords_available_for_user( $admin ) );

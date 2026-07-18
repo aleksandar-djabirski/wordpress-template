@@ -15,6 +15,7 @@ declare(strict_types=1);
 namespace Tests\Integration\SiteCore;
 
 use SiteCore\Contracts\Testimonials;
+use SiteCore\Testimonials\TestimonialsProvider;
 use Tests\Integration\IntegrationTestCase;
 
 /**
@@ -22,6 +23,27 @@ use Tests\Integration\IntegrationTestCase;
  * @covers \SiteCore\Contracts\Testimonials
  */
 final class TestimonialsTest extends IntegrationTestCase {
+
+	/**
+	 * WP_UnitTestCase::set_up() calls unregister_all_meta_keys() before every
+	 * test (see vendor/wp-phpunit/wp-phpunit/includes/abstract-testcase.php),
+	 * which wipes the `testimonial_author` post meta site-core registered on
+	 * `init` while the suite booted. (Custom post types are not reset the same
+	 * way, so `testimonial` itself survives.) Re-run the production
+	 * registration for this test via the exact method the `init` hook calls, so
+	 * the meta assertion below is verified against the product rather than
+	 * against the harness (registered_meta_key_exists() is provably true on a
+	 * live install). Calling register_meta() directly, rather than re-firing
+	 * `init`, keeps this scoped to the testimonial meta and avoids re-running
+	 * unrelated init callbacks — re-registering an already-registered block
+	 * type, in particular, would trip WP's "already registered" incorrect-usage
+	 * notice.
+	 */
+	public function set_up(): void {
+		parent::set_up();
+
+		( new TestimonialsProvider() )->register_meta();
+	}
 
 	public function test_the_testimonial_post_type_and_author_meta_are_registered(): void {
 		self::assertTrue( post_type_exists( Testimonials::POST_TYPE ) );
