@@ -14,6 +14,8 @@
         "php": ">=8.2",
         "composer/installers": "^2.0",
         "oscarotero/env": "^2.0",
+        "roots/bedrock-autoloader": "^1.0",
+        "roots/bedrock-disallow-indexing": "^2.0",
         "roots/wordpress": "^6.8",
         "roots/wp-config": "^1.0",
         "vlucas/phpdotenv": "^5.0"
