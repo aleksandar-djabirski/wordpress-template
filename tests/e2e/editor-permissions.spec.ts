@@ -15,7 +15,16 @@ import { adminUrl, expectNoAdminMenu, openBlockInserter, searchInserter } from '
  * are documented in tests/e2e/helpers/wp.ts.
  */
 
-test( 'client_editor can reach the wp-admin dashboard', async ( { page } ) => {
+// The wp-admin sidebar (#adminmenu and its items) is a desktop-only surface:
+// WordPress core collapses it behind an off-canvas toggle on narrow viewports,
+// so `toBeVisible()` assertions on it are only meaningful on the desktop
+// project. The role-restriction logic these prove is viewport-independent —
+// desktop coverage is sufficient. Same `test.skip` pattern as smoke.spec.ts.
+const DESKTOP_ONLY = 'wp-admin sidebar is desktop-only (core collapses it on narrow viewports)';
+
+test( 'client_editor can reach the wp-admin dashboard', async ( { page }, testInfo ) => {
+	test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
+
 	await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 	await page.goto( adminUrl() );
 
@@ -23,7 +32,9 @@ test( 'client_editor can reach the wp-admin dashboard', async ( { page } ) => {
 	await expect( page.locator( '#adminmenu' ) ).toBeVisible();
 } );
 
-test( 'client_editor admin menu hides Plugins and Appearance, keeps content menus', async ( { page } ) => {
+test( 'client_editor admin menu hides Plugins and Appearance, keeps content menus', async ( { page }, testInfo ) => {
+	test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
+
 	await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 	await page.goto( adminUrl() );
 
@@ -55,7 +66,9 @@ test( "client_editor's block inserter excludes Custom HTML but offers Reference 
 	await expect( page.getByText( 'Reference Callout', { exact: true } ).first() ).toBeVisible();
 } );
 
-test( 'control: administrators keep the Plugins menu', async ( { page } ) => {
+test( 'control: administrators keep the Plugins menu', async ( { page }, testInfo ) => {
+	test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
+
 	await loginAs( page, CREDS.admin.u, CREDS.admin.p );
 	await page.goto( adminUrl() );
 
