@@ -4,6 +4,24 @@ An AI-first WordPress starter for agency work: [Bedrock](https://roots.io/bedroc
 
 **If you are an AI agent working in this repo, read [AGENTS.md](AGENTS.md) first.** It is the single source of agent guidance (imported by `CLAUDE.md` for Claude Code).
 
+## What this is and how it's meant to be used (plain language)
+
+This repository is a **starter kit you copy for every new customer project** — an empty but fully wired WordPress setup with safety rails built in, so a developer or an AI agent can build any site on it without breaking things, and mistakes get caught automatically by tests.
+
+**Which sites and plugins does it support?** Underneath it is completely normal WordPress, so it supports any site type — service sites, marketing sites, landing pages, blogs, product sites, and WooCommerce stores (commerce is a built-in optional layer that switches on when WooCommerce is installed). Any normal plugin works too: SEO, forms, caching, backups, CRM connectors — install them like on any WordPress site. **The one deliberate exception: page builders (Elementor, Divi, …) and all-in-one purchased themes are not supported.** The template's entire value (locked editing, design in Git, automatic checks) depends on the design living in code, not in a builder's database.
+
+**Does it come with a theme?** Yes — `site-theme`, deliberately plain. It is not a "design"; it is a skeleton: header, footer, page layouts, one example block, and a single settings file (`theme.json`) that controls all colors, fonts, and spacing. It looks bare on purpose — it is the blank canvas every customer design gets painted onto.
+
+**How does a customer get their look?** You never create a second theme and never install a bought one on top. The workflow is always:
+
+1. **Copy the template** for the new customer and run `scripts/rename-project`.
+2. **Reshape `site-theme` in place** — it belongs to that customer's copy, so editing it directly is correct. Colors/fonts/spacing → `theme.json`. Header/footer → `parts/`. New sections the customer may edit → `blocks/` and `patterns/`.
+3. **If the customer bought a theme they like, don't install it.** Use it as a *design reference*: look at its demo, then recreate that look inside `site-theme`. Installing the bought theme itself would throw away everything this template provides — the editing locks, the tests, and the guarantee that the design lives in Git and can't be broken from the admin panel.
+
+Think of it like a house with finished wiring, plumbing, and alarm systems, where `site-theme` is its unpainted walls. A bought theme is a different prefab house — you can't bolt it onto yours, but you can look at it and paint your walls to match.
+
+**The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers can edit text/images/products but can never break the layout, every change is tested automatically, and any AI agent working on the site knows exactly where everything goes (that is what [AGENTS.md](AGENTS.md) tells it). For an agency maintaining many sites long-term, that trade is the reason this template exists.
+
 ## Requirements
 
 - [Docker](https://www.docker.com/) + [DDEV](https://ddev.com/) (no local PHP/Composer/MySQL needed — everything PHP-side runs inside the DDEV container)
