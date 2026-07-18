@@ -12,7 +12,7 @@
  *               only takes lead delivery back to "not configured" (site-core
  *               fails closed), nothing else in the starter depends on it.
  * Version:      0.1.0
- * Requires PHP: 8.2
+ * Requires PHP: 8.3
  * Author:       Agency
  * License:      MIT
  * Text Domain:  site-integrations

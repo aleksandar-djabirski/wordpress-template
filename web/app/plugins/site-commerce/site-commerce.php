@@ -10,7 +10,7 @@
  *               notice, nothing else), so the base profile never depends
  *               on it.
  * Version:      0.1.0
- * Requires PHP: 8.2
+ * Requires PHP: 8.3
  * Requires Plugins: woocommerce
  * Author:       Agency
  * License:      MIT

@@ -36,8 +36,8 @@ final class PluginGuardTest extends TestCase {
 		$notice_hook = $GLOBALS['_test_filters']['admin_notices'][10][0]['callback'] ?? null;
 
 		self::assertNotNull( $notice_hook, 'Expected the missing-WooCommerce admin notice to be registered on admin_notices.' );
-		self::assertIsArray( $notice_hook, 'Expected a [Plugin::class, \'method\'] callable, not a Closure.' );
 		self::assertNotInstanceOf( \Closure::class, $notice_hook );
+		self::assertIsArray( $notice_hook, 'Expected a [Plugin::class, \'method\'] callable, not a Closure.' );
 		self::assertSame( array( Plugin::class, 'render_missing_woocommerce_notice' ), $notice_hook );
 
 		self::assertArrayNotHasKey(

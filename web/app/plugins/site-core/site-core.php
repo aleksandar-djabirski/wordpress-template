@@ -8,7 +8,7 @@
  *               site-core namespace the theme, site-integrations, and
  *               site-commerce may reference.
  * Version:      0.1.0
- * Requires PHP: 8.2
+ * Requires PHP: 8.3
  * Author:       Agency
  * License:      MIT
  * Text Domain:  site-core

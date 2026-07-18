@@ -134,7 +134,10 @@ final class DirectoryRulesTest extends TestCase {
 			);
 		}
 
-		self::assertTrue( true, 'No PHP files under assets/.' );
+		// The loop above fails on the first offending file; reaching here means
+		// none were found. Register that clean pass so the test isn't flagged
+		// as risky for making no assertion.
+		$this->addToAssertionCount( 1 );
 	}
 
 	/**

@@ -30,8 +30,8 @@ final class PluginTest extends TestCase {
 
 		$registered = $GLOBALS['_test_filters']['site_core_lead_delivery'][10][0]['callback'];
 
-		self::assertIsArray( $registered, 'Expected a [$object, \'method\'] callable, not a Closure.' );
 		self::assertNotInstanceOf( \Closure::class, $registered );
+		self::assertIsArray( $registered, 'Expected a [$object, \'method\'] callable, not a Closure.' );
 	}
 
 	public function test_boot_wires_a_working_lead_delivery_resolution(): void {

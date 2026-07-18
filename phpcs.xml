@@ -23,7 +23,7 @@
     <exclude-pattern>*/web/app/themes/site-theme/blocks/*/build/*</exclude-pattern>
     <exclude-pattern>tests/e2e/*</exclude-pattern>
 
-    <config name="testVersion" value="8.2-"/>
+    <config name="testVersion" value="8.3-"/>
 
     <!--
         WordPress-Extra (WPCS 3.x) already includes WordPress-Core; we

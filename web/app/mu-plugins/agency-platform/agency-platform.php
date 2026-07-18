@@ -8,7 +8,7 @@
  *               WP-CLI tooling. No customer/business/brand logic lives
  *               here — see the site-* plugins and the theme for that.
  * Version:      0.1.0
- * Requires PHP: 8.2
+ * Requires PHP: 8.3
  * Author:       Agency
  * License:      MIT
  * Text Domain:  agency-platform
