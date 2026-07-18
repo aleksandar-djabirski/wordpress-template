@@ -117,6 +117,12 @@ echo "==> [7/8] Building block editor assets (wp-scripts)"
 npm run build
 
 # --- 8. Client editor test user ---------------------------------------------
+# WARNING: this user's password is the throwaway credential client-editor /
+# client-editor, for LOCAL DEVELOPMENT ONLY (same rationale as the admin/admin
+# credential in step 3) — without --user_pass, `wp user create` generates a
+# random password, which is fine for a human but breaks e2e specs that need
+# to log this user in (see tests/e2e/helpers/auth.ts). Never run this against
+# a shared or production environment.
 echo "==> [8/8] Ensuring a client-editor test user exists"
 if "${WP[@]}" user get client-editor >/dev/null 2>&1; then
   echo "    user 'client-editor' already exists — skipping."
@@ -124,10 +130,12 @@ else
   "${WP[@]}" user create client-editor client-editor@example.invalid \
     --role=client_editor \
     --display_name="Client Editor" \
+    --user_pass=client-editor \
     --porcelain >/dev/null
-  echo "    created 'client-editor' (role: client_editor)."
+  echo "    created 'client-editor' (role: client_editor, LOCAL-ONLY password: client-editor)."
 fi
 
 echo
 echo "==> Setup complete. Site: ${WP_HOME_VALUE}"
 echo "    Admin login (LOCAL ONLY): admin / admin"
+echo "    Client editor login (LOCAL ONLY): client-editor / client-editor"
