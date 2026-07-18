@@ -1,0 +1,310 @@
+name: CI
+
+# Starter-project CI: a single PHP 8.3 / Node 22 target, no matrix builds.
+# This is an agency starter, not a library that needs to prove compatibility
+# across a version grid — matrices here would add runner cost without adding
+# signal. Bump these two versions in lockstep with composer.json's
+# `config.platform.php` / .ddev/config.yaml's `php_version` and this repo's
+# `engines.node` when the starter's target versions change.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      update_visual_snapshots:
+        description: >-
+          Regenerate Playwright visual baselines (tests/visual/__screenshots__)
+          against a fresh DDEV install and upload them as the
+          `visual-baselines` artifact. Nothing is committed automatically —
+          a maintainer downloads the artifact and commits it. Leave false for
+          a normal manual run.
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # 1. Static/offline PHP quality gate: composer validate, security audit,
+  #    phpcs, phpstan, deptrac, architecture + unit tests. No database, no
+  #    WordPress install — this is `composer verify:fast` verbatim, the same
+  #    command a contributor runs locally before pushing.
+  php-qa:
+    name: PHP QA (verify:fast)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Resolve Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: composer verify:fast (validate, audit, lint:php, analyse, deptrac, architecture + unit tests)
+        run: composer verify:fast
+
+  # 2. Frontend toolchain: JS/CSS lint, wp-scripts build, and a build-drift
+  #    check. The block build output under blocks/reference-callout/build/ is
+  #    committed to git (see .gitignore's comment) so a fresh clone works
+  #    without a build step; this job proves the committed copy still matches
+  #    what `npm run build` produces from source right now.
+  frontend:
+    name: Frontend (lint, build, build-drift check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Lint (JS + CSS)
+        run: npm run lint
+
+      - name: Build block editor assets
+        run: npm run build
+
+      - name: Verify committed build output has no drift
+        run: git diff --exit-code -- web/app/themes/site-theme/blocks
+
+  # 3. PHP integration suite against a real MariaDB service container.
+  #    wp-phpunit installs its own WP test tables against the DB below; env
+  #    var names here must match tests/wp-tests-config.php's
+  #    agency_starter_integration_env() lookups exactly (WP_TESTS_DB_*).
+  integration:
+    name: PHP integration (wp-phpunit + MariaDB)
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MYSQL_DATABASE: wordpress_test
+          MYSQL_USER: db
+          MYSQL_PASSWORD: db
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          extensions: mysqli
+          coverage: none
+
+      - name: Resolve Composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Composer packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-composer-
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: composer test:integration
+        env:
+          WP_TESTS_DB_HOST: 127.0.0.1
+          WP_TESTS_DB_NAME: wordpress_test
+          WP_TESTS_DB_USER: db
+          WP_TESTS_DB_PASSWORD: db
+        run: composer test:integration
+
+  # 4. Full-stack Playwright suite (e2e + accessibility, plus visual when
+  #    baselines exist / are being regenerated) against a real DDEV install.
+  #    Runs after php-qa/frontend so a cheap static-analysis failure doesn't
+  #    burn the cost of booting a full WordPress stack.
+  #
+  #    Deliberately NOT included in this workflow: a `commerce-e2e` job.
+  #    The base starter ships without WooCommerce (tests/commerce is fixme
+  #    stubs gated on COMMERCE=1 — see tests/commerce/README.md); a
+  #    commerce-enabled downstream project adds its own commerce-e2e job
+  #    when it turns the commerce profile on, rather than this starter
+  #    paying for a WooCommerce install it doesn't ship.
+  e2e:
+    name: End-to-end (DDEV + Playwright)
+    runs-on: ubuntu-latest
+    needs: [php-qa, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up DDEV
+        uses: ddev/github-action-setup-ddev@v1
+
+      - name: Start DDEV
+        run: ddev start
+
+      - name: Create .env for CI
+        # .env.example's defaults (WP_ENV=development, the ddev.site WP_HOME,
+        # and the db/db/db DB_* credentials) already match this job's DDEV
+        # service; the sed calls below make that intent explicit/idempotent
+        # rather than relying on the example file never changing. The
+        # AUTH_KEY/SALT placeholders ("generateme", identical across all 8
+        # constants) are left as-is: WordPress only needs *some* string
+        # there, this database is destroyed at the end of the job, and
+        # scripts/setup's openssl-based salt generation is a local-dev
+        # convenience this CI job doesn't need.
+        run: |
+          cp .env.example .env
+          sed -i 's/^WP_ENV=.*/WP_ENV=development/' .env
+          sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
+
+      - name: Install PHP dependencies (inside DDEV)
+        run: ddev composer install --no-interaction --prefer-dist
+
+      - name: Install WordPress core
+        # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
+        # Never used against a shared or production environment.
+        run: |
+          ddev wp core install \
+            --url=https://agency-starter.ddev.site \
+            --title="Agency Starter CI" \
+            --admin_user=admin \
+            --admin_password=admin \
+            --admin_email=admin@example.invalid \
+            --skip-email
+
+      - name: Activate theme and base-profile plugins
+        run: |
+          ddev wp theme activate site-theme
+          ddev wp plugin activate site-core site-integrations
+
+      - name: Create client-editor test user
+        # LOCAL/CI-ONLY throwaway credential — mirrors scripts/setup step 8;
+        # tests/e2e/helpers/auth.ts logs in with this exact user/pass.
+        run: |
+          ddev wp user create client-editor client-editor@example.invalid \
+            --role=client_editor \
+            --display_name="Client Editor" \
+            --user_pass=client-editor
+
+      - name: Set pretty permalinks
+        # tests/accessibility/smoke.spec.ts and other specs request
+        # /sample-page/-style paths, which need a non-default rewrite
+        # structure to resolve.
+        run: ddev wp rewrite structure '/%postname%/' --hard
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run e2e suite
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:e2e
+
+      - name: Run accessibility suite
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:accessibility
+
+      - name: Check for committed visual baselines
+        id: visual_baselines
+        run: |
+          if [ -d "tests/visual/__screenshots__" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Visual regression has three mutually-exclusive paths, gated on the
+      # manual workflow_dispatch input and on whether baselines are already
+      # committed:
+      #   1. update_visual_snapshots=true  -> (re)generate baselines, upload
+      #      as an artifact for a maintainer to download and commit. Never
+      #      run on push/pull_request (Windows/macOS-vs-Linux font
+      #      rendering makes non-CI-generated baselines untrustworthy, and
+      #      generated screenshots must be human-reviewed before landing —
+      #      see playwright.config.ts's top-of-file comment).
+      #   2. update_visual_snapshots=false (or push/pull_request) AND
+      #      baselines exist -> run the visual suite normally as a
+      #      regression gate.
+      #   3. update_visual_snapshots=false (or push/pull_request) AND no
+      #      baselines exist yet -> nothing to compare against; skip with a
+      #      notice instead of failing the whole workflow.
+      - name: Regenerate visual baselines (manual trigger only)
+        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:visual -- --update-snapshots
+
+      - name: Upload regenerated visual baselines
+        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: tests/visual/__screenshots__
+          if-no-files-found: error
+
+      - name: Run visual regression suite
+        if: |
+          !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) &&
+          steps.visual_baselines.outputs.exists == 'true'
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:visual
+
+      - name: Skip visual regression (no committed baselines yet)
+        if: |
+          !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) &&
+          steps.visual_baselines.outputs.exists == 'false'
+        run: |
+          echo "::notice::No committed visual baselines at tests/visual/__screenshots__ yet — skipping npm run test:visual. Re-run this workflow manually (workflow_dispatch) with update_visual_snapshots=true to generate them, then download the visual-baselines artifact and commit it."
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

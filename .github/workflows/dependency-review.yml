@@ -1,0 +1,26 @@
+name: Dependency review
+
+# Flags newly-introduced dependencies (composer or npm) with known
+# vulnerabilities at or above "moderate" severity on every pull request, by
+# diffing the PR's manifest/lockfiles against the base branch. Complements
+# scheduled-maintenance.yml's weekly full-repo audit, which catches
+# vulnerabilities disclosed *after* a dependency was already merged.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Dependency review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: moderate

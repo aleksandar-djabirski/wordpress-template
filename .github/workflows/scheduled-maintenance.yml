@@ -1,0 +1,88 @@
+name: Scheduled maintenance
+
+# Weekly checks that don't depend on a push/PR happening to trigger them:
+# newly-disclosed vulnerabilities in already-merged dependencies, and
+# generated-doc drift that only a scheduled run (not CI's normal
+# push/pull_request triggers) would otherwise catch.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1' # Every Monday at 06:00 UTC.
+  workflow_dispatch:
+
+jobs:
+  # Dependabot's *security* updates (immediate PRs for newly-disclosed
+  # vulnerabilities in dependencies already in composer.lock/package-lock.json)
+  # are a GitHub repository setting (Settings > Code security > Dependabot >
+  # Dependabot security updates), not something this workflow or
+  # .github/dependabot.yml configures — that setting doesn't wait for
+  # dependabot.yml's weekly schedule/grouping. This job is the audit-and-report
+  # half: it fails the run (surfacing a notification) when a moderate/high
+  # vulnerability exists, whether or not a security update PR has landed yet.
+  audit:
+    name: Dependency audit (composer + npm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: composer audit
+        # composer.json's config.policy.abandoned is "report" (not "fail"),
+        # so plain `composer audit` already treats abandoned packages as
+        # non-fatal — no --abandoned flag needed here on top of that.
+        run: composer audit
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: npm audit (informational — all dependencies, including dev)
+        run: npm audit || true
+
+      - name: npm audit (gate — production dependencies only, high+)
+        # devDependencies (wp-scripts, playwright, stylelint, etc.) never
+        # ship to a production site, so they don't gate this job; the
+        # informational step above still surfaces them for visibility.
+        run: npm audit --omit=dev --audit-level=high
+
+  stale-index-check:
+    name: Generated block index freshness
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: composer:v2
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: composer test:architecture
+        # Includes GeneratedIndexFreshnessTest, which regenerates
+        # docs/generated-block-index.md in-memory and byte-compares it
+        # against the committed copy. ci.yml's php-qa job already runs this
+        # on every push/PR; running it again here on a schedule catches
+        # drift from anything that changed the generator's *output* without
+        # a corresponding push (e.g. a WordPress/tooling upgrade that alters
+        # generation) rather than relying solely on push-triggered CI.
+        run: composer test:architecture

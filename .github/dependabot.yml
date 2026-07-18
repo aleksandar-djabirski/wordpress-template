@@ -1,0 +1,56 @@
+version: 2
+
+# Dependabot SECURITY updates (immediate PRs for newly-disclosed
+# vulnerabilities, independent of the weekly schedule/grouping below) are a
+# GitHub repository setting (Settings > Code security > Dependabot >
+# Dependabot security updates) — not something configured in this file. That
+# setting does not wait for the weekly cadence configured here.
+
+updates:
+  - package-ecosystem: composer
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      wordpress:
+        patterns:
+          - "roots/*"
+          - "wpackagist-*"
+      dev-tools:
+        patterns:
+          - "phpstan*"
+          - "squizlabs*"
+          - "wp-coding-standards*"
+          - "phpcsstandards*"
+          - "dealerdirect*"
+          - "qossmic*"
+          - "phpunit*"
+          - "yoast*"
+          - "wp-phpunit*"
+          - "php-stubs/*"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      wordpress-tooling:
+        patterns:
+          - "@wordpress/*"
+      testing:
+        patterns:
+          - "playwright*"
+          - "@playwright/*"
+          - "@axe-core/*"
+          - "stylelint*"
+          - "eslint*"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
