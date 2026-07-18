@@ -347,31 +347,60 @@ config/environments/development.php`).
 are not committed to this repository yet (`tests/visual/__screenshots__/`
 does not exist until a maintainer runs `ci.yml` via `workflow_dispatch`
 with `update_visual_snapshots: true` and commits the downloaded
-`visual-baselines` artifact). Once baselines exist:
+`visual-baselines` artifact). Baselines are always CI-generated; a local
+Linux run (e.g. WSL/Ubuntu driving Chromium through the official
+`mcr.microsoft.com/playwright` Docker image) can generate throwaway
+baselines with `npx playwright test tests/visual --update-snapshots` to
+validate the regression *mechanism*, but those local baselines must never
+be committed — CI's Linux runner font rendering is the only authority (see
+`playwright.config.ts`'s top-of-file comment). Once baselines exist:
 
-Mutation — change something the `home.spec.ts` baseline covers, e.g. edit
-`theme.json`'s `settings.color.palette` `primary` value.
+Mutation — change a color the `home.spec.ts` baseline covers across a
+*large area* of the page. Edit `theme.json`'s `settings.color.palette`
+`base` value (the page background, wired to the document background via
+`styles.color.background` → `var(--wp--preset--color--base)`) — e.g.
+`#ffffff` → `#ff0000`:
+```json
+{ "slug": "base", "name": "Base", "color": "#ff0000" }
+```
+Do NOT use the `primary` palette value for this scenario: on the fresh
+install's sparse home page `primary` only tints a handful of thin text
+links (`styles.elements.link.color.text`), a pixel delta well *under* the
+`maxDiffPixelRatio: 0.01` threshold — the mutation reaches the rendered
+CSS but the check still passes, so it proves nothing. `base` repaints the
+whole page background and moves ~0.9 of all pixels, comfortably past the
+threshold.
 
-Check:
+Check (flush any object cache first so the regenerated global styles are
+served, then run the suite):
 ```sh
+ddev wp cache flush
 npm run test:visual
 ```
 
 Expected failure (Playwright `toHaveScreenshot`):
 ```
-Error: Screenshot comparison failed:
-  <N> pixels (ratio > 0.01 of all image pixels) are different.
+Error: expect(page).toHaveScreenshot(expected) failed
+
+  <N> pixels (ratio 0.91 of all image pixels) are different.
+
+  Snapshot: home-desktop.png
 
 Expected: tests/visual/__screenshots__/chromium-desktop/home-desktop.png
 Received: test-results/.../home-desktop-actual.png
     Diff: test-results/.../home-desktop-diff.png
 ```
-(threshold is `maxDiffPixelRatio: 0.01`, set in `playwright.config.ts`).
+(threshold is `maxDiffPixelRatio: 0.01`, set in `playwright.config.ts`; a
+`-diff.png` image is written next to the `-actual.png`/`-expected.png`
+pair under `test-results/`).
 
-Revert: revert the `theme.json` change (or re-run with `--update-snapshots`
-on Linux CI only, then have a maintainer review and commit the result — see
-`playwright.config.ts`'s top-of-file comment on why local/non-Linux
-snapshots must never be committed).
+Revert: restore the `theme.json` change (`git checkout --
+web/app/themes/site-theme/theme.json`), `ddev wp cache flush`, and re-run
+`npm run test:visual` — it goes green. To intentionally accept a visual
+change instead, re-run with `--update-snapshots` on Linux CI only, then
+have a maintainer review and commit the result (see `playwright.config.ts`'s
+top-of-file comment on why local/non-Linux snapshots must never be
+committed).
 
 ---
 
