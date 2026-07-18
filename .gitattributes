@@ -11,3 +11,23 @@ docs/generated-block-index.md text eol=lf
 # to LF so a CRLF checkout on Windows can never make that comparison spuriously
 # fail (the build always emits LF).
 web/app/themes/site-theme/blocks/**/build/** text eol=lf
+
+# All committed source blobs are already LF. Without explicit rules here, a
+# fresh Windows clone with the common `core.autocrlf=true` setting checks
+# source files out as CRLF, which then fails phpcs's
+# Generic.Files.LineEndings sniff inside the Linux DDEV container on the
+# documented `ddev composer verify:fast` path. Force these source types to
+# stay LF on checkout (and normalize to LF on commit) on every platform.
+*.php text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.neon text eol=lf
+*.md text eol=lf
+*.dist text eol=lf
+*.png binary
+*.jpg binary

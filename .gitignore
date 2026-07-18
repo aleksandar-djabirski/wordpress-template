@@ -47,6 +47,9 @@ web/app/mu-plugins/*
 !web/app/mu-plugins/agency-platform
 !web/app/mu-plugins/bedrock-autoloader.php
 
+web/app/themes/*
+!web/app/themes/site-theme
+
 # ------------------------------------------------------------------
 # Theme build artifacts — DECISION (Task 7): committed, not ignored.
 # blocks/reference-callout/build/ (wp-scripts output) ships in git so

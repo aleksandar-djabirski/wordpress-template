@@ -18,6 +18,9 @@ use Roots\WPConfig\Config;
 Config::define('DISALLOW_INDEXING', true);
 
 // Safety defaults: never let non-production environments call real outbound
-// webhooks or send real analytics. Environment-safety tests assert these.
+// webhooks or send real analytics. AGENCY_DISABLE_OUTBOUND_WEBHOOKS is
+// asserted by environment-safety tests (verify-environment + the
+// integration suite); AGENCY_DISABLE_ANALYTICS is reserved for a project's
+// analytics wiring and is intentionally unasserted until that lands.
 Config::define('AGENCY_DISABLE_OUTBOUND_WEBHOOKS', true);
 Config::define('AGENCY_DISABLE_ANALYTICS', true);

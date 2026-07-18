@@ -89,7 +89,7 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 | Suite | Needs a database? | Needs a running site? | Run with |
 | --- | --- | --- | --- |
 | Architecture (22 tests) | no | no | `ddev composer test:architecture` (or `composer` directly, anywhere) |
-| Unit (85 tests) | no | no | `ddev composer test:unit` |
+| Unit (86 tests) | no | no | `ddev composer test:unit` |
 | Integration (20 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
 | e2e / accessibility | no | yes | `npm run test:e2e` / `test:accessibility` against `WP_BASE_URL` |
 | Visual regression | no | yes | `npm run test:visual`; baselines are Linux-CI-authoritative — see `playwright.config.ts` |
