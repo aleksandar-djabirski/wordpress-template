@@ -1,0 +1,38 @@
+/*
+ * Front-end + editor style for agency/reference-callout (block.json's
+ * "style" field loads this in both contexts). Colors/spacing/typography
+ * come exclusively from theme.json design tokens
+ * (var(--wp--preset--*) / var(--wp--custom--*)) — no raw values here.
+ */
+
+.wp-block-agency-reference-callout {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wp--preset--spacing--20);
+	padding: var(--wp--preset--spacing--40);
+	background-color: var(--wp--preset--color--neutral-100);
+	color: var(--wp--preset--color--neutral-900);
+	border-radius: var(--wp--custom--radius-medium);
+}
+
+.reference-callout__heading {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--large);
+}
+
+.reference-callout__content {
+	margin: 0;
+}
+
+.reference-callout__testimonial {
+	margin: 0;
+	padding-left: var(--wp--preset--spacing--20);
+	border-left: 3px solid var(--wp--preset--color--accent);
+}
+
+.reference-callout__testimonial cite {
+	display: block;
+	margin-top: var(--wp--preset--spacing--10);
+	font-style: normal;
+	color: var(--wp--preset--color--neutral-700);
+}

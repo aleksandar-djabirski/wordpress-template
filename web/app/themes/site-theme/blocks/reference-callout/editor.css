@@ -1,0 +1,10 @@
+/*
+ * Editor-only additions to style.css (block.json's "editorStyle" field) —
+ * kept minimal, just enough for the editor canvas to match the front-end
+ * spacing before Task 7's index.js adds RichText placeholders/controls.
+ * Tokens only, same rule as style.css.
+ */
+
+.wp-block-agency-reference-callout {
+	margin-block: var(--wp--preset--spacing--20);
+}

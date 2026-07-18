@@ -1,0 +1,25 @@
+/*
+ * Body/heading typography, loaded after base.css. Font-family comes from
+ * theme.json's fontFamilies preset tokens; theme.json's own global styles
+ * (styles.typography / styles.elements.heading) already set line-height
+ * site-wide via real tag selectors, so the values here exist as an
+ * explicit, human-readable restatement rather than a second source of
+ * truth — no preset token exists for line-height (WordPress doesn't
+ * generate one; typography.lineHeight only toggles the per-block editor
+ * control), so these numbers are kept in sync with theme.json by hand.
+ */
+
+body {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.6;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.2;
+}

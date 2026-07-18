@@ -1,0 +1,38 @@
+/*
+ * Site footer chrome. Colors/spacing/typography come exclusively from
+ * theme.json design tokens (var(--wp--preset--*)) — no raw values here.
+ */
+
+.site-footer {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--wp--preset--spacing--20);
+	padding: var(--wp--preset--spacing--30);
+	background-color: var(--wp--preset--color--primary-dark);
+	color: var(--wp--preset--color--base);
+}
+
+.site-footer__nav {
+	display: flex;
+}
+
+.site-footer__menu {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--wp--preset--spacing--20);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.site-footer__menu a {
+	color: var(--wp--preset--color--base);
+	text-decoration: none;
+}
+
+.site-footer__copyright {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--small);
+}

@@ -1,0 +1,97 @@
+/*
+ * Site header chrome. Mobile-first: the nav is hidden below 782px (the
+ * same breakpoint WordPress admin uses for its own responsive collapse)
+ * until `.is-open` is toggled by site-header.js; the hamburger toggle is
+ * hidden again at/above that width, where the nav is always visible.
+ *
+ * Colors/spacing/typography come exclusively from theme.json design tokens
+ * (var(--wp--preset--*)) — no raw color/size values here.
+ */
+
+.site-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--wp--preset--spacing--20);
+	padding: var(--wp--preset--spacing--20) var(--wp--preset--spacing--30);
+	background-color: var(--wp--preset--color--base);
+	border-bottom: 1px solid var(--wp--preset--color--neutral-300);
+}
+
+.site-header__branding {
+	display: flex;
+	flex-direction: column;
+}
+
+.site-header__site-title {
+	font-family: var(--wp--preset--font-family--sans);
+	font-size: var(--wp--preset--font-size--large);
+	font-weight: 650;
+	color: var(--wp--preset--color--neutral-900);
+	text-decoration: none;
+}
+
+.site-header__tagline {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--small);
+	color: var(--wp--preset--color--neutral-700);
+}
+
+.site-header__toggle {
+	display: inline-flex;
+	flex-direction: column;
+	justify-content: center;
+	gap: 4px;
+	width: 2.5rem;
+	height: 2.5rem;
+	padding: var(--wp--preset--spacing--10);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+}
+
+.site-header__toggle-bar {
+	display: block;
+	height: 2px;
+	background-color: var(--wp--preset--color--neutral-900);
+}
+
+.site-header__nav {
+	display: none;
+	flex-basis: 100%;
+}
+
+.site-header__nav.is-open {
+	display: block;
+}
+
+.site-header__menu {
+	display: flex;
+	flex-direction: column;
+	gap: var(--wp--preset--spacing--10);
+	margin: 0;
+	padding: var(--wp--preset--spacing--20) 0 0;
+	list-style: none;
+}
+
+.site-header__menu a {
+	color: var(--wp--preset--color--neutral-900);
+	text-decoration: none;
+}
+
+@media (min-width: 782px) {
+	.site-header__toggle {
+		display: none;
+	}
+
+	.site-header__nav {
+		display: block;
+		flex-basis: auto;
+	}
+
+	.site-header__menu {
+		flex-direction: row;
+		padding-top: 0;
+	}
+}
