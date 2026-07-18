@@ -12,10 +12,9 @@ Demonstrates:
 - Listing in `AgencyPlatform\Editor\EditorRestrictions::ALLOWED_BLOCKS`.
 
 `build/index.js` (the `editorScript`) is produced by the root `npm run
-build` script, which invokes `wp-scripts build` on this directory's
-`index.js` with `--output-path=./build` — i.e. per-block, entry-point-form
-(`wp-scripts build web/app/themes/site-theme/blocks/reference-callout/index.js
---output-path=.../reference-callout/build`) rather than
+build` script (`scripts/build-blocks.mjs`), which auto-discovers every
+`blocks/*/index.js` and runs `wp-scripts build` per block in entry-point
+form with that block's own `--output-path=<slug>/build` — rather than
 `--webpack-src-dir`/`--webpack-copy-php`, so nothing shadow-copies
 `render.php` into a second build-owned location. The build output
 (`build/index.js` + `build/index.asset.php`) is committed to git — see

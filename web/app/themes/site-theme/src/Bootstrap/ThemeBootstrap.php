@@ -104,16 +104,23 @@ final class ThemeBootstrap {
 	}
 
 	/**
-	 * Registers the theme's one dynamic block from its block.json.
+	 * Registers every dynamic block under the theme's blocks/ directory from
+	 * its block.json — zero-config: dropping a new blocks/<slug>/block.json in
+	 * place registers it, no edit here required. Mirrors the auto-discovery of
+	 * the `npm run build` step (scripts/build-blocks.mjs) so adding a block is
+	 * a folder-only operation on both the PHP and build sides.
 	 *
-	 * The editorScript it declares (blocks/reference-callout/build/index.js)
-	 * is produced by a later task's `npm run build` (@wordpress/scripts)
-	 * and doesn't exist yet — register_block_type() doesn't require that
-	 * file to exist at registration time, only when WordPress actually
-	 * tries to enqueue it for the block editor. See
+	 * The editorScript each block declares (blocks/<slug>/build/index.js) is
+	 * produced by `npm run build` (@wordpress/scripts) and committed to git;
+	 * register_block_type() doesn't require that file to exist at registration
+	 * time, only when WordPress actually enqueues it for the block editor. See
 	 * blocks/reference-callout/README.md.
 	 */
 	public static function register_block(): void {
-		register_block_type( get_template_directory() . '/blocks/reference-callout' );
+		$manifests = glob( get_template_directory() . '/blocks/*/block.json' );
+
+		foreach ( ( false === $manifests ? array() : $manifests ) as $manifest ) {
+			register_block_type( dirname( $manifest ) );
+		}
 	}
 }

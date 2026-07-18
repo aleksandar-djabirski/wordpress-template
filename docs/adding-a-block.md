@@ -54,14 +54,12 @@ Server-side render callback (WordPress provides `$attributes`, `$content`,
 a minimal `editorScript` pointing at `build/index.js` anyway —
 `block.json` still needs at least one `file:` reference (step 2).
 
-## 5. Wire the build, then build
+## 5. Build
 
-`package.json`'s `build`/`start` scripts each invoke `wp-scripts
-build`/`start` once, for the single `reference-callout` entry with its own
-`--output-path`. A second block needs a second invocation chained onto the
-same script (`wp-scripts build <entry-1> --output-path=<dir-1> && wp-scripts
-build <entry-2> --output-path=<dir-2>`) — one `--output-path` can't serve
-two blocks. Update both `build` and `start`, then:
+No build config to edit. `npm run build` runs `scripts/build-blocks.mjs`,
+which auto-discovers every `blocks/*/index.js` and runs `wp-scripts build`
+per block into that block's own `build/`. A new block is picked up the
+moment its folder exists:
 
 ```sh
 npm run build
@@ -70,12 +68,18 @@ npm run build
 Commit the `build/` output; a fresh clone must have a working editor
 without running `npm install`/`npm run build` first.
 
-## 6. Register, allow-list, and index
+To watch a single block while iterating (parallel watchers are messy, so
+watch is one block at a time), pass its slug:
 
-- **Register**: add `register_block_type( get_template_directory() .
-  '/blocks/<your-slug>' )` alongside the existing call in
-  `SiteTheme\Bootstrap\ThemeBootstrap::register_block()` — a named method
-  call, never inline in `functions.php`.
+```sh
+npm run start -- <your-slug>
+```
+
+## 6. Allow-list and index
+
+- **Register**: nothing to do. `SiteTheme\Bootstrap\ThemeBootstrap::register_block()`
+  globs `blocks/*/block.json` and registers each, so a new block folder is
+  registered automatically — no edit here.
 - **Allow-list**: if customers should be able to insert it, add
   `'agency/<your-slug>'` to
   `AgencyPlatform\Editor\EditorRestrictions::ALLOWED_BLOCKS` (administrators
