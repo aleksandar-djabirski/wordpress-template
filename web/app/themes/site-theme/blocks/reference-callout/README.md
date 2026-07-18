@@ -17,9 +17,9 @@ build` script (`scripts/build-blocks.mjs`), which auto-discovers every
 form with that block's own `--output-path=<slug>/build` — rather than
 `--webpack-src-dir`/`--webpack-copy-php`, so nothing shadow-copies
 `render.php` into a second build-owned location. The build output
-(`build/index.js` + `build/index.asset.php`) is committed to git — see
-`.gitignore`'s Task 7 note — so a fresh clone has a working block editor
-without running `npm install`/`npm run build` first.
+(`build/index.js` + `build/index.asset.php`) is committed to git — see the
+committed-build-output note in `.gitignore` — so a fresh clone has a working
+block editor without running `npm install`/`npm run build` first.
 
 ## Template for a new block
 

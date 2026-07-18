@@ -74,6 +74,15 @@ given request type, a pattern is a canned arrangement of blocks (optionally
 
 ## Source of truth
 
+The contract in one line: **Git owns the shape, the database owns the
+content.** The design system, markup, templates, block and pattern
+definitions, the allowed compositions, and all behavior live in Git;
+customer copy, media choices, page compositions built *from* approved
+blocks, navigation-menu data, and product/order data live in the database.
+Database-resident *structural* overrides — a `wp_template`/`wp_template_part`
+row, or a `wp_global_styles` row carrying real custom CSS/customizations —
+are forbidden and detected by `wp agency check-overrides`.
+
 | Thing | Owned by | Notes |
 | --- | --- | --- |
 | Templates (`templates/*.php`) | Git | `ThemeBootstrapTest` requires a thin root delegate per template |
@@ -81,6 +90,7 @@ given request type, a pattern is a canned arrangement of blocks (optionally
 | Blocks (`blocks/*/`) | Git (definition) + Database (`post_content` usage) | The block's code ships in Git; where/how it's placed on a page lives in post content |
 | Design tokens | Git (`theme.json`) | `AgencyPlatform\Health\DatabaseOverrideCheck` flags a DB `wp_global_styles` row with real CSS/customizations as an override of this file |
 | Content (pages, posts, testimonials) | Database | Authored by editors; not versioned |
+| Navigation menus | Database | Menu *data* is editor-authored; the menu location and the part that renders it are Git |
 | Products (WooCommerce) | Database (behavior in Git) | Product data lives in `wp_posts`/`wp_postmeta`; the *rules* governing it live in `site-commerce/` |
 | Secrets (API keys, webhook URLs) | Environment variables / host secret store | Never Git, never the database — see `.env.example` and `AGENTS.md`'s environment-safety section |
 

@@ -6,15 +6,36 @@ real commerce behavior once you've enabled it.
 
 ## 1. Enable WooCommerce
 
+Install WooCommerce through Composer — it is the required path for any real
+project. A Composer-managed plugin is visible to Git, `composer audit`,
+Dependabot, and reproducible deploys/rollback; a manual `wp plugin install`
+(or a wp-admin upload) is invisible to every one of those.
+
+First add the wpackagist.org repository to `composer.json` (once per
+project — this repo ships no `repositories` key yet):
+
+```json
+{
+  "repositories": [
+    {
+      "type": "composer",
+      "url": "https://wpackagist.org",
+      "only": ["wpackagist-plugin/*", "wpackagist-theme/*"]
+    }
+  ]
+}
+```
+
+Then require and activate it:
+
 ```sh
-# Option A: Composer (add the wpackagist.org repository to composer.json first)
 ddev composer require wpackagist-plugin/woocommerce
-
-# Option B: wp-cli
-ddev wp plugin install woocommerce --activate
-
 ddev wp plugin activate site-commerce
 ```
+
+`ddev wp plugin install woocommerce --activate` works for a quick throwaway
+local experiment, but never for a real project: a manually installed plugin
+is untracked, unaudited, and cannot be reproduced or rolled back from Git.
 
 `SiteCommerce\Plugin::maybe_boot()` checks `class_exists('WooCommerce')` on
 `plugins_loaded`; once it's true, `boot()` wires every provider. Until then,

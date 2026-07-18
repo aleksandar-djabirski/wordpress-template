@@ -94,3 +94,13 @@ table. This expands each common task.
   anywhere outside `site-commerce/`, `site-theme/woocommerce/`,
   `tests/commerce/`, or a reviewed `tests/Architecture/woocommerce-allowlist.php`
   entry.
+
+## Tighten how much customers can edit
+
+- **Owns it**: `agency-platform` — the editor allow-list
+  (`EditorRestrictions::ALLOWED_BLOCKS`) and `client_editor` capabilities
+  (`RolesProvider`) — plus a per-project `register_post_type_args` filter for
+  template locking.
+- **See**: [`editing-strictness.md`](editing-strictness.md) for the default
+  content-only model and the three dials (trim the block allow-list, lock page
+  composition via `template_lock`, drop page caps).

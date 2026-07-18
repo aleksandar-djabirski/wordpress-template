@@ -78,4 +78,4 @@ Run `ddev composer verify:fast` before every commit; run `ddev composer test:int
 
 ## Where docs live
 
-`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.
+`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/editing-strictness.md` (per-project editing-lockdown dials), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.

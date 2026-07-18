@@ -14,9 +14,9 @@ verbatim below wherever the check is a PHPUnit architecture test.
 
 Scenarios 1–7 and 12 run with no database and are the same checks CI's
 `php-qa`/`frontend` jobs run on every push — **proven in this repo's CI**.
-Scenarios 8–11 need a live WordPress install (DDEV) or a CI-only artifact
-(committed visual baselines) — **requires DDEV/CI context**; Task 13
-executes these live.
+Scenarios 8–11 need a live WordPress install (DDEV); scenario 11
+additionally relies on the committed, Linux-CI-authoritative visual
+baselines — **requires DDEV/CI context**.
 
 ---
 
@@ -343,17 +343,21 @@ config/environments/development.php`).
 
 ## 11. Modified visual snapshot
 
-**Requires CI context** — visual baselines are Linux-CI-authoritative and
-are not committed to this repository yet (`tests/visual/__screenshots__/`
-does not exist until a maintainer runs `ci.yml` via `workflow_dispatch`
-with `update_visual_snapshots: true` and commits the downloaded
-`visual-baselines` artifact). Baselines are always CI-generated; a local
-Linux run (e.g. WSL/Ubuntu driving Chromium through the official
-`mcr.microsoft.com/playwright` Docker image) can generate throwaway
-baselines with `npx playwright test tests/visual --update-snapshots` to
-validate the regression *mechanism*, but those local baselines must never
-be committed — CI's Linux runner font rendering is the only authority (see
-`playwright.config.ts`'s top-of-file comment). Once baselines exist:
+**Requires CI context** — the visual baselines are committed at
+`tests/visual/__screenshots__/chromium-{desktop,mobile}/` and are
+Linux-CI-authoritative: CI's `e2e` job runs `npm run test:visual` against
+them on every push. Regenerate them only through the documented CI flow —
+run `ci.yml` via `workflow_dispatch` with the `update_visual_snapshots`
+input set true, which (re)generates the baselines on a Linux runner and
+uploads them as the `visual-baselines` artifact for a maintainer to review
+and commit; nothing is committed automatically. Because browser font
+hinting/anti-aliasing differs across OSes, a local Linux run (e.g.
+WSL/Ubuntu driving Chromium through the official
+`mcr.microsoft.com/playwright` Docker image) can only validate the
+regression *mechanism* via `npx playwright test tests/visual
+--update-snapshots` — those throwaway baselines must never be committed,
+since CI's Linux runner is the sole authority (see `playwright.config.ts`'s
+top-of-file comment). To run the mutation:
 
 Mutation — change a color the `home.spec.ts` baseline covers across a
 *large area* of the page. Edit `theme.json`'s `settings.color.palette`
@@ -397,10 +401,10 @@ pair under `test-results/`).
 Revert: restore the `theme.json` change (`git checkout --
 web/app/themes/site-theme/theme.json`), `ddev wp cache flush`, and re-run
 `npm run test:visual` — it goes green. To intentionally accept a visual
-change instead, re-run with `--update-snapshots` on Linux CI only, then
-have a maintainer review and commit the result (see `playwright.config.ts`'s
-top-of-file comment on why local/non-Linux snapshots must never be
-committed).
+change instead, regenerate the baselines through `ci.yml`'s
+`update_visual_snapshots` flow (Linux CI only), then have a maintainer
+review and commit the result (see `playwright.config.ts`'s top-of-file
+comment on why local/non-Linux snapshots must never be committed).
 
 ---
 

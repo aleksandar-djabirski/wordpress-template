@@ -64,9 +64,9 @@ The starter ships with a **base profile** (no WooCommerce) and an optional **com
 
 - **Base**: `site-core`, `site-integrations`, and `site-theme` are active. `site-commerce` is present but stays a no-op (an admin notice only) until WooCommerce is active — see `SiteCommerce\Plugin::maybe_boot()`.
 - **Commerce**: install WooCommerce, then `site-commerce` activates its providers automatically.
-  1. Add a WooCommerce source: either `composer require wpackagist-plugin/woocommerce` (after adding the `wpackagist.org` Composer repository to `composer.json`), or install it manually via `wp plugin install woocommerce --activate` / wp-admin.
+  1. Add WooCommerce as a Composer dependency — the required path for a real project: `ddev composer require wpackagist-plugin/woocommerce` (after adding the `wpackagist.org` repository to `composer.json`). A manual `wp plugin install` is invisible to Git, `composer audit`, Dependabot, and reproducible deploys/rollback, so keep it to throwaway local experiments only. See `docs/adding-commerce-behaviour.md` for the exact `composer.json` snippet.
   2. `ddev wp plugin activate site-commerce`.
-  3. Run the commerce Playwright suite with `COMMERCE=1 npx playwright test tests/commerce/e2e` (skipped otherwise). See `docs/adding-commerce-behaviour.md`.
+  3. Run the commerce Playwright suite with `COMMERCE=1 npx playwright test tests/commerce/e2e` (a `test.fixme` placeholder until a store project implements the journeys; skipped without `COMMERCE=1`).
 
 ## Project layout
 
@@ -107,11 +107,11 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 | Suite | Needs a database? | Needs a running site? | Run with |
 | --- | --- | --- | --- |
 | Architecture (22 tests) | no | no | `ddev composer test:architecture` (or `composer` directly, anywhere) |
-| Unit (86 tests) | no | no | `ddev composer test:unit` |
+| Unit (115 tests) | no | no | `ddev composer test:unit` |
 | Integration (20 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
 | e2e / accessibility | no | yes | `npm run test:e2e` / `test:accessibility` against `WP_BASE_URL` |
 | Visual regression | no | yes | `npm run test:visual`; baselines are Linux-CI-authoritative — see `playwright.config.ts` |
-| Commerce e2e | no | yes (+ WooCommerce) | `COMMERCE=1 npx playwright test tests/commerce/e2e` (fixme placeholder until commerce lands) |
+| Commerce e2e | no | yes (+ WooCommerce) | `COMMERCE=1 npx playwright test tests/commerce/e2e` (`test.fixme` placeholder until a store project implements the journeys) |
 
 ## Renaming for a new project
 
@@ -132,6 +132,7 @@ It deliberately does **not** rename the `agency/` block namespace (e.g. `agency/
 
 - [`docs/architecture.md`](docs/architecture.md) — layers, dependency rules, source of truth
 - [`docs/ownership-rules.md`](docs/ownership-rules.md) — "I need to do X, which layer owns it?"
+- [`docs/editing-strictness.md`](docs/editing-strictness.md) — the default content-only editing model and the per-project dials to tighten it
 - [`docs/adding-a-block.md`](docs/adding-a-block.md), [`docs/adding-an-integration.md`](docs/adding-an-integration.md), [`docs/adding-commerce-behaviour.md`](docs/adding-commerce-behaviour.md) — how-to guides
 - [`docs/validation-scenarios.md`](docs/validation-scenarios.md) — how to prove each guardrail actually fails closed
 - [`docs/mcp.md`](docs/mcp.md) — optional local MCP policy
