@@ -24,3 +24,8 @@ Config::define('DISALLOW_INDEXING', true);
 // analytics wiring and is intentionally unasserted until that lands.
 Config::define('AGENCY_DISABLE_OUTBOUND_WEBHOOKS', true);
 Config::define('AGENCY_DISABLE_ANALYTICS', true);
+
+// Explicit opt-out surface for AgencyPlatform\Security\MailGuard: false keeps
+// real email suppressed here; flip to true only to send real mail to a safe
+// test mailbox (verify-env then warns, but does not fail).
+Config::define('AGENCY_ALLOW_OUTBOUND_EMAIL', false);

@@ -12,6 +12,7 @@ use AgencyPlatform\Roles\RolesProvider;
 use AgencyPlatform\Roles\ShopRole;
 use AgencyPlatform\Security\ApplicationPasswords;
 use AgencyPlatform\Security\FileModGuard;
+use AgencyPlatform\Security\MailGuard;
 
 /**
  * Bootstraps every agency-platform guardrail.
@@ -32,6 +33,7 @@ final class Plugin {
 			new SiteEditorLockdown(),
 			new ApplicationPasswords(),
 			new FileModGuard(),
+			new MailGuard(),
 			new AgencyCommands(),
 		);
 

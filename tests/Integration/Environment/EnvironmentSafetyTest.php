@@ -15,12 +15,14 @@ namespace Tests\Integration\Environment;
 
 use AgencyPlatform\Health\DatabaseOverrideCheck;
 use AgencyPlatform\Security\FileModGuard;
+use AgencyPlatform\Security\MailGuard;
 use SiteCore\Leads\LeadSubmissionHandler;
 use SiteIntegrations\LeadDelivery\FakeLeadDelivery;
 use Tests\Integration\IntegrationTestCase;
 
 /**
  * @covers \AgencyPlatform\Security\FileModGuard
+ * @covers \AgencyPlatform\Security\MailGuard
  * @covers \AgencyPlatform\Health\DatabaseOverrideCheck
  * @covers \SiteCore\Leads\LeadSubmissionHandler
  * @covers \SiteIntegrations\LeadDelivery\LeadDeliveryResolver
@@ -137,5 +139,42 @@ final class EnvironmentSafetyTest extends IntegrationTestCase {
 		$result = ( new DatabaseOverrideCheck() )->run();
 
 		self::assertSame( array(), $result['overrides'] );
+	}
+
+	/**
+	 * MailGuard::register() (booted with the rest of the mu-plugin for this
+	 * whole test process, in 'development') hooks `pre_wp_mail` and returns
+	 * `false` outside production, so wp_mail() reports a failed send and never
+	 * reaches PHPMailer. Asserted against wp-phpunit's MockPHPMailer via the
+	 * canonical reset_phpmailer_instance()/tests_retrieve_phpmailer_instance()
+	 * helpers: mock_sent stays empty because the short-circuit fired before
+	 * any send.
+	 */
+	public function test_wp_mail_is_suppressed_in_a_non_production_environment(): void {
+		reset_phpmailer_instance();
+
+		$sent = wp_mail( 'someone@example.com', 'Subject line', 'Body text' );
+
+		self::assertFalse( $sent, 'MailGuard must make wp_mail() return false outside production.' );
+
+		$mailer = tests_retrieve_phpmailer_instance();
+
+		self::assertNotFalse( $mailer, 'wp-phpunit should provide a MockPHPMailer instance in the test environment.' );
+		self::assertSame(
+			array(),
+			$mailer->mock_sent,
+			'No message should reach PHPMailer when MailGuard suppresses the send.'
+		);
+	}
+
+	/**
+	 * MailGuard::should_suppress() is pure and has no environment check of its
+	 * own beyond its arguments; this pins the exact contract the live guard
+	 * above relies on — production never suppressed, this ('development')
+	 * environment suppressed when the override is absent.
+	 */
+	public function test_mail_guard_suppression_contract(): void {
+		self::assertFalse( MailGuard::should_suppress( 'production', false ) );
+		self::assertTrue( MailGuard::should_suppress( wp_get_environment_type(), false ) );
 	}
 }

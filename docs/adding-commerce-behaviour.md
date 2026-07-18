@@ -71,7 +71,25 @@ other reference. Adding to the allowlist is a deliberate, reviewed
 exception — if the code *could* live in `site-commerce/` instead, move it
 there rather than allowlisting it.
 
-## 5. Tests
+## 5. Sanitizing commerce PII
+
+`wp agency sanitize` (see `ops/restore.md`) is step-based and extensible via
+the `agency_platform_sanitize_steps` filter. `site-commerce` registers
+`SiteCommerce\Health\CommerceSanitizeStep` on that filter from `Plugin::boot()`
+— so the commerce sanitize step exists **only** when WooCommerce is active. It
+anonymizes both order-storage backends (classic `_billing_*`/`_shipping_*`
+postmeta and HPOS `wc_orders`/`wc_order_addresses`, each guarded by a table
+check), pattern-deletes `_stripe_*` metas, and clears the payment-token and
+`woocommerce_sessions` tables — every statement idempotent.
+
+Add a project-specific commerce scrub the same way: register a **named**
+callable (never a closure) on `agency_platform_sanitize_steps` from a
+`site-commerce` provider, keyed by a stable slug, returning the WP-CLI summary
+lines. Keep every statement idempotent and guard optional tables with a
+`SHOW TABLES` check. If your project installs other plugins that store PII,
+give each its own step — sanitize only knows what a step teaches it.
+
+## 6. Tests
 
 - **PHPUnit**: `tests/commerce/` is reserved for WooCommerce-backed test
   suites (currently empty by design — see `tests/commerce/README.md`); it

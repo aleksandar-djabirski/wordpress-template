@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace SiteCommerce;
 
+use SiteCommerce\Health\CommerceSanitizeStep;
 use SiteCommerce\Products\ExampleProductRules;
 
 /**
@@ -46,6 +47,7 @@ final class Plugin {
 	private static function boot(): void {
 		$providers = array(
 			new ExampleProductRules(),
+			new CommerceSanitizeStep(),
 		);
 
 		foreach ( $providers as $provider ) {

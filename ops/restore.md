@@ -17,10 +17,20 @@ unverified backup is a hope, not a guarantee — this contract exists so
 5. Run `ddev composer install && npm ci && npm run build` if restoring
    from a bare code checkout rather than a pre-built deploy artifact.
 6. If the restored database came from production and the target isn't
-   production, run `bash scripts/sanitize-database` — it scrubs
-   non-administrator emails/URLs, revokes sessions and application
-   passwords fleet-wide, and sets `blog_public` to discourage indexing.
-   Never skip this when production data lands anywhere non-production.
+   production, run `bash scripts/sanitize-database` (`wp agency sanitize`).
+   It runs an ordered, idempotent set of steps — scrubs non-administrator
+   emails/URLs, scrubs commenter emails/URLs, revokes sessions and
+   application passwords fleet-wide, and sets `blog_public` to discourage
+   indexing. The step set is extensible via the
+   `agency_platform_sanitize_steps` filter: with `site-commerce` + WooCommerce
+   active, an extra step anonymizes WooCommerce order PII (classic postmeta
+   and HPOS `wc_orders`/`wc_order_addresses`, payment tokens, sessions). Pass
+   `--include-admins` to sanitize administrator email/URL too (off by default
+   so agency staff logins and password resets stay usable on a local import).
+   Never skip sanitize when production data lands anywhere non-production.
+   **Warning:** sanitize covers this starter's core and commerce PII, not
+   arbitrary third-party plugins — review every installed plugin for its own
+   PII tables/meta before treating any sanitized dump as safe to share.
 
 ## Restore smoke-test checklist
 

@@ -43,11 +43,16 @@ production or exposing PII to whoever's debugging:
 1. Take (or reuse a recent) production database export.
 2. Restore it to an isolated staging/scratch environment
    (`ops/restore.md`, steps 1–5).
-3. Run `bash scripts/sanitize-database` (`wp agency sanitize`) — scrubs
-   non-administrator user emails/URLs, revokes all sessions and
-   application passwords, sets `blog_public` to 0. Never debug against an
-   un-sanitized production copy outside the actual production
-   environment.
+3. Run `bash scripts/sanitize-database` (`wp agency sanitize`) — an ordered,
+   idempotent, step-based scrub: non-administrator user emails/URLs,
+   commenter emails/URLs, all sessions and application passwords, and
+   `blog_public` set to 0. It is extensible via the
+   `agency_platform_sanitize_steps` filter, so with `site-commerce` +
+   WooCommerce active it also anonymizes WooCommerce order PII. Use
+   `--include-admins` to include administrator email/URL. Never debug against
+   an un-sanitized production copy outside the actual production environment,
+   and remember sanitize does not know about arbitrary third-party plugins'
+   PII tables — audit those separately before sharing the copy.
 4. Reproduce and fix the issue there; verify the fix with
    `ddev composer verify:fast` plus the relevant Playwright suite before
    it goes anywhere near production.

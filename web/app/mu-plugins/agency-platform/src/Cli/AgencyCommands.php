@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace AgencyPlatform\Cli;
 
 use AgencyPlatform\Health\DatabaseOverrideCheck;
+use AgencyPlatform\Health\SanitizeSteps;
 
 /**
  * Registers the `wp agency ...` WP-CLI command family. Guarded so it never
@@ -60,82 +61,45 @@ final class AgencyCommands {
 	/**
 	 * Idempotently scrubs personally-identifying and session/credential
 	 * data — intended for sanitizing a production database dump before it
-	 * lands in a non-production environment. Never touches administrator
-	 * accounts' email/URL (so a human can still log in with a known
-	 * address), but revokes sessions and application passwords for every
-	 * user, administrators included.
+	 * lands in a non-production environment.
+	 *
+	 * The work is a registry of ordered, idempotent steps (see
+	 * AgencyPlatform\Health\SanitizeSteps): users, comments, sessions,
+	 * application passwords, and blog_public by default, extensible by any
+	 * plugin via the `agency_platform_sanitize_steps` filter (site-commerce
+	 * appends real WooCommerce PII scrubbing when WooCommerce is active).
+	 * Every step is idempotent, so re-running is always safe.
+	 *
+	 * By default, administrator email/URL is left intact so a human can still
+	 * log in with a known address (sessions and application passwords are
+	 * still revoked for everyone, administrators included). Pass
+	 * `--include-admins` to extend the users step to administrators too.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--include-admins]
+	 * : Also sanitize administrator email addresses and URLs. Off by default
+	 *   so agency staff logins and password resets stay usable on a local
+	 *   import.
+	 *
+	 * @param array<int, string>    $args       Positional arguments (unused; required by the WP-CLI command signature).
+	 * @param array<string, mixed>  $assoc_args Associative arguments/flags, e.g. `--include-admins`.
 	 */
-	public static function sanitize(): void {
-		$summary = array();
-
-		$non_admin_users = get_users(
-			array(
-				'role__not_in' => array( 'administrator' ),
-				'fields'       => 'all',
-			)
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed -- $args is required by the WP-CLI command signature (positional args precede $assoc_args); this command takes no positional arguments.
+	public static function sanitize( array $args, array $assoc_args = array() ): void {
+		$options = array(
+			'include_admins' => ! empty( $assoc_args['include-admins'] ),
 		);
 
-		$emails_sanitized = 0;
-		$urls_cleared     = 0;
-
-		foreach ( $non_admin_users as $user ) {
-			$sanitized_email = sprintf( 'user_%d@example.invalid', $user->ID );
-			$email_changed   = $sanitized_email !== $user->user_email;
-			$url_changed     = '' !== $user->user_url;
-
-			if ( ! $email_changed && ! $url_changed ) {
+		foreach ( SanitizeSteps::steps() as $slug => $step ) {
+			if ( ! is_callable( $step ) ) {
+				\WP_CLI::warning( sprintf( 'Skipping sanitize step "%s": its registered value is not callable.', (string) $slug ) );
 				continue;
 			}
 
-			wp_update_user(
-				array(
-					'ID'         => $user->ID,
-					'user_email' => $sanitized_email,
-					'user_url'   => '',
-				)
-			);
-
-			if ( $email_changed ) {
-				++$emails_sanitized;
+			foreach ( (array) call_user_func( $step, $options ) as $line ) {
+				\WP_CLI::log( (string) $line );
 			}
-
-			if ( $url_changed ) {
-				++$urls_cleared;
-			}
-		}
-
-		$summary[] = sprintf( 'Sanitized email address on %d non-administrator user(s).', $emails_sanitized );
-		$summary[] = sprintf( 'Cleared user_url on %d non-administrator user(s).', $urls_cleared );
-
-		$all_user_ids       = get_users( array( 'fields' => 'ID' ) );
-		$sessions_cleared   = 0;
-		$app_passwords_gone = 0;
-
-		foreach ( $all_user_ids as $user_id ) {
-			if ( delete_user_meta( (int) $user_id, 'session_tokens' ) ) {
-				++$sessions_cleared;
-			}
-
-			if ( delete_user_meta( (int) $user_id, '_application_passwords' ) ) {
-				++$app_passwords_gone;
-			}
-		}
-
-		$summary[] = sprintf( 'Revoked active sessions for %d user(s).', $sessions_cleared );
-		$summary[] = sprintf( 'Deleted application passwords for %d user(s).', $app_passwords_gone );
-
-		// LEAD_WEBHOOK_URL itself is consumed directly as an environment
-		// variable by SiteIntegrations\LeadDelivery\WebhookLeadDelivery —
-		// nothing caches it into a wp_options row today, so there is
-		// nothing to clear here. If a later task ever introduces such a
-		// cache, add its deletion here at that point (don't speculate on
-		// an option name nothing writes yet).
-
-		update_option( 'blog_public', 0 );
-		$summary[] = 'Set "blog_public" to 0 (discourage search engines from indexing).';
-
-		foreach ( $summary as $line ) {
-			\WP_CLI::log( $line );
 		}
 
 		\WP_CLI::success( 'Sanitize complete.' );
@@ -156,6 +120,20 @@ final class AgencyCommands {
 			\WP_CLI::warning( 'Running verify-env against a production environment; there are no non-production invariants to check here.' );
 			\WP_CLI::success( 'Nothing to verify in production.' );
 			return;
+		}
+
+		// Asymmetry by design: AGENCY_ALLOW_OUTBOUND_EMAIL is only ever a
+		// WARNING (never a hard failure) because it is a deliberate opt-out
+		// surface — a project may point staging at a safe test mailbox and
+		// enable real mail on purpose — whereas AGENCY_DISABLE_OUTBOUND_WEBHOOKS
+		// below is a hard invariant that must always hold outside production.
+		if ( defined( 'AGENCY_ALLOW_OUTBOUND_EMAIL' ) && true === AGENCY_ALLOW_OUTBOUND_EMAIL ) {
+			\WP_CLI::warning(
+				sprintf(
+					'AGENCY_ALLOW_OUTBOUND_EMAIL is defined true in non-production ("%s"): MailGuard is disabled and real email can be sent. Confirm this points at a safe test mailbox.',
+					$environment
+				)
+			);
 		}
 
 		$failures = array();
