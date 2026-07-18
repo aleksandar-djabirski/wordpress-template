@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Reports database records (templates, template parts, customized global
+# styles) that shadow the Git-owned theme/theme.json. Thin wrapper around the
+# `wp agency check-overrides` WP-CLI command (see the agency-platform
+# mu-plugin) so it is runnable the same way from a host or CI as from inside
+# the container. Exits non-zero when overrides are found.
+set -euo pipefail
+
+if command -v wp >/dev/null 2>&1; then
+  exec wp agency check-overrides "$@"
+elif command -v ddev >/dev/null 2>&1; then
+  exec ddev wp agency check-overrides "$@"
+else
+  echo "error: need 'wp' (WP-CLI) or 'ddev' on PATH." >&2
+  echo "       Run inside the DDEV container (ddev ssh) or use: ddev wp agency check-overrides" >&2
+  exit 1
+fi

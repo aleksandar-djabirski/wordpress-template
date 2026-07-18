@@ -1,0 +1,39 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Regenerates docs/generated-block-index.md from the theme's block.json
+ * manifests plus the patterns, templates, and tests that reference each
+ * block. Deterministic (no timestamps) so the architecture suite's
+ * GeneratedIndexFreshnessTest can assert the committed copy is current.
+ *
+ * Usage:  php scripts/generate-block-index
+ *
+ * Shares its generation logic with that test via
+ * tests/support/BlockIndexGenerator.php, so script and test can never
+ * disagree about what "current" means.
+ */
+
+declare(strict_types=1);
+
+$repo_root = dirname(__DIR__);
+
+// Use Composer's autoloader when it is available, but do not require it:
+// this script must run on a fresh checkout before `composer install`.
+$autoload = $repo_root . '/vendor/autoload.php';
+if (is_file($autoload)) {
+    require $autoload;
+}
+
+require $repo_root . '/tests/support/BlockIndexGenerator.php';
+
+$markdown = \Tests\Support\BlockIndexGenerator::generate($repo_root);
+
+$docs_dir = $repo_root . '/docs';
+if (!is_dir($docs_dir)) {
+    mkdir($docs_dir, 0755, true);
+}
+
+$target = $docs_dir . '/generated-block-index.md';
+file_put_contents($target, $markdown);
+
+fwrite(STDOUT, 'Wrote ' . $target . ' (' . strlen($markdown) . " bytes).\n");

@@ -86,7 +86,7 @@
     "minimum-stability": "stable",
     "prefer-stable": true,
     "scripts": {
-        "setup": "echo \"See scripts/setup (added in a later task) for full environment bootstrap.\"",
+        "setup": "echo \"Bootstrap the environment from inside DDEV: 'ddev ssh' then 'bash scripts/setup' (or 'ddev exec bash scripts/setup'). The full setup sequence needs the container's php/wp/node, so it lives in scripts/setup rather than here.\"",
         "lint:php": "phpcs",
         "analyse": "phpstan analyse --memory-limit=1G",
         "deptrac": "deptrac analyse --config-file=deptrac.yaml --no-progress",

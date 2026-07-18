@@ -1,0 +1,266 @@
+#!/usr/bin/env php
+<?php
+/**
+ * Rebrands a fresh clone of the agency-starter for a real project by
+ * rewriting the project's human/slug names across text files.
+ *
+ * Replacements:
+ *   'agency-starter'  ->  --slug   (composer package slug, DDEV name, URLs, docs)
+ *   'Agency Starter'  ->  --title  (human-facing display name)
+ *
+ * Intentionally NOT renamed (see --help):
+ *   - the `agency/` block namespace (e.g. agency/reference-callout)
+ *   - PHP namespaces (AgencyPlatform\, SiteCore\, ...)
+ * Both are baked into content stored in existing databases and into the
+ * autoloader; renaming them silently breaks live content and class loading,
+ * so treat that as a separate, deliberate decision — never a side effect of
+ * this script.
+ *
+ * Usage:
+ *   php scripts/rename-project --slug=acme-web
+ *   php scripts/rename-project --slug=acme-web --title="Acme Web"
+ *   php scripts/rename-project --slug=acme-web --apply
+ *
+ * Dry-run by default: it prints what WOULD change. Pass --apply to write.
+ */
+
+declare(strict_types=1);
+
+const OLD_SLUG  = 'agency-starter';
+const OLD_TITLE = 'Agency Starter';
+
+$options = parse_arguments(array_slice($argv, 1));
+
+if (isset($options['help'])) {
+    print_help();
+    exit(0);
+}
+
+$slug = $options['slug'] ?? '';
+
+if (preg_match('/^[a-z][a-z0-9-]+$/', $slug) !== 1) {
+    fwrite(STDERR, "error: --slug is required and must be kebab-case (^[a-z][a-z0-9-]+$).\n\n");
+    print_help();
+    exit(1);
+}
+
+$title = $options['title'] ?? default_title($slug);
+$apply = isset($options['apply']);
+
+$repo_root = dirname(__DIR__);
+$files     = collect_files($repo_root);
+
+$total_files   = 0;
+$total_matches = 0;
+
+fwrite(STDOUT, ($apply ? "APPLYING renames" : 'DRY RUN (no files written; pass --apply to write)') . "\n");
+fwrite(STDOUT, "  '" . OLD_SLUG . "'  -> '" . $slug . "'\n");
+fwrite(STDOUT, "  '" . OLD_TITLE . "' -> '" . $title . "'\n\n");
+
+foreach ($files as $file) {
+    $contents = (string) file_get_contents($file);
+
+    $slug_hits  = substr_count($contents, OLD_SLUG);
+    $title_hits = substr_count($contents, OLD_TITLE);
+
+    if (0 === $slug_hits && 0 === $title_hits) {
+        continue;
+    }
+
+    ++$total_files;
+    $total_matches += $slug_hits + $title_hits;
+
+    $relative = substr($file, strlen($repo_root) + 1);
+    fwrite(STDOUT, sprintf("  %-60s %2d slug, %2d title\n", $relative, $slug_hits, $title_hits));
+
+    if ($apply) {
+        $updated = str_replace(array(OLD_TITLE, OLD_SLUG), array($title, $slug), $contents);
+        file_put_contents($file, $updated);
+    }
+}
+
+fwrite(STDOUT, "\n");
+fwrite(
+    STDOUT,
+    sprintf(
+        "%s %d replacement(s) across %d file(s).\n",
+        $apply ? 'Wrote' : 'Would write',
+        $total_matches,
+        $total_files
+    )
+);
+
+if (!$apply && $total_files > 0) {
+    fwrite(STDOUT, "Re-run with --apply to write these changes.\n");
+}
+
+exit(0);
+
+/**
+ * @param list<string> $arguments
+ * @return array<string, string>
+ */
+function parse_arguments(array $arguments): array
+{
+    $options = array();
+
+    foreach ($arguments as $argument) {
+        if ('--help' === $argument || '-h' === $argument) {
+            $options['help'] = '1';
+            continue;
+        }
+
+        if ('--apply' === $argument) {
+            $options['apply'] = '1';
+            continue;
+        }
+
+        if (preg_match('/^--([a-z]+)=(.*)$/', $argument, $matches) === 1) {
+            $options[$matches[1]] = $matches[2];
+        }
+    }
+
+    return $options;
+}
+
+function default_title(string $slug): string
+{
+    return ucwords(str_replace('-', ' ', $slug));
+}
+
+/**
+ * Every text file the rename should touch. Prefers git's list of TRACKED
+ * files (which already excludes vendor/, node_modules/, web/wp/ and other
+ * gitignored scratch such as .superpowers/); falls back to a filesystem walk
+ * when git is unavailable. Either way, lockfiles, core, build output, and
+ * binary files are excluded.
+ *
+ * @return list<string>
+ */
+function collect_files(string $repo_root): array
+{
+    $skip_paths = array('/web/wp/', '/vendor/', '/node_modules/', '/.git/', '/build/');
+    $skip_names = array('composer.lock', 'package-lock.json');
+
+    $candidates = tracked_files($repo_root) ?? filesystem_files($repo_root);
+    $files      = array();
+
+    foreach ($candidates as $path) {
+        $normalized = str_replace('\\', '/', $path);
+
+        foreach ($skip_paths as $fragment) {
+            if (str_contains($normalized, $fragment)) {
+                continue 2;
+            }
+        }
+
+        if (in_array(basename($path), $skip_names, true) || !is_file($path)) {
+            continue;
+        }
+
+        if (is_probably_binary($path)) {
+            continue;
+        }
+
+        $files[] = $path;
+    }
+
+    sort($files);
+
+    return $files;
+}
+
+/**
+ * Absolute paths of git-tracked files, or null when git is unavailable.
+ *
+ * @return list<string>|null
+ */
+function tracked_files(string $repo_root): ?array
+{
+    if (!function_exists('exec')) {
+        return null;
+    }
+
+    $output = array();
+    $status = 1;
+    exec('git -C ' . escapeshellarg($repo_root) . ' ls-files 2>/dev/null', $output, $status);
+
+    if (0 !== $status || array() === $output) {
+        return null;
+    }
+
+    return array_map(static fn(string $relative): string => $repo_root . '/' . $relative, $output);
+}
+
+/**
+ * Recursive filesystem fallback listing when git is not available.
+ *
+ * @return list<string>
+ */
+function filesystem_files(string $repo_root): array
+{
+    $skip_dirs = array('.git', 'vendor', 'node_modules', 'build');
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveCallbackFilterIterator(
+            new RecursiveDirectoryIterator($repo_root, FilesystemIterator::SKIP_DOTS),
+            static function (SplFileInfo $current) use ($skip_dirs): bool {
+                return !($current->isDir() && in_array($current->getFilename(), $skip_dirs, true));
+            }
+        )
+    );
+
+    $files = array();
+
+    foreach ($iterator as $item) {
+        if ($item instanceof SplFileInfo && $item->isFile()) {
+            $files[] = $item->getPathname();
+        }
+    }
+
+    return $files;
+}
+
+function is_probably_binary(string $file): bool
+{
+    $handle = fopen($file, 'rb');
+
+    if (false === $handle) {
+        return true;
+    }
+
+    $sample = (string) fread($handle, 8192);
+    fclose($handle);
+
+    return str_contains($sample, "\0");
+}
+
+function print_help(): void
+{
+    $text = <<<'HELP'
+rename-project — rebrand a fresh agency-starter clone for a real project.
+
+USAGE
+  php scripts/rename-project --slug=<kebab-slug> [--title="Human Name"] [--apply]
+
+OPTIONS
+  --slug=<slug>     New project slug (required). Kebab-case: ^[a-z][a-z0-9-]+$.
+                    Replaces every 'agency-starter'.
+  --title="Name"    New human-facing name. Defaults to a Title-Cased slug.
+                    Replaces every 'Agency Starter'.
+  --apply           Write the changes. Without it, this is a dry run.
+  --help, -h        Show this help.
+
+WHAT IS NOT RENAMED (on purpose)
+  - The block namespace `agency/` (e.g. agency/reference-callout).
+  - PHP namespaces (AgencyPlatform\, SiteCore\, SiteIntegrations\, ...).
+  Both are persisted in existing databases (block markup) and wired into the
+  Composer autoloader. Renaming them breaks live content and class loading, so
+  it must be a separate, deliberate decision — not a side effect of a rebrand.
+
+  Also skipped: .git/, vendor/, node_modules/, web/wp/, build output,
+  composer.lock, package-lock.json, and binary files.
+HELP;
+
+    fwrite(STDOUT, $text . "\n");
+}

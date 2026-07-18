@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#
+# Scrubs personally-identifying and session/credential data from the current
+# database — intended for sanitizing a production dump before it lands in a
+# non-production environment. Thin wrapper around the `wp agency sanitize`
+# WP-CLI command (see the agency-platform mu-plugin); the command itself is
+# idempotent.
+set -euo pipefail
+
+if command -v wp >/dev/null 2>&1; then
+  exec wp agency sanitize "$@"
+elif command -v ddev >/dev/null 2>&1; then
+  exec ddev wp agency sanitize "$@"
+else
+  echo "error: need 'wp' (WP-CLI) or 'ddev' on PATH." >&2
+  echo "       Run inside the DDEV container (ddev ssh) or use: ddev wp agency sanitize" >&2
+  exit 1
+fi

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#
+# Asserts the environment-safety invariants that must hold outside production
+# (e.g. AGENCY_DISABLE_OUTBOUND_WEBHOOKS defined and true). Thin wrapper
+# around the `wp agency verify-env` WP-CLI command (see the agency-platform
+# mu-plugin). Exits non-zero when any invariant fails.
+set -euo pipefail
+
+if command -v wp >/dev/null 2>&1; then
+  exec wp agency verify-env "$@"
+elif command -v ddev >/dev/null 2>&1; then
+  exec ddev wp agency verify-env "$@"
+else
+  echo "error: need 'wp' (WP-CLI) or 'ddev' on PATH." >&2
+  echo "       Run inside the DDEV container (ddev ssh) or use: ddev wp agency verify-env" >&2
+  exit 1
+fi

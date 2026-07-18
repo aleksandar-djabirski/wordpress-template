@@ -1,0 +1,7 @@
+# Keep operational scripts and the generated block index LF on every platform.
+# The scripts carry #!/usr/bin/env shebangs that must run in the DDEV/CI Linux
+# containers (a CRLF would break the interpreter line), and the architecture
+# suite compares the generated index byte-for-byte, so its line endings must
+# be identical everywhere.
+scripts/* text eol=lf
+docs/generated-block-index.md text eol=lf

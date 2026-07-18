@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+#
+# One-shot local environment bootstrap for the agency-starter.
+#
+# DOCUMENTATION-GRADE: this script is meant to be read top to bottom. It is
+# the canonical description of how a working local install comes together, so
+# agents and humans can learn the sequence even without running it.
+#
+# Run it INSIDE the DDEV web container (`ddev ssh` then `bash scripts/setup`)
+# or on any host that has php, composer, wp (WP-CLI) and node on PATH. When
+# only `ddev` is present on the host, composer/wp calls are transparently
+# routed through it.
+#
+# It is idempotent: every step checks the current state first, so re-running
+# it only fills in what is missing and never clobbers an existing .env or a
+# already-installed site.
+#
+# WARNING: the WordPress admin it creates uses the throwaway credentials
+# admin / admin for LOCAL DEVELOPMENT ONLY. Never run this against a shared or
+# production environment.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+# --- Tooling resolution ------------------------------------------------------
+# Prefer native binaries; fall back to running them through ddev.
+if command -v composer >/dev/null 2>&1; then
+  COMPOSER=(composer)
+elif command -v ddev >/dev/null 2>&1; then
+  COMPOSER=(ddev composer)
+else
+  echo "error: need 'composer' or 'ddev' on PATH." >&2
+  exit 1
+fi
+
+if command -v wp >/dev/null 2>&1; then
+  WP=(wp)
+elif command -v ddev >/dev/null 2>&1; then
+  WP=(ddev wp)
+else
+  echo "error: need 'wp' (WP-CLI) or 'ddev' on PATH." >&2
+  exit 1
+fi
+
+# --- 1. PHP dependencies -----------------------------------------------------
+echo "==> [1/8] Installing Composer dependencies (WordPress core + tooling)"
+"${COMPOSER[@]}" install
+
+# --- 2. Environment file + salts --------------------------------------------
+echo "==> [2/8] Ensuring .env exists with real auth salts"
+if [ -f .env ]; then
+  echo "    .env already present — leaving it untouched."
+else
+  cp .env.example .env
+  echo "    created .env from .env.example."
+  # .env.example ships every AUTH_KEY/SALT as the literal 'generateme'.
+  # Replace them one at a time with fresh random values so each key/salt is
+  # unique. openssl is available in the DDEV web container.
+  if command -v openssl >/dev/null 2>&1; then
+    while grep -q 'generateme' .env; do
+      salt="$(openssl rand -base64 48 | tr -d '\n')"
+      # Escape sed-special characters (\ / & |) in the generated salt.
+      escaped="$(printf '%s' "${salt}" | sed -e 's/[\\/&|]/\\&/g')"
+      # Replace only the FIRST remaining 'generateme'.
+      sed -i "0,/generateme/s|generateme|${escaped}|" .env
+    done
+    echo "    generated unique random salts for all AUTH_* keys."
+  else
+    echo "    warning: openssl not found — .env still contains 'generateme'" >&2
+    echo "             placeholders; replace them before using this install." >&2
+  fi
+fi
+
+# The site URL comes from WP_HOME in .env (default: the ddev.site host).
+WP_HOME_VALUE="$(grep -E '^WP_HOME=' .env | head -n1 | cut -d= -f2-)"
+WP_HOME_VALUE="${WP_HOME_VALUE%\"}"; WP_HOME_VALUE="${WP_HOME_VALUE#\"}"
+WP_HOME_VALUE="${WP_HOME_VALUE%\'}"; WP_HOME_VALUE="${WP_HOME_VALUE#\'}"
+WP_HOME_VALUE="${WP_HOME_VALUE:-https://agency-starter.ddev.site}"
+
+# --- 3. WordPress core install ----------------------------------------------
+echo "==> [3/8] Installing WordPress core (if not already installed)"
+if "${WP[@]}" core is-installed >/dev/null 2>&1; then
+  echo "    WordPress is already installed — skipping."
+else
+  echo "    installing at ${WP_HOME_VALUE} with LOCAL-ONLY admin (admin/admin)."
+  "${WP[@]}" core install \
+    --url="${WP_HOME_VALUE}" \
+    --title="Agency Starter (local)" \
+    --admin_user="admin" \
+    --admin_password="admin" \
+    --admin_email="admin@example.invalid" \
+    --skip-email
+fi
+
+# --- 4. Theme ----------------------------------------------------------------
+echo "==> [4/8] Activating the site-theme"
+"${WP[@]}" theme activate site-theme
+
+# --- 5. Base-profile plugins -------------------------------------------------
+# site-commerce is intentionally NOT activated here: it only does anything
+# when WooCommerce is present, and the base profile ships without it.
+echo "==> [5/8] Activating base-profile plugins (site-core, site-integrations)"
+"${WP[@]}" plugin activate site-core site-integrations
+
+# --- 6. Node dependencies ----------------------------------------------------
+echo "==> [6/8] Installing Node dependencies"
+if [ -f package-lock.json ]; then
+  npm ci
+else
+  npm install
+fi
+
+# --- 7. Block build ----------------------------------------------------------
+echo "==> [7/8] Building block editor assets (wp-scripts)"
+npm run build
+
+# --- 8. Client editor test user ---------------------------------------------
+echo "==> [8/8] Ensuring a client-editor test user exists"
+if "${WP[@]}" user get client-editor >/dev/null 2>&1; then
+  echo "    user 'client-editor' already exists — skipping."
+else
+  "${WP[@]}" user create client-editor client-editor@example.invalid \
+    --role=client_editor \
+    --display_name="Client Editor" \
+    --porcelain >/dev/null
+  echo "    created 'client-editor' (role: client_editor)."
+fi
+
+echo
+echo "==> Setup complete. Site: ${WP_HOME_VALUE}"
+echo "    Admin login (LOCAL ONLY): admin / admin"
