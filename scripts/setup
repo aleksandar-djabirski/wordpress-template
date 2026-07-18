@@ -45,11 +45,11 @@ else
 fi
 
 # --- 1. PHP dependencies -----------------------------------------------------
-echo "==> [1/8] Installing Composer dependencies (WordPress core + tooling)"
+echo "==> [1/9] Installing Composer dependencies (WordPress core + tooling)"
 "${COMPOSER[@]}" install
 
 # --- 2. Environment file + salts --------------------------------------------
-echo "==> [2/8] Ensuring .env exists with real auth salts"
+echo "==> [2/9] Ensuring .env exists with real auth salts"
 if [ -f .env ]; then
   echo "    .env already present — leaving it untouched."
 else
@@ -80,7 +80,7 @@ WP_HOME_VALUE="${WP_HOME_VALUE%\'}"; WP_HOME_VALUE="${WP_HOME_VALUE#\'}"
 WP_HOME_VALUE="${WP_HOME_VALUE:-https://agency-starter.ddev.site}"
 
 # --- 3. WordPress core install ----------------------------------------------
-echo "==> [3/8] Installing WordPress core (if not already installed)"
+echo "==> [3/9] Installing WordPress core (if not already installed)"
 if "${WP[@]}" core is-installed >/dev/null 2>&1; then
   echo "    WordPress is already installed — skipping."
 else
@@ -95,17 +95,17 @@ else
 fi
 
 # --- 4. Theme ----------------------------------------------------------------
-echo "==> [4/8] Activating the site-theme"
+echo "==> [4/9] Activating the site-theme"
 "${WP[@]}" theme activate site-theme
 
 # --- 5. Base-profile plugins -------------------------------------------------
 # site-commerce is intentionally NOT activated here: it only does anything
 # when WooCommerce is present, and the base profile ships without it.
-echo "==> [5/8] Activating base-profile plugins (site-core, site-integrations)"
+echo "==> [5/9] Activating base-profile plugins (site-core, site-integrations)"
 "${WP[@]}" plugin activate site-core site-integrations
 
 # --- 6. Node dependencies ----------------------------------------------------
-echo "==> [6/8] Installing Node dependencies"
+echo "==> [6/9] Installing Node dependencies"
 if [ -f package-lock.json ]; then
   npm ci
 else
@@ -113,7 +113,7 @@ else
 fi
 
 # --- 7. Block build ----------------------------------------------------------
-echo "==> [7/8] Building block editor assets (wp-scripts)"
+echo "==> [7/9] Building block editor assets (wp-scripts)"
 npm run build
 
 # --- 8. Client editor test user ---------------------------------------------
@@ -123,7 +123,7 @@ npm run build
 # random password, which is fine for a human but breaks e2e specs that need
 # to log this user in (see tests/e2e/helpers/auth.ts). Never run this against
 # a shared or production environment.
-echo "==> [8/8] Ensuring a client-editor test user exists"
+echo "==> [8/9] Ensuring a client-editor test user exists"
 if "${WP[@]}" user get client-editor >/dev/null 2>&1; then
   echo "    user 'client-editor' already exists — skipping."
 else
@@ -133,6 +133,30 @@ else
     --user_pass=client-editor \
     --porcelain >/dev/null
   echo "    created 'client-editor' (role: client_editor, LOCAL-ONLY password: client-editor)."
+fi
+
+# --- 9. Primary navigation menu ---------------------------------------------
+# The site header renders wp_nav_menu( theme_location => 'primary',
+# fallback_cb => false ) (see parts/site-header/site-header.php), so until a
+# menu is assigned to the 'primary' location the <nav id="site-header-nav"> and
+# its mobile toggle never render at all — and the e2e nav specs
+# (tests/e2e/smoke.spec.ts) then have nothing to assert against. Create a
+# minimal primary menu once and assign it, so a freshly bootstrapped site
+# matches what those specs (and a real editor filling in navigation) expect.
+echo "==> [9/9] Ensuring a primary navigation menu exists"
+if "${WP[@]}" menu list --fields=locations --format=csv 2>/dev/null | grep -q 'primary'; then
+  echo "    a menu is already assigned to the primary location — skipping."
+else
+  "${WP[@]}" menu create "Primary" >/dev/null
+  "${WP[@]}" menu item add-custom primary "Home" "${WP_HOME_VALUE}/" >/dev/null
+  # Add the "Sample Page" WordPress core ships, when present, so the menu has a
+  # real internal link (its ID is not fixed across installs — look it up).
+  sample_page_id="$("${WP[@]}" post list --post_type=page --name=sample-page --field=ID 2>/dev/null | head -n1)"
+  if [ -n "${sample_page_id}" ]; then
+    "${WP[@]}" menu item add-post primary "${sample_page_id}" >/dev/null
+  fi
+  "${WP[@]}" menu location assign primary primary >/dev/null
+  echo "    created the 'Primary' menu and assigned it to the primary location."
 fi
 
 echo

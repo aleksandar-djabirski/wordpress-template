@@ -223,6 +223,18 @@ jobs:
             --display_name="Client Editor" \
             --user_pass=client-editor
 
+      - name: Create primary navigation menu
+        # Mirrors scripts/setup step 9. The theme header renders
+        # wp_nav_menu( theme_location => 'primary', fallback_cb => false ), so
+        # without a menu assigned to the 'primary' location the
+        # <nav id="site-header-nav"> and its mobile toggle never render, and
+        # tests/e2e/smoke.spec.ts's nav specs have nothing to assert against.
+        run: |
+          ddev wp menu create "Primary"
+          ddev wp menu item add-custom primary "Home" https://agency-starter.ddev.site/
+          ddev wp menu item add-post primary "$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp menu location assign primary primary
+
       - name: Set pretty permalinks
         # tests/accessibility/smoke.spec.ts and other specs request
         # /sample-page/-style paths, which need a non-default rewrite
