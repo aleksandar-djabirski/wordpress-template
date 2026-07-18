@@ -25,6 +25,7 @@
     "stylelint-config-standard": "^40.0.0",
     "stylelint-declaration-strict-value": "^1.11.1",
     "@playwright/test": "^1.61.1",
-    "@axe-core/playwright": "^4.12.1"
+    "@axe-core/playwright": "^4.12.1",
+    "axe-core": "^4.12.1"
   }
 }

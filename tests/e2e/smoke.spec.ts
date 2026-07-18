@@ -28,15 +28,32 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 	const hrefs = await page.$$eval(
 		'a[href]',
 		( anchors, base ) => {
+			// Resolve each href against the page's base URL and compare
+			// ORIGINS rather than string-prefixing. Origin comparison
+			// correctly classifies protocol-relative hrefs (//host/path),
+			// rejects prefix-collision look-alikes (https://base.evil.com no
+			// longer counts as internal just because it starts with the base
+			// string), and treats opaque-origin schemes (mailto:, tel:,
+			// javascript:) as external.
+			let baseOrigin: string;
+			try {
+				baseOrigin = new URL( base ).origin;
+			} catch {
+				return [];
+			}
 			const internal = new Set<string>();
 			for ( const anchor of anchors ) {
 				const href = anchor.getAttribute( 'href' );
 				if ( ! href ) {
 					continue;
 				}
-				const isRelative = href.startsWith( '/' );
-				const isAbsoluteInternal = base ? href.startsWith( base ) : false;
-				if ( isRelative || isAbsoluteInternal ) {
+				let origin: string;
+				try {
+					origin = new URL( href, base ).origin;
+				} catch {
+					continue;
+				}
+				if ( origin === baseOrigin ) {
 					internal.add( href );
 				}
 			}

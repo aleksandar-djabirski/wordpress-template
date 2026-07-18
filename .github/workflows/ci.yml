@@ -92,7 +92,10 @@ jobs:
         run: npm run build
 
       - name: Verify committed build output has no drift
-        run: git diff --exit-code -- web/app/themes/site-theme/blocks
+        # Stage first, then diff --cached, so the check also catches brand-new
+        # build files that `npm run build` emits but git isn't tracking yet
+        # (a plain `git diff` ignores untracked files and would miss them).
+        run: git add -A -- web/app/themes/site-theme/blocks && git diff --cached --exit-code -- web/app/themes/site-theme/blocks
 
   # 3. PHP integration suite against a real MariaDB service container.
   #    wp-phpunit installs its own WP test tables against the DB below; env

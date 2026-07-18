@@ -5,3 +5,9 @@
 # be identical everywhere.
 scripts/* text eol=lf
 docs/generated-block-index.md text eol=lf
+
+# The committed wp-scripts block build output is byte-compared against a fresh
+# `npm run build` by ci.yml's frontend build-drift check. Pin its line endings
+# to LF so a CRLF checkout on Windows can never make that comparison spuriously
+# fail (the build always emits LF).
+web/app/themes/site-theme/blocks/**/build/** text eol=lf

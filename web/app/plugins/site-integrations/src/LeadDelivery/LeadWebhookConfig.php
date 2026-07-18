@@ -10,12 +10,16 @@ namespace SiteIntegrations\LeadDelivery;
  * env var fallback chain) can be unit-tested independently of the HTTP call
  * itself.
  *
- * Checked in order: the LEAD_WEBHOOK_URL constant (if defined and a
- * non-empty string — see config/environments/*.php's Config::define()
- * calls), then the LEAD_WEBHOOK_URL environment variable (getenv(), then
- * $_ENV, then $_SERVER — Bedrock's .env loading populates these via
- * vlucas/phpdotenv). Returns '' if none resolve to a non-empty string;
- * callers (LeadDeliveryResolver) treat that as "not configured".
+ * Checked in order: the LEAD_WEBHOOK_URL constant (if defined and, after
+ * trimming, a non-empty string — see config/environments/*.php's
+ * Config::define() calls), then the LEAD_WEBHOOK_URL environment variable
+ * (getenv(), then $_ENV, then $_SERVER — Bedrock's .env loading populates
+ * these via vlucas/phpdotenv). Every candidate is trim()'d before the
+ * empty-check, so a whitespace-only value (e.g. LEAD_WEBHOOK_URL='   ' in a
+ * carelessly-edited .env) is treated as "not configured" rather than posting
+ * leads to a blank endpoint. Returns '' if none resolve to a non-empty
+ * (post-trim) string; callers (LeadDeliveryResolver) treat that as "not
+ * configured".
  */
 final class LeadWebhookConfig {
 
@@ -23,22 +27,34 @@ final class LeadWebhookConfig {
 		if ( defined( 'LEAD_WEBHOOK_URL' ) ) {
 			$constant_value = constant( 'LEAD_WEBHOOK_URL' );
 
-			if ( is_string( $constant_value ) && '' !== $constant_value ) {
-				return $constant_value;
+			if ( is_string( $constant_value ) ) {
+				$trimmed = trim( $constant_value );
+
+				if ( '' !== $trimmed ) {
+					return $trimmed;
+				}
 			}
 		}
 
 		$from_getenv = getenv( 'LEAD_WEBHOOK_URL' );
 
-		if ( is_string( $from_getenv ) && '' !== $from_getenv ) {
-			return $from_getenv;
+		if ( is_string( $from_getenv ) ) {
+			$trimmed = trim( $from_getenv );
+
+			if ( '' !== $trimmed ) {
+				return $trimmed;
+			}
 		}
 
 		foreach ( array( $_ENV, $_SERVER ) as $source ) {
 			$value = $source['LEAD_WEBHOOK_URL'] ?? null;
 
-			if ( is_string( $value ) && '' !== $value ) {
-				return $value;
+			if ( is_string( $value ) ) {
+				$trimmed = trim( $value );
+
+				if ( '' !== $trimmed ) {
+					return $trimmed;
+				}
 			}
 		}
 

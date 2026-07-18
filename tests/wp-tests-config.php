@@ -77,6 +77,16 @@ define( 'WP_ENVIRONMENT_TYPE', 'development' );
 // (WordPress core's own default) is what EnvironmentSafetyTest's FileModGuard
 // coverage depends on — see that test for the full reasoning.
 
+// Also deliberately NOT redefined here: WP_CONTENT_DIR / WP_CONTENT_URL. The
+// integration suite loads the plugins and theme under test manually (see
+// tests/Integration/bootstrap.php) rather than through Bedrock's content-dir
+// wiring, so nothing here depends on wp-content resolving to Bedrock's
+// web/app/ layout, and WordPress core's own defaults are left in place. Any
+// FUTURE integration test that touches uploads or asserts a content URL (e.g.
+// media library, wp_upload_dir(), enqueued-asset URLs) must define
+// WP_CONTENT_DIR and WP_CONTENT_URL here first, pointing at web/app/, or it
+// will resolve against core's default location and give misleading results.
+
 // wp-phpunit's own bootstrap (includes/bootstrap.php) always swaps in
 // MockPHPMailer before any test runs, regardless of anything defined here —
 // wp_mail() can never send a real email from this suite. No extra

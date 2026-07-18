@@ -66,6 +66,17 @@ final class LeadDeliveryResolutionTest extends TestCase {
 		self::assertInstanceOf( FakeLeadDelivery::class, ( new LeadDeliveryResolver() )->resolve( null ) );
 	}
 
+	public function test_production_with_a_whitespace_only_webhook_url_resolves_fake_delivery(): void {
+		// A LEAD_WEBHOOK_URL of only whitespace is not a usable endpoint.
+		// LeadWebhookConfig::url() trims every candidate before its empty-check,
+		// so this must resolve to the safe FakeLeadDelivery rather than
+		// constructing a WebhookLeadDelivery around a blank URL.
+		$GLOBALS['_test_env_type'] = 'production';
+		putenv( 'LEAD_WEBHOOK_URL=   ' );
+
+		self::assertInstanceOf( FakeLeadDelivery::class, ( new LeadDeliveryResolver() )->resolve( null ) );
+	}
+
 	public function test_production_with_a_url_but_webhooks_disabled_resolves_fake_delivery(): void {
 		// Exercises the "disabled" branch via the protected webhooks_disabled()
 		// seam rather than actually define()-ing AGENCY_DISABLE_OUTBOUND_WEBHOOKS:
