@@ -51,27 +51,61 @@ final class GlobalAssetRulesTest extends TestCase {
 	}
 
 	public function test_block_specific_css_stays_inside_its_block(): void {
-		$theme       = $this->theme();
-		$block_local = str_replace( '\\', '/', $theme ) . '/blocks/reference-callout/';
+		$theme     = $this->theme();
+		$css_files = $this->css_files( $theme );
+		$slugs     = $this->block_slugs( $theme );
 
-		foreach ( $this->css_files( $theme ) as $file ) {
-			$normalized = str_replace( '\\', '/', $file );
+		self::assertNotEmpty( $slugs, 'The theme should define at least one block under blocks/.' );
 
-			if ( str_starts_with( $normalized, $block_local ) ) {
-				continue;
+		// For every block, its slug (the BEM class prefix, e.g. slug__element)
+		// may only appear in CSS inside that block's own directory. Iterating
+		// all blocks means new blocks are enforced automatically.
+		foreach ( $slugs as $slug ) {
+			$block_local = str_replace( '\\', '/', $theme ) . '/blocks/' . $slug . '/';
+
+			foreach ( $css_files as $file ) {
+				$normalized = str_replace( '\\', '/', $file );
+
+				if ( str_starts_with( $normalized, $block_local ) ) {
+					continue;
+				}
+
+				self::assertStringNotContainsString(
+					$slug,
+					$this->strip_css_comments( $this->read( $file ) ),
+					$this->architecture_failure(
+						'Block-specific class used outside its block directory',
+						$this->to_relative( $file ),
+						'The "' . $slug . '" block\'s classes must only be styled inside blocks/' . $slug . '/, so a block\'s styling ships and is removed with the block.',
+						'Move these rules into blocks/' . $slug . '/style.css (or editor.css).'
+					)
+				);
 			}
-
-			self::assertStringNotContainsString(
-				'reference-callout',
-				$this->strip_css_comments( $this->read( $file ) ),
-				$this->architecture_failure(
-					'Block-specific class used outside its block directory',
-					$this->to_relative( $file ),
-					'The reference-callout block\'s classes must only be styled inside blocks/reference-callout/, so a block\'s styling ships and is removed with the block.',
-					'Move these rules into blocks/reference-callout/style.css (or editor.css).'
-				)
-			);
 		}
+	}
+
+	/**
+	 * @return list<string>
+	 */
+	private function block_slugs( string $theme ): array {
+		$blocks  = $theme . '/blocks';
+		$entries = is_dir( $blocks ) ? scandir( $blocks ) : false;
+
+		if ( false === $entries ) {
+			return array();
+		}
+
+		$slugs = array();
+
+		foreach ( $entries as $entry ) {
+			if ( '.' !== $entry && '..' !== $entry && is_dir( $blocks . '/' . $entry ) ) {
+				$slugs[] = $entry;
+			}
+		}
+
+		sort( $slugs );
+
+		return $slugs;
 	}
 
 	public function test_part_assets_are_named_after_their_part(): void {

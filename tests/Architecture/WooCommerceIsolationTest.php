@@ -76,6 +76,29 @@ final class WooCommerceIsolationTest extends TestCase {
 		}
 	}
 
+	public function test_allowlist_entries_still_reference_woocommerce(): void {
+		foreach ( array_keys( $this->allowlist() ) as $relative ) {
+			$path = $this->repo_root() . '/' . $relative;
+
+			if ( ! is_file( $path ) ) {
+				// Existence is asserted by the sibling test; skip here so both
+				// failures are not reported for the same missing file.
+				continue;
+			}
+
+			self::assertNotSame(
+				array(),
+				ArchitectureScanner::find_symbol_references( $path, self::PATTERNS ),
+				$this->architecture_failure(
+					'WooCommerce allow-list entry is obsolete',
+					$relative,
+					'This file no longer references any WooCommerce symbol, so its exemption protects nothing and only weakens the rule.',
+					'Remove this stale entry from tests/Architecture/woocommerce-allowlist.php.'
+				)
+			);
+		}
+	}
+
 	/**
 	 * @return array<string, string>
 	 */

@@ -89,19 +89,19 @@ final class ArchitectureScanner {
 		for ( $i = 0; $i < $count; $i++ ) {
 			$token = $tokens[ $i ];
 
-			if ( ! is_array( $token ) || \T_STRING !== $token[0] ) {
+			if ( ! is_array( $token ) ) {
 				continue;
 			}
 
-			$name = $token[1];
+			$name = self::callable_name( $token );
 
-			if ( 'add_action' !== $name && 'add_filter' !== $name ) {
+			if ( null === $name || ( 'add_action' !== $name && 'add_filter' !== $name ) ) {
 				continue;
 			}
 
 			// Skip method calls/definitions that merely share the name
 			// (e.g. $obj->add_action(...), self::add_action(...),
-			// function add_action(...)).
+			// function add_action(...), or a namespaced Ns\add_action()).
 			$previous = self::previous_significant( $tokens, $i );
 
 			if ( is_array( $previous ) && in_array(
@@ -180,6 +180,10 @@ final class ArchitectureScanner {
 			'wp_remote_post',
 			'wp_remote_request',
 			'wp_remote_head',
+			'wp_safe_remote_get',
+			'wp_safe_remote_post',
+			'wp_safe_remote_request',
+			'wp_safe_remote_head',
 			'curl_init',
 			'curl_exec',
 			'curl_setopt',
@@ -207,7 +211,9 @@ final class ArchitectureScanner {
 				continue;
 			}
 
-			if ( \T_STRING !== $token[0] ) {
+			$name = self::callable_name( $token );
+
+			if ( null === $name ) {
 				continue;
 			}
 
@@ -221,15 +227,15 @@ final class ArchitectureScanner {
 				continue;
 			}
 
-			if ( in_array( $token[1], $http_functions, true ) ) {
+			if ( in_array( $name, $http_functions, true ) ) {
 				$calls[] = array(
 					'line' => (int) $token[2],
-					'call' => $token[1],
+					'call' => $name,
 				);
 				continue;
 			}
 
-			if ( 'file_get_contents' === $token[1] && self::first_argument_is_http_url( $tokens, $i ) ) {
+			if ( 'file_get_contents' === $name && self::first_argument_is_http_url( $tokens, $i ) ) {
 				$calls[] = array(
 					'line' => (int) $token[2],
 					'call' => 'file_get_contents(http)',
@@ -346,6 +352,32 @@ final class ArchitectureScanner {
 		}
 
 		return 0 === stripos( self::unquote( $argument[1] ), 'http' );
+	}
+
+	/**
+	 * Returns the callable's trailing name segment for an identifier token,
+	 * or null when the token is not an identifier. This collapses the three
+	 * ways PHP tokenizes a function name so an unqualified `add_action`, a
+	 * fully-qualified `\add_action` (T_NAME_FULLY_QUALIFIED), and a qualified
+	 * `Ns\add_action` (T_NAME_QUALIFIED) all resolve to `add_action` — a hook
+	 * or HTTP call must not be able to slip past the scanner by being written
+	 * with a leading or namespace-qualified backslash.
+	 *
+	 * @param array{0: int, 1: string, 2: int}|string $token
+	 */
+	private static function callable_name( array|string $token ): ?string {
+		if ( ! is_array( $token ) || ! in_array(
+			$token[0],
+			array( \T_STRING, \T_NAME_QUALIFIED, \T_NAME_FULLY_QUALIFIED ),
+			true
+		) ) {
+			return null;
+		}
+
+		$name     = ltrim( $token[1], '\\' );
+		$last_sep = strrpos( $name, '\\' );
+
+		return false === $last_sep ? $name : substr( $name, $last_sep + 1 );
 	}
 
 	private static function unquote( string $literal ): string {

@@ -154,6 +154,26 @@ final class ArchitectureScannerTest extends TestCase {
 		self::assertSame( array(), ArchitectureScanner::tokens_contain_closure_hook( $file ) );
 	}
 
+	public function test_fully_qualified_and_namespaced_closure_hooks_are_detected(): void {
+		$file = $this->write(
+			'qualified-closure.php',
+			implode(
+				"\n",
+				array(
+					'<?php',
+					"\\add_action( 'init', function () {} );",
+					"Ns\\add_filter( 'the_content', fn( \$c ) => \$c );",
+				)
+			)
+		);
+
+		$violations = ArchitectureScanner::tokens_contain_closure_hook( $file );
+
+		self::assertCount( 2, $violations );
+		self::assertSame( 'add_action', $violations[0]['hook'] );
+		self::assertSame( 'add_filter', $violations[1]['hook'] );
+	}
+
 	public function test_symbol_reference_in_code_is_detected_but_ignored_in_docblock(): void {
 		$file = $this->write(
 			'wc.php',
@@ -199,6 +219,46 @@ final class ArchitectureScannerTest extends TestCase {
 		self::assertContains( 'GuzzleHttp', $names );
 		self::assertContains( 'wp_remote_post', $names );
 		self::assertContains( 'file_get_contents(http)', $names );
+	}
+
+	public function test_fully_qualified_outbound_http_is_detected(): void {
+		$file = $this->write(
+			'qualified-http.php',
+			implode(
+				"\n",
+				array(
+					'<?php',
+					"\\wp_remote_post( 'https://example.test/hook' );",
+				)
+			)
+		);
+
+		$names = array_column( ArchitectureScanner::outbound_http_calls( $file ), 'call' );
+
+		self::assertContains( 'wp_remote_post', $names );
+	}
+
+	public function test_wp_safe_remote_functions_are_detected(): void {
+		$file = $this->write(
+			'safe-remote.php',
+			implode(
+				"\n",
+				array(
+					'<?php',
+					'wp_safe_remote_get( $url );',
+					'wp_safe_remote_post( $url );',
+					'wp_safe_remote_request( $url );',
+					'wp_safe_remote_head( $url );',
+				)
+			)
+		);
+
+		$names = array_column( ArchitectureScanner::outbound_http_calls( $file ), 'call' );
+
+		self::assertContains( 'wp_safe_remote_get', $names );
+		self::assertContains( 'wp_safe_remote_post', $names );
+		self::assertContains( 'wp_safe_remote_request', $names );
+		self::assertContains( 'wp_safe_remote_head', $names );
 	}
 
 	public function test_local_file_get_contents_and_commented_http_are_not_flagged(): void {

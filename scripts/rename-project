@@ -38,8 +38,13 @@ if (isset($options['help'])) {
 
 $slug = $options['slug'] ?? '';
 
-if (preg_match('/^[a-z][a-z0-9-]+$/', $slug) !== 1) {
-    fwrite(STDERR, "error: --slug is required and must be kebab-case (^[a-z][a-z0-9-]+$).\n\n");
+// A valid Composer-style package slug: starts with a letter, lowercase
+// alphanumerics with single INTERNAL hyphens only (no leading, trailing, or
+// doubled hyphens). Minimum length 2 is enforced explicitly.
+if (preg_match('/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/', $slug) !== 1 || strlen($slug) < 2) {
+    fwrite(STDERR, "error: --slug is required and must be a valid kebab-case slug:\n");
+    fwrite(STDERR, "       >= 2 chars, start with a letter, lowercase alphanumerics with single\n");
+    fwrite(STDERR, "       internal hyphens only (no leading/trailing/double hyphens).\n\n");
     print_help();
     exit(1);
 }
@@ -244,7 +249,8 @@ USAGE
   php scripts/rename-project --slug=<kebab-slug> [--title="Human Name"] [--apply]
 
 OPTIONS
-  --slug=<slug>     New project slug (required). Kebab-case: ^[a-z][a-z0-9-]+$.
+  --slug=<slug>     New project slug (required). Kebab-case, >= 2 chars, single
+                    internal hyphens only: ^[a-z][a-z0-9]*(-[a-z0-9]+)*$.
                     Replaces every 'agency-starter'.
   --title="Name"    New human-facing name. Defaults to a Title-Cased slug.
                     Replaces every 'Agency Starter'.
