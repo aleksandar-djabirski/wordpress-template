@@ -300,11 +300,24 @@ Revert: restore `'unfiltered_html'` in `NEVER_GRANT`.
 
 **Requires DDEV/CI context** — reads the live environment.
 
-Mutation — in `.env`, set:
+Mutation — in `config/environments/development.php`, flip the hardcoded
+kill-switch:
+```php
+Config::define('AGENCY_DISABLE_OUTBOUND_WEBHOOKS', true);
 ```
-AGENCY_DISABLE_OUTBOUND_WEBHOOKS=false
+to:
+```php
+Config::define('AGENCY_DISABLE_OUTBOUND_WEBHOOKS', false);
 ```
 while `WP_ENV` stays `development` (the checked-out default).
+
+Editing the `AGENCY_DISABLE_OUTBOUND_WEBHOOKS` line in `.env` does NOT reproduce
+this failure: that variable is informational/reserved and is never read into
+the constant (see the note in `.env.example`). The live kill-switch — and the
+exact thing `verify-env` checks (`! defined( 'AGENCY_DISABLE_OUTBOUND_WEBHOOKS' )
+|| true !== AGENCY_DISABLE_OUTBOUND_WEBHOOKS`) — is the hardcoded
+`Config::define()` above, present in both
+`config/environments/development.php` and `config/environments/staging.php`.
 
 Check:
 ```sh
@@ -322,7 +335,9 @@ outright — `wp_get_environment_type() === 'production'` short-circuits
 `verify-env` to a success with a warning, since there is nothing to check
 there (see the command's docblock).
 
-Revert: set `AGENCY_DISABLE_OUTBOUND_WEBHOOKS=true` again in `.env`.
+Revert: set the `Config::define('AGENCY_DISABLE_OUTBOUND_WEBHOOKS', ...)` in
+`config/environments/development.php` back to `true` (or `git checkout --
+config/environments/development.php`).
 
 ---
 
