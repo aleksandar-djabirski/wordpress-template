@@ -20,7 +20,7 @@ This repository is a **starter kit you copy for every new customer project** —
 
 Think of it like a house with finished wiring, plumbing, and alarm systems, where `site-theme` is its unpainted walls. A bought theme is a different prefab house — you can't bolt it onto yours, but you can look at it and paint your walls to match.
 
-**The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers can edit text/images/products but can never break the layout, every change is tested automatically, and any AI agent working on the site knows exactly where everything goes (that is what [AGENTS.md](AGENTS.md) tells it). For an agency maintaining many sites long-term, that trade is the reason this template exists.
+**The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers edit text, images, and products and compose pages from an approved set of blocks while structure, styles, and templates stay locked (tighten that block set per project with the editing-strictness dial), every change is tested automatically, and any AI agent working on the site knows exactly where everything goes (that is what [AGENTS.md](AGENTS.md) tells it). For an agency maintaining many sites long-term, that trade is the reason this template exists.
 
 ## Requirements
 

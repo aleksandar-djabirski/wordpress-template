@@ -35,6 +35,15 @@ the outcome (who, when, and the choice made) in the project's change log;
 - [ ] **`wp agency verify-env` green on staging.** Confirms the non-production
       invariants hold (outbound webhooks disabled; MailGuard active unless a
       test mailbox is deliberately opted in).
+- [ ] **No local seed artifacts in the production database.** The local
+      bootstrap scripts (`scripts/setup`, `scripts/enable-commerce`) create
+      deterministic, publicly-known accounts (`admin`, `client-editor`,
+      `shop-manager`, `test-customer` — each with its username as its password),
+      fixture products ("Test Simple Product", "Test Variable Product"), and
+      coupon `TESTCOUPON`. These land in production only if someone ran a local
+      script against the wrong database; the scripts now refuse to run outside
+      `development`/`local`, so getting them there is an explicit act. Confirm
+      none are present before go-live, and remove any that are.
 
 ## Environment
 

@@ -24,6 +24,58 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
+# --- Environment guard -------------------------------------------------------
+# This script seeds DETERMINISTIC, PUBLICLY-KNOWN local credentials and fixtures
+# — a WordPress administrator admin/admin, a client-editor/client-editor user, a
+# Primary navigation menu. Harmless on a throwaway local box, catastrophic
+# anywhere shared: it would plant a known-password administrator on a live site.
+# So it runs ONLY when the environment is development or local, and this check is
+# first — before any composer/wp/ddev call — so nothing happens otherwise.
+#
+# The environment is read from .env's WP_ENV WITHOUT booting WordPress (this
+# script runs before WP is installed). If .env is ABSENT, setup is about to
+# create it from .env.example (WP_ENV=development), so a missing .env is treated
+# as development and allowed. A present-but-empty or missing WP_ENV is treated
+# as UNSAFE — Bedrock maps an unset WP_ENV to production.
+#
+# There is deliberately NO override flag: seeding a non-development box on
+# purpose means editing .env (or this script), and that friction is the point.
+require_development_environment() {
+  local env_value='development'
+  if [ -f .env ]; then
+    # Last WP_ENV= wins; tolerate leading whitespace, trailing CR, and quotes.
+    env_value="$(grep -E '^[[:space:]]*WP_ENV=' .env | tail -n1 | cut -d= -f2- || true)"
+    env_value="${env_value#"${env_value%%[![:space:]]*}"}"    # ltrim
+    env_value="${env_value%"${env_value##*[![:space:]]}"}"    # rtrim (incl. CR)
+    env_value="${env_value%\"}"; env_value="${env_value#\"}"  # strip "quotes"
+    env_value="${env_value%\'}"; env_value="${env_value#\'}"  # strip 'quotes'
+  fi
+
+  case "${env_value}" in
+    development | local)
+      echo "==> Environment guard: WP_ENV='${env_value}' — proceeding."
+      ;;
+    *)
+      echo "" >&2
+      echo "REFUSING TO RUN: scripts/setup is a LOCAL-DEVELOPMENT bootstrap." >&2
+      echo "  Detected WP_ENV='${env_value:-<unset>}' — it must be 'development' or 'local'." >&2
+      echo "" >&2
+      echo "  This script seeds deterministic, PUBLICLY-KNOWN artifacts:" >&2
+      echo "    - a WordPress administrator   admin / admin" >&2
+      echo "    - a client-editor user        client-editor / client-editor" >&2
+      echo "    - a 'Primary' navigation menu and pretty permalinks" >&2
+      echo "  On a shared, staging, or production site that is a critical security" >&2
+      echo "  exposure — a known-password administrator on a live install." >&2
+      echo "" >&2
+      echo "  There is no override flag: to seed a non-development box on purpose," >&2
+      echo "  change WP_ENV in .env (or edit this script). That friction is the point." >&2
+      exit 1
+      ;;
+  esac
+}
+
+require_development_environment
+
 # --- Tooling resolution ------------------------------------------------------
 # Prefer native binaries; fall back to running them through ddev.
 if command -v composer >/dev/null 2>&1; then

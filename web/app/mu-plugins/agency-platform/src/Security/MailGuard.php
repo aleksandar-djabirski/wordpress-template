@@ -16,9 +16,18 @@ use AgencyPlatform\Logging\Logger;
  *
  * Hooks `pre_wp_mail` (WP 5.7+) at `PHP_INT_MAX` so it runs LAST: whatever a
  * plugin or theme filter decided at an earlier priority, this guard gets the
- * final say and no later filter can flip its verdict back to "deliver". That
- * fail-closed ordering is the whole point — a stray or hostile `pre_wp_mail`
- * filter returning `null` (to re-enable delivery) cannot outrank the guard.
+ * final say and no earlier- or lower-priority filter can flip its verdict back
+ * to "deliver". That fail-closed ordering is the whole point — a stray or
+ * hostile `pre_wp_mail` filter returning `null` (to re-enable delivery) cannot
+ * outrank the guard.
+ *
+ * Two honest boundaries on "last", though. A callback registered at the SAME
+ * `PHP_INT_MAX` priority AFTER this one still runs later and could re-enable
+ * delivery — acceptable here because we control every line of installed code,
+ * so nothing does. And this governs `wp_mail()` only: a plugin that hands mail
+ * straight to an SMTP relay or a transactional-email API bypasses `pre_wp_mail`
+ * entirely, so the guard's scope is precisely `wp_mail()`, not "all email".
+ *
  * The filter is consulted before WordPress hands anything to PHPMailer, and
  * returning a NON-NULL value short-circuits sending. This guard returns
  * `false` (not `null`) when suppressing —
@@ -42,8 +51,9 @@ use AgencyPlatform\Logging\Logger;
 final class MailGuard {
 
 	public function register(): void {
-		// PHP_INT_MAX: run last so this guard's suppression verdict is final and
-		// no later-registered filter can re-enable delivery. See the class docblock.
+		// PHP_INT_MAX: run in the last priority batch so this guard sees earlier
+		// filters' verdicts and gets the final say over them. See the class
+		// docblock for the two honest boundaries on "last".
 		add_filter( 'pre_wp_mail', array( $this, 'maybe_suppress' ), PHP_INT_MAX, 2 );
 	}
 
