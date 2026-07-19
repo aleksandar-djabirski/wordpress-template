@@ -108,3 +108,15 @@ files above.
 - **Commerce**: WooCommerce active, so `site-commerce`'s providers boot and
   its `src/Integrations/` becomes a second approved outbound-HTTP location.
   See `docs/adding-commerce-behaviour.md`.
+
+There are deliberately no further profiles. Commerce is included because
+WooCommerce is the unambiguous industry standard, free, and CI-testable
+without secrets. Capabilities without a unified standard — multilingual
+(WPML/Polylang/TranslatePress), memberships, bookings, LMS — are per-client
+plugin decisions made in the client repo, following the commerce blueprint
+(enable script + deterministic config + gated tests; paid plugins installed
+via Composer with license keys in `.env`, never committed). The starter is
+already translation-ready: every string uses WordPress i18n functions with
+phpcs-enforced text domains. A capability graduates into a template profile
+only after ~3 clients converge on the same stack — extracted from real
+repetition, never predicted.
