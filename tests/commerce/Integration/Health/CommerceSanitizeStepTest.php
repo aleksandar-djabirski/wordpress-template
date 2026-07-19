@@ -31,14 +31,18 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 	 * phone shape) so a passing test means real PII was actually removed.
 	 */
 	private const PII = array(
-		'first_name' => 'Jane',
-		'last_name'  => 'Customer',
-		'email'      => 'jane.customer@real-example.com',
-		'phone'      => '+1-555-0100',
-		'address_1'  => '742 Evergreen Terrace',
-		'city'       => 'Springfield',
-		'postcode'   => '12345',
-		'company'    => 'Acme Real Company',
+		'first_name'     => 'Jane',
+		'last_name'      => 'Customer',
+		'email'          => 'jane.customer@real-example.com',
+		'phone'          => '+1-555-0100',
+		'address_1'      => '742 Evergreen Terrace',
+		'city'           => 'Springfield',
+		'postcode'       => '12345',
+		'company'        => 'Acme Real Company',
+		'ip_address'     => '203.0.113.42',
+		'user_agent'     => 'Mozilla/5.0 (RealDevice) RealBrowser/1.0',
+		'customer_note'  => 'Please leave the parcel with the real neighbour at #740.',
+		'transaction_id' => 'ch_real_secret_txn_9c8b7a',
 	);
 
 	/**
@@ -64,6 +68,12 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 		$order->set_shipping_address_1( self::PII['address_1'] );
 		$order->set_shipping_city( self::PII['city'] );
 		$order->set_shipping_postcode( self::PII['postcode'] );
+
+		// Order-level metadata scrubbed from the wc_orders row itself.
+		$order->set_customer_ip_address( self::PII['ip_address'] );
+		$order->set_customer_user_agent( self::PII['user_agent'] );
+		$order->set_customer_note( self::PII['customer_note'] );
+		$order->set_transaction_id( self::PII['transaction_id'] );
 
 		$order->save();
 
@@ -127,11 +137,15 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 		self::assertSame( self::PII['email'], $billing_before['email'] );
 		self::assertSame( self::PII['phone'], $billing_before['phone'] );
 
+		$order_before = $this->order_meta_row( $order_id );
+		self::assertSame( self::PII['ip_address'], $order_before['ip_address'], 'Guard: the order must start with the real captured IP in wc_orders.' );
+		self::assertSame( self::PII['transaction_id'], $order_before['transaction_id'], 'Guard: the order must start with the real gateway transaction id.' );
+
 		// --- Run the step under test. ---
 		$summary = CommerceSanitizeStep::sanitize_commerce( array() );
 
 		self::assertIsArray( $summary );
-		self::assertCount( 4, $summary, 'The step returns one summary line per data area (classic, HPOS, tokens, sessions).' );
+		self::assertCount( 5, $summary, 'The step returns one summary line per data area (classic, HPOS, registered customers, tokens, sessions).' );
 
 		// --- Post-state: wc_orders billing email anonymized. ---
 		self::assertSame(
@@ -139,6 +153,13 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 			$this->order_billing_email( $order_id ),
 			'wc_orders.billing_email must be replaced with the synthetic per-order address.'
 		);
+
+		// --- Post-state: wc_orders order-level metadata blanked. ---
+		$order_after = $this->order_meta_row( $order_id );
+		self::assertSame( '', $order_after['ip_address'], 'wc_orders.ip_address must be blanked.' );
+		self::assertSame( '', $order_after['user_agent'], 'wc_orders.user_agent must be blanked.' );
+		self::assertSame( '', $order_after['customer_note'], 'wc_orders.customer_note must be blanked.' );
+		self::assertSame( '', $order_after['transaction_id'], 'wc_orders.transaction_id must be blanked.' );
 
 		// --- Post-state: wc_order_addresses billing row scrubbed. ---
 		$billing_after = $this->billing_address_row( $order_id );
@@ -191,6 +212,51 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 		);
 	}
 
+	public function test_sanitize_anonymizes_registered_customer_billing_meta_but_spares_admins(): void {
+		$customer_id = self::factory()->user->create( array( 'role' => 'customer' ) );
+		$admin_id    = self::factory()->user->create( array( 'role' => 'administrator' ) );
+
+		foreach ( array( $customer_id, $admin_id ) as $user_id ) {
+			update_user_meta( $user_id, 'billing_first_name', self::PII['first_name'] );
+			update_user_meta( $user_id, 'billing_last_name', self::PII['last_name'] );
+			update_user_meta( $user_id, 'billing_email', self::PII['email'] );
+			update_user_meta( $user_id, 'billing_phone', self::PII['phone'] );
+			update_user_meta( $user_id, 'billing_address_1', self::PII['address_1'] );
+			update_user_meta( $user_id, 'billing_city', self::PII['city'] );
+			update_user_meta( $user_id, 'billing_postcode', self::PII['postcode'] );
+			update_user_meta( $user_id, 'shipping_address_1', self::PII['address_1'] );
+		}
+
+		CommerceSanitizeStep::sanitize_commerce( array() );
+
+		// The direct-write scrub bypasses WordPress's meta cache, so read fresh.
+		clean_user_cache( $customer_id );
+		clean_user_cache( $admin_id );
+
+		// --- Non-admin customer: billing/shipping account meta anonymized. ---
+		self::assertSame(
+			sprintf( 'user_%d@example.invalid', $customer_id ),
+			get_user_meta( $customer_id, 'billing_email', true ),
+			'A registered customer billing_email must become the synthetic per-user address.'
+		);
+		self::assertSame( '', get_user_meta( $customer_id, 'billing_first_name', true ), 'Customer billing_first_name must be blanked.' );
+		self::assertSame( '', get_user_meta( $customer_id, 'billing_phone', true ), 'Customer billing_phone must be blanked.' );
+		self::assertSame( '', get_user_meta( $customer_id, 'billing_address_1', true ), 'Customer billing_address_1 must be blanked.' );
+		self::assertSame( '', get_user_meta( $customer_id, 'shipping_address_1', true ), 'Customer shipping_address_1 must be blanked.' );
+
+		// --- Administrator: account meta preserved (agency staff stay usable). ---
+		self::assertSame(
+			self::PII['email'],
+			get_user_meta( $admin_id, 'billing_email', true ),
+			'Administrator billing_email must be preserved — the scrub is scoped to non-admins.'
+		);
+		self::assertSame(
+			self::PII['first_name'],
+			get_user_meta( $admin_id, 'billing_first_name', true ),
+			'Administrator billing_first_name must be preserved.'
+		);
+	}
+
 	private function order_billing_email( int $order_id ): string {
 		global $wpdb;
 
@@ -206,6 +272,21 @@ final class CommerceSanitizeStepTest extends IntegrationTestCase {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- test-only read; table name derived from $wpdb->prefix, order id is bound.
 		$row = $wpdb->get_row( $wpdb->prepare( "SELECT first_name, last_name, email, phone, address_1, city, postcode, company FROM {$wpdb->prefix}wc_order_addresses WHERE order_id = %d AND address_type = 'billing'", $order_id ), ARRAY_A );
+
+		return is_array( $row ) ? array_map( 'strval', $row ) : array();
+	}
+
+	/**
+	 * The order-level (non-address) columns on the wc_orders row, read raw so
+	 * the assertions prove exactly what the sanitize SQL wrote.
+	 *
+	 * @return array<string, string>
+	 */
+	private function order_meta_row( int $order_id ): array {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.NotPrepared -- test-only read; table name derived from $wpdb->prefix, order id is bound.
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT ip_address, user_agent, customer_note, transaction_id FROM {$wpdb->prefix}wc_orders WHERE id = %d", $order_id ), ARRAY_A );
 
 		return is_array( $row ) ? array_map( 'strval', $row ) : array();
 	}

@@ -26,6 +26,24 @@ namespace AgencyPlatform\Health;
 final class SanitizeSteps {
 
 	/**
+	 * Profile usermeta keys blanked outright for every sanitized user. These
+	 * are free-text profile fields that routinely carry a person's real name
+	 * or bio; they are keyed by both the WordPress meta key and (for the first
+	 * three) the wp_insert_user() argument name, but are blanked via
+	 * update_user_meta() rather than wp_update_user() — the latter resets an
+	 * empty `nickname` back to the user_login, which is exactly the value this
+	 * step deliberately preserves elsewhere.
+	 *
+	 * @var list<string>
+	 */
+	private const SCRUBBED_USER_META_KEYS = array(
+		'first_name',
+		'last_name',
+		'nickname',
+		'description',
+	);
+
+	/**
 	 * Ordered step registry, after the extension filter. Keys are stable
 	 * slugs; values are named callables of shape `fn(array $options): list<string>`.
 	 *
@@ -54,11 +72,21 @@ final class SanitizeSteps {
 	}
 
 	/**
-	 * Replaces user email addresses with `user_{ID}@example.invalid` and
-	 * clears `user_url`. Administrators are skipped by default — an agency
-	 * needs its own staff logins and password-reset addresses to stay usable
-	 * on a local import — unless `--include-admins` (options['include_admins'])
-	 * is set.
+	 * Anonymizes user identity and profile PII: `user_email` becomes
+	 * `user_{ID}@example.invalid`, `user_url` is cleared, `display_name`
+	 * becomes `Sanitized User {ID}`, `user_nicename` (the public author slug)
+	 * becomes the per-ID-unique `sanitized-user-{id}`, and the `first_name`,
+	 * `last_name`, `nickname`, and `description` usermeta are blanked.
+	 *
+	 * `user_login` is DELIBERATELY left untouched: it is the identity needed to
+	 * actually log into the sanitized copy locally, a login is rarely
+	 * third-party PII, and rewriting it would break active sessions, fixtures,
+	 * and any test that references a known login. (See docs/restore.md and
+	 * ops/launch-checklist.md — sanitize is a baseline scrub, not a guarantee.)
+	 *
+	 * Administrators are skipped by default — an agency needs its own staff
+	 * logins and password-reset addresses to stay usable on a local import —
+	 * unless `--include-admins` (options['include_admins']) is set.
 	 *
 	 * @param array<string, mixed> $options
 	 * @return list<string>
@@ -69,31 +97,65 @@ final class SanitizeSteps {
 		$users = get_users( self::user_query_args( $include_admins ) );
 
 		$emails_sanitized = 0;
+		$names_sanitized  = 0;
 		$urls_cleared     = 0;
+		$meta_cleared     = 0;
 
 		foreach ( $users as $user ) {
-			$sanitized_email = self::sanitized_user_email( (int) $user->ID );
-			$email_changed   = $sanitized_email !== $user->user_email;
-			$url_changed     = '' !== $user->user_url;
+			$user_id = (int) $user->ID;
 
-			if ( ! $email_changed && ! $url_changed ) {
-				continue;
-			}
+			$sanitized_email    = self::sanitized_user_email( $user_id );
+			$sanitized_name     = self::sanitized_display_name( $user_id );
+			$sanitized_nicename = self::sanitized_user_nicename( $user_id );
 
-			wp_update_user(
-				array(
-					'ID'         => $user->ID,
-					'user_email' => $sanitized_email,
-					'user_url'   => '',
-				)
-			);
+			$update = array( 'ID' => $user_id );
 
-			if ( $email_changed ) {
+			if ( $sanitized_email !== $user->user_email ) {
+				$update['user_email'] = $sanitized_email;
 				++$emails_sanitized;
 			}
 
-			if ( $url_changed ) {
+			$name_changed = false;
+
+			if ( $sanitized_name !== $user->display_name ) {
+				$update['display_name'] = $sanitized_name;
+				$name_changed           = true;
+			}
+
+			if ( $sanitized_nicename !== $user->user_nicename ) {
+				$update['user_nicename'] = $sanitized_nicename;
+				$name_changed            = true;
+			}
+
+			if ( $name_changed ) {
+				++$names_sanitized;
+			}
+
+			if ( '' !== $user->user_url ) {
+				$update['user_url'] = '';
 				++$urls_cleared;
+			}
+
+			// More than just the 'ID' anchor means at least one users-table
+			// field changed; user_login is never among the keys.
+			if ( count( $update ) > 1 ) {
+				wp_update_user( $update );
+			}
+
+			// Blank profile meta directly: update_user_meta() lets us set an
+			// empty 'nickname' (wp_update_user() would reset that back to the
+			// user_login, which this step preserves on purpose).
+			$meta_changed = false;
+
+			foreach ( self::SCRUBBED_USER_META_KEYS as $meta_key ) {
+				if ( '' !== (string) get_user_meta( $user_id, $meta_key, true ) ) {
+					update_user_meta( $user_id, $meta_key, '' );
+					$meta_changed = true;
+				}
+			}
+
+			if ( $meta_changed ) {
+				++$meta_cleared;
 			}
 		}
 
@@ -101,16 +163,25 @@ final class SanitizeSteps {
 
 		return array(
 			sprintf( 'Sanitized email address on %d %s.', $emails_sanitized, $scope ),
+			sprintf( 'Sanitized display name + author slug (user_nicename) on %d %s.', $names_sanitized, $scope ),
 			sprintf( 'Cleared user_url on %d %s.', $urls_cleared, $scope ),
+			sprintf( 'Blanked profile meta (first/last name, nickname, description) on %d %s.', $meta_cleared, $scope ),
 		);
 	}
 
 	/**
-	 * Replaces commenter email addresses with `comment_{ID}@example.invalid`
-	 * and blanks `comment_author_url`. Two guarded UPDATEs keep it idempotent:
-	 * a second run matches nothing and reports zero changes. Empty commenter
-	 * emails (logged-in-user comments can carry none) are left untouched rather
-	 * than stamped with a synthetic address.
+	 * Anonymizes commenter PII: `comment_author_email` becomes
+	 * `comment_{ID}@example.invalid`, `comment_author` becomes
+	 * `Sanitized Commenter {ID}`, and `comment_author_url`, `comment_author_IP`
+	 * and `comment_agent` are blanked. Each field is its own guarded UPDATE so
+	 * the step stays idempotent: a second run matches nothing and reports zero
+	 * changes. Empty commenter emails (logged-in-user comments can carry none)
+	 * are left untouched rather than stamped with a synthetic address.
+	 *
+	 * `comment_content` is deliberately NOT scrubbed: free-text comment bodies
+	 * are a per-project editorial decision (they can carry PII a customer wants
+	 * kept, or none at all), flagged in the sanitize audit checklist
+	 * (ops/launch-checklist.md) rather than blanked wholesale here.
 	 *
 	 * @param array<string, mixed> $options
 	 * @return list<string>
@@ -119,18 +190,30 @@ final class SanitizeSteps {
 	public static function comments( array $options ): array {
 		global $wpdb;
 
-		// The synthetic address is built inline (CONCAT over comment_ID) rather
-		// than via a bound placeholder because it is a fixed SQL expression, not
-		// external input; only the $wpdb->comments table name is interpolated.
+		// The synthetic values are built inline (CONCAT over comment_ID) rather
+		// than via a bound placeholder because they are fixed SQL expressions,
+		// not external input; only the $wpdb->comments table name is interpolated.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off CLI sanitize; table name is $wpdb->comments and the statement carries no external input.
 		$emails_sanitized = (int) $wpdb->query( "UPDATE {$wpdb->comments} SET comment_author_email = CONCAT('comment_', comment_ID, '@example.invalid') WHERE comment_author_email <> '' AND comment_author_email <> CONCAT('comment_', comment_ID, '@example.invalid')" );
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off CLI sanitize; table name is $wpdb->comments and the statement carries no external input.
+		$authors_sanitized = (int) $wpdb->query( "UPDATE {$wpdb->comments} SET comment_author = CONCAT('Sanitized Commenter ', comment_ID) WHERE comment_author <> '' AND comment_author <> CONCAT('Sanitized Commenter ', comment_ID)" );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off CLI sanitize; table name is $wpdb->comments and the statement carries no external input.
 		$urls_cleared = (int) $wpdb->query( "UPDATE {$wpdb->comments} SET comment_author_url = '' WHERE comment_author_url <> ''" );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off CLI sanitize; table name is $wpdb->comments and the statement carries no external input.
+		$ips_cleared = (int) $wpdb->query( "UPDATE {$wpdb->comments} SET comment_author_IP = '' WHERE comment_author_IP <> ''" );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- one-off CLI sanitize; table name is $wpdb->comments and the statement carries no external input.
+		$agents_cleared = (int) $wpdb->query( "UPDATE {$wpdb->comments} SET comment_agent = '' WHERE comment_agent <> ''" );
 
 		return array(
 			sprintf( 'Sanitized email address on %d comment(s).', $emails_sanitized ),
+			sprintf( 'Sanitized author name on %d comment(s).', $authors_sanitized ),
 			sprintf( 'Cleared comment_author_url on %d comment(s).', $urls_cleared ),
+			sprintf( 'Cleared commenter IP address on %d comment(s).', $ips_cleared ),
+			sprintf( 'Cleared commenter user agent on %d comment(s).', $agents_cleared ),
 		);
 	}
 
@@ -193,10 +276,33 @@ final class SanitizeSteps {
 	}
 
 	/**
+	 * Pure: the synthetic replacement display name for a given user ID.
+	 */
+	public static function sanitized_display_name( int $user_id ): string {
+		return sprintf( 'Sanitized User %d', $user_id );
+	}
+
+	/**
+	 * Pure: the synthetic replacement `user_nicename` (public author slug) for
+	 * a given user ID. The ID keeps it unique — nicename is a slug WordPress
+	 * expects to be distinct per user, so a fixed literal would collide.
+	 */
+	public static function sanitized_user_nicename( int $user_id ): string {
+		return sprintf( 'sanitized-user-%d', $user_id );
+	}
+
+	/**
 	 * Pure: the synthetic replacement email for a given comment ID.
 	 */
 	public static function sanitized_comment_email( int $comment_id ): string {
 		return sprintf( 'comment_%d@example.invalid', $comment_id );
+	}
+
+	/**
+	 * Pure: the synthetic replacement author name for a given comment ID.
+	 */
+	public static function sanitized_comment_author( int $comment_id ): string {
+		return sprintf( 'Sanitized Commenter %d', $comment_id );
 	}
 
 	/**

@@ -105,7 +105,7 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 | Suite | Needs a database? | Needs a running site? | Run with |
 | --- | --- | --- | --- |
 | Architecture (22 tests) | no | no | `ddev composer test:architecture` (or `composer` directly, anywhere) |
-| Unit (115 tests) | no | no | `ddev composer test:unit` |
+| Unit (121 tests) | no | no | `ddev composer test:unit` |
 | Integration (20 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
 | e2e / accessibility | no | yes | `npm run test:e2e` / `test:accessibility` against `WP_BASE_URL` |
 | Visual regression | no | yes | `npm run test:visual`; baselines are Linux-CI-authoritative — see `playwright.config.ts` |
@@ -135,4 +135,4 @@ It deliberately does **not** rename the `agency/` block namespace (e.g. `agency/
 - [`docs/adding-a-block.md`](docs/adding-a-block.md), [`docs/adding-an-integration.md`](docs/adding-an-integration.md), [`docs/adding-commerce-behaviour.md`](docs/adding-commerce-behaviour.md) — how-to guides
 - [`docs/validation-scenarios.md`](docs/validation-scenarios.md) — how to prove each guardrail actually fails closed
 - [`docs/mcp.md`](docs/mcp.md) — optional local MCP policy
-- [`ops/`](ops/) — backup, restore, update process, monitoring, incident recovery
+- [`ops/`](ops/) — launch checklist, backup, restore, update process, monitoring, incident recovery

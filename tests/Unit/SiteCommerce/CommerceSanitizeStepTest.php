@@ -23,6 +23,44 @@ final class CommerceSanitizeStepTest extends TestCase {
 		self::assertSame( 'order_7@example.invalid', CommerceSanitizeStep::order_email( 7 ) );
 	}
 
+	public function test_customer_email_matches_the_base_user_email_shape(): void {
+		// The registered-customer billing_email scrub reuses the base users
+		// step's `user_{id}@example.invalid` shape so a customer's order and
+		// account addresses land on the same synthetic domain.
+		self::assertSame( 'user_7@example.invalid', CommerceSanitizeStep::customer_email( 7 ) );
+	}
+
+	public function test_order_blanked_meta_keys_are_order_level_non_address_metas(): void {
+		$keys = CommerceSanitizeStep::order_blanked_meta_keys();
+
+		self::assertContains( '_customer_ip_address', $keys );
+		self::assertContains( '_customer_user_agent', $keys );
+		self::assertContains( '_transaction_id', $keys );
+
+		// These are order-level metas, never billing/shipping address keys
+		// (which the address map above owns) — no overlap.
+		foreach ( $keys as $key ) {
+			self::assertDoesNotMatchRegularExpression( '/^_(billing|shipping)_/', $key );
+		}
+	}
+
+	public function test_customer_blanked_meta_keys_are_only_billing_or_shipping_account_metas(): void {
+		$keys = CommerceSanitizeStep::customer_blanked_meta_keys();
+
+		self::assertContains( 'billing_first_name', $keys );
+		self::assertContains( 'billing_phone', $keys );
+		self::assertContains( 'shipping_address_1', $keys );
+
+		// Account usermeta keys carry no leading underscore (unlike the per-order
+		// postmeta) and are strictly billing_*/shipping_* — billing_email is
+		// handled separately as a synthetic address, so it must NOT be blanked here.
+		self::assertNotContains( 'billing_email', $keys );
+
+		foreach ( $keys as $key ) {
+			self::assertMatchesRegularExpression( '/^(billing|shipping)_/', $key );
+		}
+	}
+
 	public function test_address_meta_replacements_maps_email_names_and_blanks(): void {
 		$replacements = CommerceSanitizeStep::address_meta_replacements( 7 );
 

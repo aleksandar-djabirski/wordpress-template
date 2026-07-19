@@ -177,4 +177,49 @@ final class EnvironmentSafetyTest extends IntegrationTestCase {
 		self::assertFalse( MailGuard::should_suppress( 'production', false ) );
 		self::assertTrue( MailGuard::should_suppress( wp_get_environment_type(), false ) );
 	}
+
+	/**
+	 * MailGuard registers `pre_wp_mail` at PHP_INT_MAX so it always runs last
+	 * and has the final say. This proves the fail-closed ordering: a hostile or
+	 * buggy filter registered at a lower priority (PHP_INT_MAX - 1) that returns
+	 * `null` to re-enable delivery cannot outrank the guard — wp_mail() must
+	 * still return false and nothing may reach PHPMailer.
+	 */
+	public function test_mail_guard_wins_over_a_later_filter_trying_to_re_enable_delivery(): void {
+		reset_phpmailer_instance();
+
+		add_filter( 'pre_wp_mail', array( self::class, 'force_allow_mail' ), PHP_INT_MAX - 1, 2 );
+
+		$sent = wp_mail( 'someone@example.com', 'Subject line', 'Body text' );
+
+		// Removed before the assertions so a failure can't leak the hostile
+		// filter into later tests in this process.
+		remove_filter( 'pre_wp_mail', array( self::class, 'force_allow_mail' ), PHP_INT_MAX - 1 );
+
+		self::assertFalse( $sent, 'MailGuard at PHP_INT_MAX must have the final say — a lower-priority filter returning null must not re-enable delivery.' );
+
+		$mailer = tests_retrieve_phpmailer_instance();
+
+		self::assertNotFalse( $mailer, 'wp-phpunit should provide a MockPHPMailer instance in the test environment.' );
+		self::assertSame(
+			array(),
+			$mailer->mock_sent,
+			'No message may reach PHPMailer even when an earlier filter tries to allow the send.'
+		);
+	}
+
+	/**
+	 * Named `pre_wp_mail` callback (never a closure — see the naming contract):
+	 * unconditionally returns `null` to simulate a plugin or filter trying to
+	 * keep mail flowing. MailGuard, pinned at PHP_INT_MAX, must still override
+	 * this to `false`.
+	 *
+	 * @param mixed                $short_circuit The value an earlier filter set (unused; required by the filter signature).
+	 * @param array<string, mixed> $atts          wp_mail() arguments (unused; required by the filter signature).
+	 * @return null
+	 */
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- both parameters are required to match WordPress's `pre_wp_mail` filter signature; this fixture deliberately ignores them and always returns null.
+	public static function force_allow_mail( $short_circuit, array $atts ) {
+		return null;
+	}
 }

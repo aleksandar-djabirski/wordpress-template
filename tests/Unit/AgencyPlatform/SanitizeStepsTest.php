@@ -83,6 +83,25 @@ final class SanitizeStepsTest extends TestCase {
 		self::assertSame( 'comment_7@example.invalid', SanitizeSteps::sanitized_comment_email( 7 ) );
 	}
 
+	public function test_sanitized_display_name_is_deterministic(): void {
+		self::assertSame( 'Sanitized User 42', SanitizeSteps::sanitized_display_name( 42 ) );
+	}
+
+	public function test_sanitized_user_nicename_is_a_unique_per_id_slug(): void {
+		self::assertSame( 'sanitized-user-42', SanitizeSteps::sanitized_user_nicename( 42 ) );
+
+		// nicename is the public author slug, which WordPress expects distinct
+		// per user — different IDs must never collapse to the same slug.
+		self::assertNotSame(
+			SanitizeSteps::sanitized_user_nicename( 42 ),
+			SanitizeSteps::sanitized_user_nicename( 43 )
+		);
+	}
+
+	public function test_sanitized_comment_author_is_deterministic(): void {
+		self::assertSame( 'Sanitized Commenter 7', SanitizeSteps::sanitized_comment_author( 7 ) );
+	}
+
 	public function test_user_query_args_excludes_administrators_by_default(): void {
 		self::assertSame(
 			array(

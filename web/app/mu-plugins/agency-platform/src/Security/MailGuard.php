@@ -14,9 +14,14 @@ use AgencyPlatform\Logging\Logger;
  * wp_mail() — a password reset, a form notification, a WooCommerce order
  * email — would otherwise reach real inboxes.
  *
- * Hooks `pre_wp_mail` (WP 5.7+): that filter is consulted before WordPress
- * hands anything to PHPMailer, and returning a NON-NULL value short-circuits
- * sending. This guard returns `false` (not `null`) when suppressing —
+ * Hooks `pre_wp_mail` (WP 5.7+) at `PHP_INT_MAX` so it runs LAST: whatever a
+ * plugin or theme filter decided at an earlier priority, this guard gets the
+ * final say and no later filter can flip its verdict back to "deliver". That
+ * fail-closed ordering is the whole point — a stray or hostile `pre_wp_mail`
+ * filter returning `null` (to re-enable delivery) cannot outrank the guard.
+ * The filter is consulted before WordPress hands anything to PHPMailer, and
+ * returning a NON-NULL value short-circuits sending. This guard returns
+ * `false` (not `null`) when suppressing —
  * matching WordPress's own contract: a `false` return makes wp_mail() return
  * false to its caller without sending, i.e. the mail is reported as a failed
  * send rather than a silent success. Returning `null` would instead let the
@@ -37,7 +42,9 @@ use AgencyPlatform\Logging\Logger;
 final class MailGuard {
 
 	public function register(): void {
-		add_filter( 'pre_wp_mail', array( $this, 'maybe_suppress' ), 10, 2 );
+		// PHP_INT_MAX: run last so this guard's suppression verdict is final and
+		// no later-registered filter can re-enable delivery. See the class docblock.
+		add_filter( 'pre_wp_mail', array( $this, 'maybe_suppress' ), PHP_INT_MAX, 2 );
 	}
 
 	/**

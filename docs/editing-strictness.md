@@ -3,7 +3,8 @@
 How locked-down customer editing is, and how to tighten it per project. The
 starter ships a deliberately *loose* default; the dials below let a project
 tighten it. All of them are per-project decisions — none is active out of
-the box.
+the box. Which dial a project picks is a launch gate: choose and record it
+before go-live (see `ops/launch-checklist.md`).
 
 ## The default editing model
 
