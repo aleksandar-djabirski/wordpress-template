@@ -11,10 +11,11 @@ import { adminUrl, expectNoAdminMenu } from '../../e2e/helpers/wp';
  * `isMobileProject()` skip the journey suite uses.
  *
  * Scope is intentionally lean: full fulfillment/refund flows are deferred to
- * the first real store project. This proves the reduced `client_shop_manager`
+ * the first real store project. This proves the restricted `client_shop_manager`
  * role (created by scripts/enable-commerce; capabilities pinned by
  * tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest) can do
- * its day-to-day admin work AND that the agency lockdown still holds around it.
+ * its day-to-day catalogue/order/coupon work AND that the agency lockdown still
+ * holds around it.
  *
  * Every selector below was verified against a live `scripts/enable-commerce`
  * store (WooCommerce 10.9, HPOS active, products in the CLASSIC editor), not
@@ -71,8 +72,8 @@ async function placeGuestCodOrder( page: Page ): Promise<string> {
 
 /**
  * The numeric product id parsed from a products-list row's `<tr id="post-{id}">`.
- * Needed because — see the products test — the reduced role renders the product
- * row title WITHOUT an edit-link href, so the id can't be read off the anchor.
+ * Read off the row id rather than the title anchor's href so it does not depend
+ * on how WordPress renders the edit link.
  */
 async function productIdFromRow( page: Page, title: string ): Promise<string> {
 	const trId = await page
@@ -94,30 +95,27 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		test.setTimeout( 90_000 );
 	} );
 
-	test( 'products list shows the fixtures; editing a PUBLISHED product is refused for the reduced role', async ( { page } ) => {
+	test( 'products list shows the fixtures and a published product opens for editing', async ( { page } ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		await page.goto( adminUrl( 'edit.php?post_type=product' ) );
 		await expect( page.locator( 'a.row-title', { hasText: 'Test Simple Product' } ) ).toBeVisible();
 		await expect( page.locator( 'a.row-title', { hasText: 'Test Variable Product' } ) ).toBeVisible();
 
-		// DOCUMENTED CONTRACT: client_shop_manager is a REDUCED shop role
-		// (client_editor + exactly nine WooCommerce caps — see
-		// ShopManagerCapabilitiesTest). It deliberately OMITS
-		// `edit_published_products`, so it can browse the catalogue but cannot
-		// open a published product's editor: WordPress renders the row title
-		// with an empty href and refuses a direct edit with a 403. Asserting
-		// that boundary here makes the contract break loudly if the role's
-		// product-editing scope ever changes (see docs/editing-strictness.md →
-		// "Commerce role dial"). Products themselves use the CLASSIC editor in
-		// this WooCommerce build (verified as admin: input#title carries the
-		// fixture name) — the block product editor is not in play.
+		// Workflow proof: client_shop_manager is workflow-complete for the
+		// catalogue — ShopRole grants `edit_published_products` +
+		// `edit_others_products` (see ShopManagerCapabilitiesTest), so an
+		// admin-authored, PUBLISHED fixture product opens in its editor rather
+		// than 403-ing. Products use the CLASSIC editor in this WooCommerce
+		// build, so the title field is input#title and must carry the fixture
+		// name (that field being editable is the day-to-day price/stock edit the
+		// project editing model promises a shop manager).
 		const simpleId = await productIdFromRow( page, 'Test Simple Product' );
 		expect( simpleId ).toMatch( /\d+/ );
 
 		const response = await page.goto( adminUrl( `post.php?post=${ simpleId }&action=edit` ) );
-		expect( response?.status() ).toBe( 403 );
-		await expect( page.getByText( /not allowed to edit this item/i ) ).toBeVisible();
+		expect( response?.status() ).toBe( 200 );
+		await expect( page.locator( 'input#title' ) ).toHaveValue( 'Test Simple Product' );
 	} );
 
 	test( 'orders screen loads and a private order note round-trips', async ( { page } ) => {

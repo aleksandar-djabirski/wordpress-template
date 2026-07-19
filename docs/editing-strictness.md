@@ -109,8 +109,10 @@ baseline.
 Only relevant with the commerce profile active.
 `client_shop_manager` — registered by
 `web/app/mu-plugins/agency-platform/src/Roles/ShopRole.php` only when
-WooCommerce is present — is `client_editor` plus exactly nine WooCommerce
-capabilities. One of them is `manage_woocommerce`, which (matching core's own
+WooCommerce is present — is `client_editor` plus a workflow-complete set of
+WooCommerce catalogue/order/coupon capabilities (the full product lifecycle
+including editing/deleting published products, product-term assignment, orders,
+and coupons). One of them is `manage_woocommerce`, which (matching core's own
 `shop_manager`) grants access to **WooCommerce → Settings** and **Status**; a
 shop manager reaching Settings is pinned live by
 `tests/commerce/e2e/shop-manager-admin.spec.ts`. To lock Settings down for a
@@ -123,9 +125,11 @@ WooCommerce **Settings**, **Status**, and **Status → Tools** screens (all
 top-level menu, so insights stay available; and product, order, and coupon
 management ride on their own caps (`edit_products`, `edit_shop_orders`,
 `edit_shop_coupons`), so day-to-day catalogue and order work is unaffected.
-Note the reduced role already omits `edit_published_products`, so it can browse
-but not edit an existing published product — tightening it further is the same
-kind of per-project decision. Record the choice on the launch checklist
+Going the other way, a project that wants a *tighter* catalogue can trim the
+destructive/taxonomy caps (`delete_products`, `delete_published_products`,
+`manage_product_terms`, `edit_product_terms`) from the same list — leaving a
+shop manager who edits products and prices but cannot delete catalogue entries
+or restructure categories. Record the choice on the launch checklist
 (`ops/launch-checklist.md`).
 
 ## Why the default is looser

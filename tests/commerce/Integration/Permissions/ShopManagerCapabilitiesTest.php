@@ -6,9 +6,9 @@
  *
  * The base ClientEditorCapabilitiesTest already proves this role is ABSENT in
  * the base profile (ShopRole's class_exists('WooCommerce') guard). This is its
- * commerce-profile mirror: the role exists, carries the nine shop caps on top
- * of client_editor's, and still cannot install plugins, switch themes, or edit
- * theme options.
+ * commerce-profile mirror: the role exists, carries the full workflow-complete
+ * shop cap set on top of client_editor's, and still cannot install plugins,
+ * switch themes, or edit theme options.
  *
  * @package Tests\Commerce\Integration
  */
@@ -26,8 +26,11 @@ use Tests\Integration\IntegrationTestCase;
 final class ShopManagerCapabilitiesTest extends IntegrationTestCase {
 
 	/**
-	 * The nine WooCommerce capabilities ShopRole grants on top of the
-	 * client_editor baseline (kept in sync with ShopRole::WOOCOMMERCE_CAPABILITIES).
+	 * The workflow-complete WooCommerce capability set ShopRole grants on top of
+	 * the client_editor baseline (kept in sync with
+	 * ShopRole::WOOCOMMERCE_CAPABILITIES): store admin + reporting, the full
+	 * product lifecycle (incl. published/private edit + delete), product-term
+	 * assignment, orders, and coupons (incl. published-coupon edit).
 	 *
 	 * @return list<string>
 	 */
@@ -37,11 +40,20 @@ final class ShopManagerCapabilitiesTest extends IntegrationTestCase {
 			'view_woocommerce_reports',
 			'edit_products',
 			'edit_others_products',
+			'edit_published_products',
+			'edit_private_products',
+			'read_private_products',
 			'publish_products',
+			'delete_products',
+			'delete_published_products',
+			'manage_product_terms',
+			'edit_product_terms',
+			'assign_product_terms',
 			'edit_shop_orders',
 			'edit_others_shop_orders',
 			'edit_shop_coupons',
 			'edit_others_shop_coupons',
+			'edit_published_shop_coupons',
 		);
 	}
 

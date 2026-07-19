@@ -18,7 +18,8 @@ PHPUnit suite lives in its own `commerce-integration` testsuite that base
     booted branch with WooCommerce active (ExampleProductRules + the commerce
     sanitize step wired, no missing-WooCommerce admin notice).
   - `Integration/Permissions/ShopManagerCapabilitiesTest.php` — the
-    `client_shop_manager` role exists with its nine WooCommerce capabilities and
+    `client_shop_manager` role exists with its full workflow-complete WooCommerce
+    capability set (catalogue lifecycle, product terms, orders, coupons) and
     still cannot install plugins, switch themes, or edit theme options.
   - `Integration/Health/CommerceSanitizeStepTest.php` — the first **runtime**
     exercise of `SiteCommerce\Health\CommerceSanitizeStep`: it seeds an order
@@ -32,8 +33,9 @@ PHPUnit suite lives in its own `commerce-integration` testsuite that base
   project runs the full set.
 - **`e2e/shop-manager-admin.spec.ts`** — a lean, desktop-only `COMMERCE=1`
   wp-admin smoke for the `shop-manager` user: the products list shows the
-  fixtures (and editing a published product is refused for the reduced role),
-  the HPOS orders screen loads and a private order note round-trips (against an
+  fixtures and a published product opens for editing (the workflow-complete
+  catalogue role), the HPOS orders screen loads and a private order note
+  round-trips (against an
   order the spec places itself), the coupons screen lists `TESTCOUPON`, the
   agency lockdown still hides Plugins/Appearance, and WooCommerce Settings stays
   reachable (the documented `manage_woocommerce` dial). Full fulfillment/refund
