@@ -37,6 +37,15 @@ parameters:
         - tests/Integration/*
         - tests/wp-tests-config.php
 
+        # The `commerce-integration` suite (tests/commerce/Integration/*) is the
+        # WooCommerce counterpart of the base integration suite excluded above,
+        # and extends the same runtime-only symbols (WP_UnitTestCase, its
+        # factories, tests_add_filter(), plus WooCommerce install/order APIs that
+        # only exist once WooCommerce is actually installed). It is verified by
+        # running it for real inside DDEV/CI (`composer test:integration:commerce`
+        # after `scripts/enable-commerce`), for the same reason spelled out above.
+        - tests/commerce/Integration/*
+
     # szepeviktor/phpstan-wordpress's extension.neon already bootstraps
     # WordPress core stubs/constants via its own `bootstrapFiles` (NEON
     # merges this list across included configs rather than replacing it, so

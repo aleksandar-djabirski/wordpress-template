@@ -12,6 +12,7 @@
     "lint:js": "wp-scripts lint-js web/app/themes/site-theme/blocks web/app/themes/site-theme/parts",
     "lint:css": "stylelint \"web/app/themes/site-theme/**/*.css\" --ignore-pattern \"web/app/themes/site-theme/**/build/**\"",
     "test:e2e": "playwright test tests/e2e",
+    "test:e2e:commerce": "playwright test tests/commerce/e2e",
     "test:visual": "playwright test tests/visual",
     "test:accessibility": "playwright test tests/accessibility"
   },

@@ -6,13 +6,24 @@ real commerce behavior once you've enabled it.
 
 ## 1. Enable WooCommerce
 
-Install WooCommerce through Composer — it is the required path for any real
-project. A Composer-managed plugin is visible to Git, `composer audit`,
-Dependabot, and reproducible deploys/rollback; a manual `wp plugin install`
-(or a wp-admin upload) is invisible to every one of those.
+The fastest path — locally or in CI — is the one script:
 
-First add the wpackagist.org repository to `composer.json` (once per
-project — this repo ships no `repositories` key yet):
+```sh
+bash scripts/enable-commerce
+```
+
+It installs WooCommerce via Composer, activates it alongside site-commerce,
+configures a deterministic store (HPOS on, classic cart/checkout, COD, free
+shipping, guest checkout, store taken out of "coming soon"), and creates the
+fixtures the commerce test suites assert against. It is idempotent and, like
+`scripts/setup`, is written to be read top to bottom.
+
+Under the hood it does what a real project does by hand. WooCommerce is
+installed through Composer — the required path for any real project: a
+Composer-managed plugin is visible to Git, `composer audit`, Dependabot, and
+reproducible deploys/rollback; a manual `wp plugin install` (or a wp-admin
+upload) is invisible to every one of those. The `wpackagist.org` repository the
+plugin resolves from is already declared in this repo's `composer.json`:
 
 ```json
 {
@@ -26,12 +37,22 @@ project — this repo ships no `repositories` key yet):
 }
 ```
 
-Then require and activate it:
+so all that's left is the require + activate:
 
 ```sh
 ddev composer require wpackagist-plugin/woocommerce
-ddev wp plugin activate site-commerce
+ddev wp plugin activate woocommerce site-commerce
 ```
+
+**Ephemeral vs committed.** `composer require` edits `composer.json` and
+`composer.lock`. For a **real commerce client** you **commit** that change —
+WooCommerce becomes a tracked, audited, reproducible dependency of that client's
+copy. For the **template itself** it stays **ephemeral**: CI's `commerce-e2e`
+job runs `scripts/enable-commerce`, proves the commerce profile, and throws the
+require away — the template must never carry a committed WooCommerce dependency
+(the base CI jobs and `WooCommerceIsolationTest` prove the base profile runs
+with no WooCommerce at all). The repository entry above is the only committed
+piece, and it is inert without a require.
 
 `ddev wp plugin install woocommerce --activate` works for a quick throwaway
 local experiment, but never for a real project: a manually installed plugin
@@ -112,22 +133,36 @@ give each its own step — sanitize only knows what a step teaches it.
 
 ## 6. Tests
 
-- **PHPUnit**: `tests/commerce/` is reserved for WooCommerce-backed test
-  suites (currently empty by design — see `tests/commerce/README.md`); it
-  never runs as part of the base `composer verify`/`verify:fast` pipeline,
-  so the base site stays green without WooCommerce installed. Add a new
-  PHPUnit testsuite here when real commerce coverage lands.
-- **e2e**: `tests/commerce/e2e/commerce-journey.spec.ts` is gated on
-  `COMMERCE=1` and skips otherwise:
+`tests/commerce/` holds real WooCommerce-backed suites (see
+`tests/commerce/README.md`). None of them run in the base
+`composer verify`/`verify:fast` pipeline, so the base site stays green without
+WooCommerce installed.
+
+- **PHPUnit** (`commerce-integration` suite): proves site-commerce boots, the
+  `client_shop_manager` role, and — the first runtime test of R2's SQL —
+  `CommerceSanitizeStep` anonymizing a real HPOS order and clearing payment
+  tokens. Needs the DDEV database:
 
   ```sh
-  COMMERCE=1 npx playwright test tests/commerce/e2e
+  ddev composer test:integration:commerce
   ```
+
+- **e2e** (`COMMERCE=1`): the full storefront journey — archive → PDP (simple +
+  variable) → cart + `TESTCOUPON` → guest COD checkout → order history:
+
+  ```sh
+  COMMERCE=1 npm run test:e2e:commerce
+  ```
+
+CI runs both in a dedicated `commerce-e2e` job that installs WooCommerce
+ephemerally; the base jobs never install it.
 
 ## Verify
 
 ```sh
-ddev composer test:architecture   # WooCommerceIsolationTest, allowlist checks
+ddev composer test:architecture         # WooCommerceIsolationTest, allowlist checks
 ddev composer test:unit
-COMMERCE=1 npx playwright test tests/commerce/e2e
+bash scripts/enable-commerce            # once, to set up the store + fixtures
+ddev composer test:integration:commerce
+COMMERCE=1 npm run test:e2e:commerce
 ```

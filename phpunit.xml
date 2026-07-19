@@ -18,6 +18,17 @@
         <testsuite name="integration">
             <directory>tests/Integration</directory>
         </testsuite>
+        <!--
+            Commerce profile only. Never part of `verify`/`verify:fast` — it
+            needs WooCommerce installed (via scripts/enable-commerce) and is
+            run explicitly by the `test:integration:commerce` Composer script
+            (which sets WP_COMMERCE_INTEGRATION=1 so tests/bootstrap.php loads
+            tests/commerce/Integration/bootstrap.php). The base profile must
+            stay green with no WooCommerce, so this suite is opt-in only.
+        -->
+        <testsuite name="commerce-integration">
+            <directory>tests/commerce/Integration</directory>
+        </testsuite>
     </testsuites>
     <php>
         <!--

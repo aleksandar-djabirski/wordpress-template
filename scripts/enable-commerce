@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+#
+# Turns the optional COMMERCE PROFILE on for a local/CI environment: installs
+# WooCommerce, activates it alongside site-commerce, configures a minimal
+# deterministic store, and creates the fixtures the commerce test suites
+# (tests/commerce/) assert against.
+#
+# DOCUMENTATION-GRADE: this script is meant to be read top to bottom. It is
+# the canonical description of how the commerce profile is switched on, so
+# agents and humans can learn the sequence even without running it. Every
+# step echoes what it is doing and is idempotent — re-running only fills in
+# what is missing.
+#
+# Run it INSIDE the DDEV web container (`ddev ssh` then `bash
+# scripts/enable-commerce`) or on any host that has composer + wp (WP-CLI) on
+# PATH. When only `ddev` is present on the host, composer/wp calls are
+# transparently routed through it (same resolution as scripts/setup).
+#
+# EPHEMERAL vs COMMITTED — the one thing to understand before running:
+#   `composer require wpackagist-plugin/woocommerce` (step 1) edits
+#   composer.json AND composer.lock on disk. For a REAL commerce client that
+#   change is COMMITTED — WooCommerce becomes a tracked, audited, reproducible
+#   dependency of that client's copy. For the TEMPLATE itself it stays
+#   EPHEMERAL: CI runs this script, exercises the commerce suites, and throws
+#   the checkout away — the template must never carry a committed WooCommerce
+#   require (WooCommerceIsolationTest + the base CI jobs prove the base profile
+#   still runs with no WooCommerce at all). The wpackagist.org repository entry
+#   in composer.json is the ONLY committed piece; it is inert without a require.
+#
+# WARNING: the users it creates use throwaway LOCAL-ONLY credentials
+# (shop-manager / shop-manager, test-customer / test-customer), same rationale
+# as the admin/admin credential scripts/setup creates. Never run this against a
+# shared or production environment.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
+# --- Tooling resolution ------------------------------------------------------
+# Prefer native binaries; fall back to running them through ddev (mirrors
+# scripts/setup so this script behaves the same inside and outside the
+# container, and on a CI host where only `ddev` is on PATH).
+if command -v composer >/dev/null 2>&1; then
+  COMPOSER=(composer)
+elif command -v ddev >/dev/null 2>&1; then
+  COMPOSER=(ddev composer)
+else
+  echo "error: need 'composer' or 'ddev' on PATH." >&2
+  exit 1
+fi
+
+if command -v wp >/dev/null 2>&1; then
+  WP=(wp)
+elif command -v ddev >/dev/null 2>&1; then
+  WP=(ddev wp)
+else
+  echo "error: need 'wp' (WP-CLI) or 'ddev' on PATH." >&2
+  exit 1
+fi
+
+# --- 1. WooCommerce as a Composer dependency ---------------------------------
+# Composer is the required install path (a manual `wp plugin install` is
+# invisible to Git, `composer audit`, Dependabot, and reproducible deploys) —
+# see docs/adding-commerce-behaviour.md. The wpackagist.org repository this
+# resolves from is already declared in composer.json; only the `require` is
+# added here. EPHEMERAL for the template, COMMITTED for a real client (see the
+# header). Skipped when WooCommerce is already required, so re-runs are no-ops.
+echo "==> [1/10] Requiring WooCommerce via Composer (LOCAL edit to composer.json/lock)"
+if "${COMPOSER[@]}" show wpackagist-plugin/woocommerce >/dev/null 2>&1; then
+  echo "    wpackagist-plugin/woocommerce already installed — skipping require."
+else
+  "${COMPOSER[@]}" require wpackagist-plugin/woocommerce --no-interaction
+fi
+
+# --- 2. Activate WooCommerce + site-commerce ---------------------------------
+# Activating WooCommerce makes SiteCommerce\Plugin::maybe_boot() take its
+# booted branch (class_exists('WooCommerce') is now true), wiring
+# ExampleProductRules and CommerceSanitizeStep. `wp plugin activate` is
+# idempotent.
+echo "==> [2/10] Activating woocommerce + site-commerce"
+"${WP[@]}" plugin activate woocommerce site-commerce
+
+# --- 3. High-Performance Order Storage (HPOS) --------------------------------
+# Enable HPOS so orders live in the wc_orders / wc_order_addresses tables — the
+# storage backend CommerceSanitizeStep's HPOS branch scrubs and the commerce
+# integration suite exercises. `wp wc hpos enable` is the current command
+# (`wp wc cot enable` is deprecated since WooCommerce 8.9) and is idempotent:
+# it warns (exit 0) when HPOS is already on. Safe on a fresh store because no
+# orders exist yet, so there is nothing to migrate.
+echo "==> [3/10] Enabling High-Performance Order Storage (HPOS)"
+"${WP[@]}" wc hpos enable
+
+# --- 4. Shop / cart / checkout / my-account pages ----------------------------
+# WooCommerce creates these on activation; running the install_pages tool again
+# re-creates any that are missing and is idempotent otherwise.
+#
+# CLASSIC cart/checkout: WooCommerce 8+ ships the block-based Cart/Checkout
+# pages by default, whose form fields hydrate client-side (they are absent from
+# the server-rendered HTML). The commerce e2e journey drives stable,
+# server-rendered selectors, so the cart/checkout pages are switched to the
+# classic shortcodes ([woocommerce_cart] / [woocommerce_checkout]) — a
+# fully-supported WooCommerce configuration that makes the automated checkout
+# deterministic. Idempotent: skipped once the page already holds the shortcode.
+echo "==> [4/10] Ensuring shop/cart/checkout/my-account pages exist (classic cart/checkout)"
+"${WP[@]}" wc tool run install_pages --user=admin >/dev/null
+for page in cart checkout; do
+  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r')"
+  if [ -n "${page_id}" ] \
+      && ! "${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | grep -q "\[woocommerce_${page}\]"; then
+    "${WP[@]}" post update "${page_id}" --post_content="[woocommerce_${page}]" >/dev/null
+    echo "    set ${page} page (#${page_id}) to the classic [woocommerce_${page}] shortcode."
+  else
+    echo "    ${page} page already uses the classic shortcode — skipping."
+  fi
+done
+
+# --- 5. Store basics ---------------------------------------------------------
+# Currency is deliberately left at WooCommerce's USD default — the fixtures and
+# the e2e assertions below are written in dollars, so keeping USD keeps them
+# deterministic across environments. A base country/address is set so shipping
+# and tax have a well-defined origin, and guest checkout is enabled so the e2e
+# journey can place an order without an account.
+#
+# "Coming soon" mode: WooCommerce 8.6+ defaults a fresh install to
+# woocommerce_coming_soon=yes / woocommerce_store_pages_only=yes, which hides the
+# shop/product/cart/checkout pages behind a coming-soon screen until a store
+# owner launches. That screen would make every storefront e2e journey fail, so
+# the store is explicitly taken live here.
+echo "==> [5/10] Configuring store basics (live store, country/address, guest checkout; currency stays USD)"
+"${WP[@]}" option update woocommerce_coming_soon "no" >/dev/null
+"${WP[@]}" option update woocommerce_store_pages_only "no" >/dev/null
+"${WP[@]}" option update woocommerce_default_country "US:CA" >/dev/null
+"${WP[@]}" option update woocommerce_store_address "123 Test Street" >/dev/null
+"${WP[@]}" option update woocommerce_store_city "Los Angeles" >/dev/null
+"${WP[@]}" option update woocommerce_store_postcode "90001" >/dev/null
+"${WP[@]}" option update woocommerce_enable_guest_checkout "yes" >/dev/null
+echo "    store live (coming-soon off), base country US:CA, guest checkout enabled, currency left at USD default."
+
+# --- 6. Cash on Delivery payment gateway -------------------------------------
+# COD needs no external gateway credentials, so it is the deterministic choice
+# for an automated checkout. WooCommerce reads this gateway's config from the
+# woocommerce_cod_settings option; setting the whole array (WC merges any
+# missing keys with the gateway's field defaults) enables it. Idempotent —
+# re-running reports the value as unchanged.
+echo "==> [6/10] Enabling the Cash on Delivery (COD) payment gateway"
+"${WP[@]}" option update woocommerce_cod_settings --format=json \
+  '{"enabled":"yes","title":"Cash on delivery"}' >/dev/null
+echo "    COD enabled."
+
+# --- 7. Shipping -------------------------------------------------------------
+# A checkout with a physical product needs a resolvable shipping method or
+# WooCommerce blocks the order. Add a single Free Shipping method to the
+# built-in "Locations not covered by your other zones" zone (id 0) so shipping
+# always resolves for any address, keeping the e2e checkout deterministic.
+echo "==> [7/10] Ensuring a Free Shipping method on the default zone"
+if "${WP[@]}" wc shipping_zone_method list 0 --user=admin --field=method_id 2>/dev/null \
+    | grep -q 'free_shipping'; then
+  echo "    a shipping method already exists on the default zone — skipping."
+else
+  "${WP[@]}" wc shipping_zone_method create 0 --method_id=free_shipping --user=admin >/dev/null
+  echo "    added Free Shipping to the default zone."
+fi
+
+# --- 8. Fixture products + coupon --------------------------------------------
+# The commerce test suites (tests/commerce/) assert against these exact
+# fixtures. Each is created only when absent (looked up by slug), so re-running
+# never duplicates them. `wp wc` product/coupon commands go through the REST
+# controller, so they need --user=admin.
+echo "==> [8/10] Creating fixture products and coupon (idempotent)"
+
+if [ -z "$("${WP[@]}" post list --post_type=product --name=test-simple-product --field=ID 2>/dev/null | tr -d '\r')" ]; then
+  "${WP[@]}" wc product create --name="Test Simple Product" --type=simple \
+    --regular_price=19.99 --user=admin --porcelain >/dev/null
+  echo "    created simple product 'Test Simple Product' (\$19.99, in stock)."
+else
+  echo "    'Test Simple Product' already exists — skipping."
+fi
+
+if [ -z "$("${WP[@]}" post list --post_type=product --name=test-variable-product --field=ID 2>/dev/null | tr -d '\r')" ]; then
+  variable_id="$("${WP[@]}" wc product create --name="Test Variable Product" --type=variable \
+    --attributes='[{"name":"Size","visible":true,"variation":true,"options":["S","M"]}]' \
+    --user=admin --porcelain 2>/dev/null | tr -d '\r')"
+  "${WP[@]}" wc product_variation create "${variable_id}" --regular_price=24.99 \
+    --attributes='[{"name":"Size","option":"S"}]' --user=admin --porcelain >/dev/null
+  "${WP[@]}" wc product_variation create "${variable_id}" --regular_price=29.99 \
+    --attributes='[{"name":"Size","option":"M"}]' --user=admin --porcelain >/dev/null
+  echo "    created variable product 'Test Variable Product' (Size S \$24.99 / M \$29.99)."
+else
+  echo "    'Test Variable Product' already exists — skipping."
+fi
+
+if [ -z "$("${WP[@]}" post list --post_type=shop_coupon --name=testcoupon --field=ID 2>/dev/null | tr -d '\r')" ]; then
+  "${WP[@]}" wc shop_coupon create --code=TESTCOUPON --discount_type=percent \
+    --amount=10 --user=admin --porcelain >/dev/null
+  echo "    created coupon 'TESTCOUPON' (10% off)."
+else
+  echo "    coupon 'TESTCOUPON' already exists — skipping."
+fi
+
+# --- 9. Commerce test users --------------------------------------------------
+# WARNING: throwaway LOCAL-ONLY credentials (same rationale as scripts/setup's
+# admin/admin and client-editor/client-editor). `client_shop_manager` is the
+# starter's restricted shop role (AgencyPlatform\Roles\ShopRole, registered
+# only when WooCommerce is active); the `customer` role is WooCommerce's own,
+# used by the e2e account-history journey to place an order tied to an account.
+echo "==> [9/10] Ensuring commerce test users exist (LOCAL-ONLY credentials)"
+if "${WP[@]}" user get shop-manager >/dev/null 2>&1; then
+  echo "    user 'shop-manager' already exists — skipping."
+else
+  "${WP[@]}" user create shop-manager shop-manager@example.invalid \
+    --role=client_shop_manager --display_name="Shop Manager" \
+    --user_pass=shop-manager --porcelain >/dev/null
+  echo "    created 'shop-manager' (role: client_shop_manager, LOCAL-ONLY password: shop-manager)."
+fi
+
+if "${WP[@]}" user get test-customer >/dev/null 2>&1; then
+  echo "    user 'test-customer' already exists — skipping."
+else
+  "${WP[@]}" user create test-customer test-customer@example.invalid \
+    --role=customer --display_name="Test Customer" \
+    --user_pass=test-customer --porcelain >/dev/null
+  echo "    created 'test-customer' (role: customer, LOCAL-ONLY password: test-customer)."
+fi
+
+# --- 10. Permalinks ----------------------------------------------------------
+# WooCommerce product/shop URLs (/product/..., /shop/) need a non-default
+# permalink structure; flush after registering WooCommerce's rewrite rules so
+# the storefront the e2e specs navigate resolves. Mirrors scripts/setup and the
+# e2e CI job's permalink step.
+echo "==> [10/10] Setting pretty permalinks and flushing rewrite rules"
+"${WP[@]}" rewrite structure '/%postname%/' --hard >/dev/null
+"${WP[@]}" rewrite flush --hard >/dev/null
+echo "    permalinks set to /%postname%/ and rules flushed."
+
+echo
+echo "==> Commerce profile enabled."
+echo "    Shop manager login (LOCAL ONLY): shop-manager / shop-manager"
+echo "    Test customer login (LOCAL ONLY): test-customer / test-customer"
+echo "    Run the commerce suites:"
+echo "      ddev composer test:integration:commerce"
+echo "      COMMERCE=1 npx playwright test tests/commerce/e2e"

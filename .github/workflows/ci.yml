@@ -159,12 +159,9 @@ jobs:
   #    Runs after php-qa/frontend so a cheap static-analysis failure doesn't
   #    burn the cost of booting a full WordPress stack.
   #
-  #    Deliberately NOT included in this workflow: a `commerce-e2e` job.
-  #    The base starter ships without WooCommerce (tests/commerce is fixme
-  #    stubs gated on COMMERCE=1 — see tests/commerce/README.md); a
-  #    commerce-enabled downstream project adds its own commerce-e2e job
-  #    when it turns the commerce profile on, rather than this starter
-  #    paying for a WooCommerce install it doesn't ship.
+  #    The commerce profile has its own separate `commerce-e2e` job below;
+  #    this base e2e job never installs WooCommerce, proving the base
+  #    storefront runs (and is tested) without it.
   e2e:
     name: End-to-end (DDEV + Playwright)
     runs-on: ubuntu-latest
@@ -321,5 +318,95 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # 5. Commerce profile: the proof the OPTIONAL WooCommerce layer works, kept
+  #    entirely separate from the base jobs above so the base profile is always
+  #    exercised with no WooCommerce installed. This job boots a base DDEV
+  #    install, runs `scripts/enable-commerce` (which `composer require`s
+  #    WooCommerce — ephemeral to this runner, never committed), then runs the
+  #    commerce PHPUnit suite and the COMMERCE=1 Playwright journeys. Runs after
+  #    php-qa/frontend for the same cost reason as the base e2e job.
+  commerce-e2e:
+    name: 'Commerce (DDEV + WooCommerce: integration + Playwright)'
+    runs-on: ubuntu-latest
+    needs: [php-qa, frontend]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up DDEV
+        uses: ddev/github-action-setup-ddev@v1
+
+      - name: Start DDEV
+        run: ddev start
+
+      - name: Create .env for CI
+        # Mirrors the base e2e job — the DDEV service defaults already match.
+        run: |
+          cp .env.example .env
+          sed -i 's/^WP_ENV=.*/WP_ENV=development/' .env
+          sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
+
+      - name: Install PHP dependencies (inside DDEV)
+        run: ddev composer install --no-interaction --prefer-dist
+
+      - name: Install WordPress core
+        # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
+        run: |
+          ddev wp core install \
+            --url=https://agency-starter.ddev.site \
+            --title="Agency Starter Commerce CI" \
+            --admin_user=admin \
+            --admin_password=admin \
+            --admin_email=admin@example.invalid \
+            --skip-email
+
+      - name: Activate theme and base-profile plugins
+        run: |
+          ddev wp theme activate site-theme
+          ddev wp plugin activate site-core site-integrations
+
+      - name: Ensure WordPress core uploads directory exists
+        # The commerce integration suite (wp-phpunit) scans WP core's default
+        # uploads dir (ABSPATH/wp-content/uploads) in WP_UnitTestCase teardown.
+        # Bedrock installs core without a wp-content/, so create it up front —
+        # the checkout is owned by the runner, so this host mkdir is writable in
+        # the DDEV container via the bind mount.
+        run: mkdir -p web/wp/wp-content/uploads
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Enable the commerce profile
+        # Installs WooCommerce (ephemeral `composer require` on this runner only),
+        # activates site-commerce, configures a deterministic store, and creates
+        # the fixtures the commerce suites assert against.
+        run: bash scripts/enable-commerce
+
+      - name: Commerce integration suite (PHPUnit + WooCommerce + HPOS)
+        run: ddev composer test:integration:commerce
+
+      - name: Commerce e2e journeys (Playwright, COMMERCE=1)
+        env:
+          COMMERCE: '1'
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:e2e:commerce
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-commerce
           path: playwright-report/
           retention-days: 7

@@ -10,6 +10,16 @@
         "roots",
         "wordpress"
     ],
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://wpackagist.org",
+            "only": [
+                "wpackagist-plugin/*",
+                "wpackagist-theme/*"
+            ]
+        }
+    ],
     "require": {
         "php": ">=8.3",
         "composer/installers": "^2.0",
@@ -91,6 +101,10 @@
         "test:integration": [
             "@putenv WP_INTEGRATION=1",
             "phpunit --testsuite integration"
+        ],
+        "test:integration:commerce": [
+            "@putenv WP_COMMERCE_INTEGRATION=1",
+            "phpunit --testsuite commerce-integration"
         ],
         "verify:fast": [
             "composer validate --strict",

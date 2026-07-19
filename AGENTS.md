@@ -60,9 +60,10 @@ When changing npm dependencies, regenerate the lock with `npx -y npm@10 install`
 - `npm run build` / `npm run start` — production/watch block build (wp-scripts).
 - `npm run lint` (`lint:js` + `lint:css`) — ESLint + Stylelint.
 - `npm run test:e2e` / `test:visual` / `test:accessibility` — Playwright; needs a running site (`WP_BASE_URL`, defaults to the DDEV URL).
+- Commerce profile (optional; WooCommerce stays OUT of the base template): `bash scripts/enable-commerce` installs WooCommerce (ephemeral `composer require` — commit it only for a real commerce client), configures a deterministic store + fixtures. Then `ddev composer test:integration:commerce` (WooCommerce-backed PHPUnit, incl. the HPOS sanitize step) and `COMMERCE=1 npm run test:e2e:commerce` (storefront journeys). Neither runs in base `verify`/`test:integration`; CI's `commerce-e2e` job runs both.
 - `scripts/setup` — full bootstrap from a fresh clone (composer install, `.env` + salts, WP core install, theme/plugin activation, `npm ci && npm run build`, client-editor test user). Run inside DDEV.
 - `scripts/verify` — mirrors CI: `composer verify`, `npm run lint`, `npm run build`.
-- `scripts/generate-block-index`, `scripts/check-database-overrides`, `scripts/sanitize-database`, `scripts/verify-environment`, `scripts/rename-project` — the middle three are thin wrappers around `wp agency check-overrides|sanitize|verify-env`.
+- `scripts/generate-block-index`, `scripts/check-database-overrides`, `scripts/sanitize-database`, `scripts/verify-environment`, `scripts/rename-project`, `scripts/enable-commerce` — the sanitize/check/verify-env three are thin wrappers around `wp agency check-overrides|sanitize|verify-env`.
 
 ## Environment safety
 

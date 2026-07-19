@@ -6,6 +6,7 @@ namespace SiteCommerce;
 
 use SiteCommerce\Health\CommerceSanitizeStep;
 use SiteCommerce\Products\ExampleProductRules;
+use SiteCommerce\Theme\ThemeSupport;
 
 /**
  * Site Commerce's activation guard and bootstrapper.
@@ -46,6 +47,7 @@ final class Plugin {
 	 */
 	private static function boot(): void {
 		$providers = array(
+			new ThemeSupport(),
 			new ExampleProductRules(),
 			new CommerceSanitizeStep(),
 		);

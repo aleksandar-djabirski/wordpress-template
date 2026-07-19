@@ -63,10 +63,8 @@ Visit `https://agency-starter.ddev.site`.
 The starter ships with a **base profile** (no WooCommerce) and an optional **commerce profile**.
 
 - **Base**: `site-core`, `site-integrations`, and `site-theme` are active. `site-commerce` is present but stays a no-op (an admin notice only) until WooCommerce is active — see `SiteCommerce\Plugin::maybe_boot()`.
-- **Commerce**: install WooCommerce, then `site-commerce` activates its providers automatically.
-  1. Add WooCommerce as a Composer dependency — the required path for a real project: `ddev composer require wpackagist-plugin/woocommerce` (after adding the `wpackagist.org` repository to `composer.json`). A manual `wp plugin install` is invisible to Git, `composer audit`, Dependabot, and reproducible deploys/rollback, so keep it to throwaway local experiments only. See `docs/adding-commerce-behaviour.md` for the exact `composer.json` snippet.
-  2. `ddev wp plugin activate site-commerce`.
-  3. Run the commerce Playwright suite with `COMMERCE=1 npx playwright test tests/commerce/e2e` (a `test.fixme` placeholder until a store project implements the journeys; skipped without `COMMERCE=1`).
+- **Commerce**: run **`bash scripts/enable-commerce`** — it installs WooCommerce via Composer, activates site-commerce, configures a deterministic store, and creates the test fixtures. `site-commerce` then boots its providers automatically. It is proven, not scaffolded: a `commerce-integration` PHPUnit suite and a `COMMERCE=1` Playwright journey suite exercise the real store (both run in CI's dedicated `commerce-e2e` job).
+  - **Ephemeral vs committed:** the script's `composer require wpackagist-plugin/woocommerce` edits `composer.json`/`composer.lock`. For a **real commerce client you commit** that change (WooCommerce becomes a tracked, audited dependency). For the **template it stays ephemeral** — CI installs it per-run and throws it away, so the base profile never carries a committed WooCommerce dependency. Only the inert `wpackagist.org` repository entry in `composer.json` is committed. See `docs/adding-commerce-behaviour.md`.
 
 ## Project layout
 
@@ -111,7 +109,8 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 | Integration (20 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
 | e2e / accessibility | no | yes | `npm run test:e2e` / `test:accessibility` against `WP_BASE_URL` |
 | Visual regression | no | yes | `npm run test:visual`; baselines are Linux-CI-authoritative — see `playwright.config.ts` |
-| Commerce e2e | no | yes (+ WooCommerce) | `COMMERCE=1 npx playwright test tests/commerce/e2e` (`test.fixme` placeholder until a store project implements the journeys) |
+| Commerce integration | yes | no (+ WooCommerce) | `bash scripts/enable-commerce` then `ddev composer test:integration:commerce` |
+| Commerce e2e | no | yes (+ WooCommerce) | `bash scripts/enable-commerce` then `COMMERCE=1 npm run test:e2e:commerce` |
 
 ## Renaming for a new project
 
@@ -126,7 +125,7 @@ It deliberately does **not** rename the `agency/` block namespace (e.g. `agency/
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push/PR: `php-qa` (`composer verify:fast`), `frontend` (lint, build, build-drift check against the committed block build output), `integration` (PHPUnit against a MariaDB service), and `e2e` (DDEV + Playwright e2e/accessibility/visual). `dependency-review.yml` gates PRs on newly-introduced vulnerable dependencies. `scheduled-maintenance.yml` runs a weekly dependency audit and generated-index freshness check. `.github/dependabot.yml` groups weekly composer/npm/actions update PRs; Dependabot *security* updates are a separate GitHub repository setting.
+`.github/workflows/ci.yml` runs on every push/PR: `php-qa` (`composer verify:fast`), `frontend` (lint, build, build-drift check against the committed block build output), `integration` (PHPUnit against a MariaDB service), `e2e` (DDEV + Playwright e2e/accessibility/visual), and `commerce-e2e` (the optional commerce profile: installs WooCommerce ephemerally, then runs the `commerce-integration` PHPUnit suite and the `COMMERCE=1` Playwright journeys — the base jobs never install WooCommerce). `dependency-review.yml` gates PRs on newly-introduced vulnerable dependencies. `scheduled-maintenance.yml` runs a weekly dependency audit and generated-index freshness check. `.github/dependabot.yml` groups weekly composer/npm/actions update PRs; Dependabot *security* updates are a separate GitHub repository setting.
 
 ## Documentation index
 
