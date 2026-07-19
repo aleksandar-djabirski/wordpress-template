@@ -22,6 +22,14 @@ Think of it like a house with finished wiring, plumbing, and alarm systems, wher
 
 **The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers edit text, images, and products and compose pages from an approved set of blocks while structure, styles, and templates stay locked (tighten that block set per project with the editing-strictness dial), every change is tested automatically, and any AI agent working on the site knows exactly where everything goes (that is what [AGENTS.md](AGENTS.md) tells it). For an agency maintaining many sites long-term, that trade is the reason this template exists.
 
+## The playbook — a project's whole life in five steps
+
+1. **New client** → click **"Use this template"** on GitHub (clean-history repo) → `php scripts/rename-project --slug=<client> --apply` → build the client's design into `site-theme` (tokens in `theme.json`, chrome in `parts/`, editable sections in `blocks/`/`patterns/`).
+2. **Store client** → additionally run `bash scripts/enable-commerce` and **commit** the WooCommerce dependency it adds.
+3. **Client needs a capability with no single industry standard** (multilingual, memberships, bookings, …) → choose the plugin for *that client*, install it via Composer in *their* repo (license keys in `.env`, never committed), following the commerce blueprint — see `docs/architecture.md#profiles`.
+4. **Before any launch** → work through [`ops/launch-checklist.md`](ops/launch-checklist.md) top to bottom; every item is mandatory.
+5. **Every Monday** → review the grouped Dependabot PRs and merge them once CI is green (`ops/update-process.md`).
+
 ## Requirements
 
 - [Docker](https://www.docker.com/) + [DDEV](https://ddev.com/) (no local PHP/Composer/MySQL needed — everything PHP-side runs inside the DDEV container)

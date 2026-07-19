@@ -2,6 +2,10 @@
 
 AI-first WordPress agency starter: Bedrock + DDEV, a hybrid block/classic theme, and layered plugins (`agency-platform`, `site-core`, `site-integrations`, `site-commerce`).
 
+## Project lifecycle
+
+New client: GitHub "Use this template" → `scripts/rename-project --apply` → design into `site-theme`. Store client: also `bash scripts/enable-commerce` + commit the WooCommerce require. Non-standard capabilities (multilingual, memberships, …): per-client plugin via Composer in the client repo (`docs/architecture.md#profiles`), never added to this template. Before launch: complete every item in `ops/launch-checklist.md`. Weekly: merge green Dependabot PRs.
+
 ## Routing table
 
 Customer-editable UI → block (`site-theme/blocks/`)
