@@ -30,6 +30,14 @@ PHPUnit suite lives in its own `commerce-integration` testsuite that base
   `TESTCOUPON` → guest COD checkout → order-received → a logged-in customer's
   order history. The mobile project runs the checkout as a smoke; the desktop
   project runs the full set.
+- **`e2e/shop-manager-admin.spec.ts`** — a lean, desktop-only `COMMERCE=1`
+  wp-admin smoke for the `shop-manager` user: the products list shows the
+  fixtures (and editing a published product is refused for the reduced role),
+  the HPOS orders screen loads and a private order note round-trips (against an
+  order the spec places itself), the coupons screen lists `TESTCOUPON`, the
+  agency lockdown still hides Plugins/Appearance, and WooCommerce Settings stays
+  reachable (the documented `manage_woocommerce` dial). Full fulfillment/refund
+  flows are deferred to the first real store project.
 
 ## How to run locally
 

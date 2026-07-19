@@ -16,7 +16,9 @@ the outcome (who, when, and the choice made) in the project's change log;
 - [ ] **Commerce clients: shop-manager scope reviewed.** `client_shop_manager`
       carries `manage_woocommerce`, which grants access to WooCommerce settings
       (core parity, not a starter decision). Confirm that scope is acceptable
-      for this client, or trim it per project. See `docs/editing-strictness.md`.
+      for this client, or trim it per project. See
+      `docs/editing-strictness.md#commerce-role-dial` for the exact cap to drop
+      and what it does (and does not) cost.
 
 ## Data safety
 

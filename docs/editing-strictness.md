@@ -104,6 +104,30 @@ a clean sweep) to `NEVER_GRANT`, and they are stripped on the next `init`
 re-sync — including from `client_shop_manager`, which builds on the same
 baseline.
 
+## Commerce role dial
+
+Only relevant with the commerce profile active.
+`client_shop_manager` — registered by
+`web/app/mu-plugins/agency-platform/src/Roles/ShopRole.php` only when
+WooCommerce is present — is `client_editor` plus exactly nine WooCommerce
+capabilities. One of them is `manage_woocommerce`, which (matching core's own
+`shop_manager`) grants access to **WooCommerce → Settings** and **Status**; a
+shop manager reaching Settings is pinned live by
+`tests/commerce/e2e/shop-manager-admin.spec.ts`. To lock Settings down for a
+project, drop `'manage_woocommerce'` from `ShopRole::WOOCOMMERCE_CAPABILITIES`
+(and update the mirror list in `ShopManagerCapabilitiesTest`, which asserts the
+exact capability set). The tradeoff is deliberately narrow: you lose the
+WooCommerce **Settings**, **Status**, and **Status → Tools** screens (all
+`manage_woocommerce`-gated) — but NOT reporting. The role also holds
+`view_woocommerce_reports`, which gates the **Analytics** dashboard on its own
+top-level menu, so insights stay available; and product, order, and coupon
+management ride on their own caps (`edit_products`, `edit_shop_orders`,
+`edit_shop_coupons`), so day-to-day catalogue and order work is unaffected.
+Note the reduced role already omits `edit_published_products`, so it can browse
+but not edit an existing published product — tightening it further is the same
+kind of per-project decision. Record the choice on the launch checklist
+(`ops/launch-checklist.md`).
+
 ## Why the default is looser
 
 One line, restated: **spec §14 defers server-side block-tree validation
