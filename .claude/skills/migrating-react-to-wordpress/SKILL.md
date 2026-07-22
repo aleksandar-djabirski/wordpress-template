@@ -182,8 +182,9 @@ config edits:
 ## 4. Block script delivery — sharing one motion module
 
 `docs/adding-a-block.md` documents `viewScript` as a `file:` reference. Two
-undocumented forms are verified working and are what let 15 blocks share one
-GSAP-backed reveal module instead of shipping a global bundle:
+undocumented forms are verified working, and are what let most blocks (14 of 17
+in the reference migration) share one GSAP-backed reveal module instead of
+shipping a global bundle:
 
 ```jsonc
 "viewScript": "cinq-reveal"                              // bare registered handle
