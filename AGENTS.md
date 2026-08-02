@@ -1,5 +1,12 @@
 # AGENTS.md
 
+## Response language
+Write all prose replies in ASD-STE100 Simplified Technical English: active
+voice, short sentences, one instruction per sentence, approved words only, no
+synonyms, no slang or idioms. This applies to prose only
+- do not change code,
+code comments, commit messages, file contents, or command output.
+
 AI-first WordPress agency starter: Bedrock + DDEV, a hybrid block/classic theme, and layered plugins (`agency-platform`, `site-core`, `site-integrations`, `site-commerce`).
 
 ## Project lifecycle
