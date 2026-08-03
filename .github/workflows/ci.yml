@@ -235,17 +235,28 @@ jobs:
             --display_name="Client Editor" \
             --user_pass=client-editor
 
-      - name: Create primary navigation menu
-        # Mirrors scripts/setup step 9. The theme header renders
-        # wp_nav_menu( theme_location => 'primary', fallback_cb => false ), so
-        # without a menu assigned to the 'primary' location the
-        # <nav id="site-header-nav"> and its mobile toggle never render, and
-        # tests/e2e/smoke.spec.ts's nav specs have nothing to assert against.
+      - name: Create the site navigation menu
+        # Mirrors scripts/setup step 9. parts/site-header.html renders a
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # most recently published non-empty wp_navigation record.
+        # Seeding one named record makes CI deterministic; it does not depend on
+        # no other record existing.
         run: |
-          ddev wp menu create "Primary"
-          ddev wp menu item add-custom primary "Home" https://agency-starter.ddev.site/
-          ddev wp menu item add-post primary "$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
-          ddev wp menu location assign primary primary
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
+
+      - name: Create the Demo page
+        # Mirrors scripts/setup step 10; tests/parity and tests/e2e both drive
+        # /demo/.
+        run: |
+          MEDIA_ID="$(ddev wp media import tests/fixtures/demo-media.png --title='Demo media' --porcelain)"
+          MEDIA_URL="$(ddev wp eval "echo wp_get_attachment_url( ${MEDIA_ID} );")"
+          sed -e "s|{{MEDIA_ID}}|${MEDIA_ID}|g" -e "s|{{MEDIA_URL}}|${MEDIA_URL}|g" tests/fixtures/demo-page.html > /tmp/demo-page.html
+          ddev wp post create --post_type=page --post_status=publish --post_title="Demo" --post_name=demo --post_content="$(cat /tmp/demo-page.html)"
 
       - name: Set pretty permalinks
         # tests/accessibility/smoke.spec.ts and other specs request
@@ -391,6 +402,28 @@ jobs:
           ddev wp theme activate site-theme
           ddev wp plugin activate site-core site-integrations
 
+      - name: Create the site navigation menu
+        # Mirrors scripts/setup step 9. parts/site-header.html renders a
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # most recently published non-empty wp_navigation record.
+        # Seeding one named record makes CI deterministic; it does not depend on
+        # no other record existing.
+        run: |
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
+
+      - name: Create the Demo page
+        # Mirrors scripts/setup step 10.
+        run: |
+          MEDIA_ID="$(ddev wp media import tests/fixtures/demo-media.png --title='Demo media' --porcelain)"
+          MEDIA_URL="$(ddev wp eval "echo wp_get_attachment_url( ${MEDIA_ID} );")"
+          sed -e "s|{{MEDIA_ID}}|${MEDIA_ID}|g" -e "s|{{MEDIA_URL}}|${MEDIA_URL}|g" tests/fixtures/demo-page.html > /tmp/demo-page.html
+          ddev wp post create --post_type=page --post_status=publish --post_title="Demo" --post_name=demo --post_content="$(cat /tmp/demo-page.html)"
+
       - name: Ensure WordPress core uploads directory exists
         # The commerce integration suite (wp-phpunit) scans WP core's default
         # uploads dir (ABSPATH/wp-content/uploads) in WP_UnitTestCase teardown.
@@ -484,12 +517,14 @@ jobs:
           ddev wp theme activate site-theme
           ddev wp plugin activate site-core site-integrations
 
-      - name: Seed the site exactly as scripts/setup does today
+      - name: Seed the site navigation
         run: |
-          ddev wp menu create "Primary"
-          ddev wp menu item add-custom primary "Home" https://agency-starter.ddev.site/
-          ddev wp menu item add-post primary "$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
-          ddev wp menu location assign primary primary
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
           ddev wp rewrite structure '/%postname%/' --hard
 
       - name: Set up Node 22
