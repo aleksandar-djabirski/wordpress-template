@@ -6,11 +6,11 @@
     { "name": "site-footer", "title": "Site Footer", "area": "footer" }
   ],
   "settings": {
-    "appearanceTools": false,
+    "appearanceTools": true,
     "useRootPaddingAwareAlignments": true,
     "color": {
-      "custom": false,
-      "customGradient": false,
+      "custom": true,
+      "customGradient": true,
       "defaultPalette": false,
       "palette": [
         { "slug": "primary", "name": "Primary", "color": "#1a3c34" },
@@ -24,7 +24,7 @@
       ]
     },
     "typography": {
-      "customFontSize": false,
+      "customFontSize": true,
       "lineHeight": true,
       "fontFamilies": [
         {
@@ -47,7 +47,7 @@
       ]
     },
     "spacing": {
-      "custom": false,
+      "custom": true,
       "defaultSpacingSizes": false,
       "blockGap": true,
       "units": [ "px", "rem", "em", "%" ],

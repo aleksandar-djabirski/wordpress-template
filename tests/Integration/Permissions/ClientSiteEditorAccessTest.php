@@ -62,15 +62,48 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 		self::assertContains( $response->get_status(), array( 200, 201 ) );
 	}
 
-	/*
-	 * The two template write-back tests are deliberately NOT here. They send a
-	 * REST update to `<stylesheet>//index` and `<stylesheet>//site-footer`,
-	 * which resolve only after `templates/index.html` and
-	 * `parts/site-footer.html` exist. Task 6 converts the theme and adds both
-	 * tests at its Step 12. Before the conversion WordPress answers 404 and
-	 * `wp_is_block_theme()` returns 0, so keeping them here would land Task 3
-	 * on a red gate.
+	/**
+	 * Reading a collection proves nothing about editing. These two write, then
+	 * READ BACK, because the whole point of Release 1 is that a client's Site
+	 * Editor save actually persists.
+	 *
+	 * These two required tests have no skip path.
 	 */
+	public function test_client_editor_can_create_and_read_back_a_template(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//index';
+		$content = "<!-- wp:paragraph -->\n<p>Client template write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/templates/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client template write.',
+			(string) get_block_template( $id, 'wp_template' )->content
+		);
+	}
+
+	public function test_client_editor_can_create_and_read_back_a_template_part(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//site-footer';
+		$content = "<!-- wp:paragraph -->\n<p>Client footer write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/template-parts/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client footer write.',
+			(string) get_block_template( $id, 'wp_template_part' )->content
+		);
+	}
 
 	public function test_client_editor_can_write_global_styles_and_the_change_persists(): void {
 		wp_set_current_user( $this->make_client_editor()->ID );

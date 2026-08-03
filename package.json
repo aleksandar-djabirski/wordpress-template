@@ -9,7 +9,7 @@
     "build": "node scripts/build-blocks.mjs",
     "start": "node scripts/build-blocks.mjs --watch",
     "lint": "npm run lint:js && npm run lint:css",
-    "lint:js": "wp-scripts lint-js web/app/themes/site-theme/blocks web/app/themes/site-theme/parts",
+    "lint:js": "wp-scripts lint-js web/app/themes/site-theme/blocks",
     "lint:css": "stylelint \"web/app/themes/site-theme/**/*.css\" --ignore-pattern \"web/app/themes/site-theme/**/build/**\"",
     "test:e2e": "playwright test tests/e2e",
     "test:e2e:commerce": "playwright test tests/commerce/e2e",
