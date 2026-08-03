@@ -5,7 +5,7 @@ import { MIGRATION_BASELINE_DIR, MIGRATION_PARITY_PAGES, captureFrontend } from 
 
 /**
  * Writes the IMMUTABLE pre-migration baselines. Deliberately writes PNGs with
- * fs.writeFileSync instead of toHaveScreenshot(), so `--update-snapshots` can
+ * fs.writeFileSync instead of a Playwright snapshot assertion, so `--update-snapshots` can
  * never regenerate them: regenerating a migration baseline requires running
  * this spec explicitly with CAPTURE_MIGRATION_BASELINE=1 against the classic
  * theme, which no longer exists after the migration lands.
