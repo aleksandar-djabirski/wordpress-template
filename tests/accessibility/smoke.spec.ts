@@ -46,3 +46,13 @@ test( 'a content page (Sample Page) has no WCAG 2 A/AA violations', async ( { pa
 
 	expect( results.violations, formatViolations( results.violations ) ).toEqual( [] );
 } );
+
+test( 'the demo page has no WCAG 2 A/AA violations', async ( { page } ) => {
+	const response = await page.goto( '/demo/' );
+
+	expect( response?.status() ).toBe( 200 );
+
+	const results = await new AxeBuilder( { page } ).withTags( [ 'wcag2a', 'wcag2aa' ] ).analyze();
+
+	expect( results.violations, formatViolations( results.violations ) ).toEqual( [] );
+} );

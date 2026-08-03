@@ -5,7 +5,8 @@ import { adminUrl, expectNoAdminMenu, openBlockInserter, searchInserter } from '
 /**
  * Proves the `client_editor` role's admin-UI restrictions
  * (AgencyPlatform\Roles\RolesProvider, AgencyPlatform\Editor\EditorRestrictions,
- * AgencyPlatform\Editor\SiteEditorLockdown — see
+ * AgencyPlatform\Security\AdminScreenPolicy and
+ * AgencyPlatform\Security\CapabilityPolicy — see
  * tests/Integration/Permissions/ClientEditorCapabilitiesTest.php for the
  * PHPUnit-level coverage of the same policy) hold up end-to-end, against a
  * real browser and a real wp-admin render, not just capability checks.
@@ -41,29 +42,37 @@ test( 'client_editor admin menu hides Plugins and Appearance, keeps content menu
 	await expectNoAdminMenu( page, 'menu-plugins' );
 	await expectNoAdminMenu( page, 'menu-appearance' );
 
+	// AdminScreenPolicy replaces the denied Appearance menu with one Design
+	// entry that links straight to the Site Editor.
+	await expect( page.locator( '#adminmenu a[href$="site-editor.php"]' ).first() ).toBeVisible();
+
 	await expect( page.locator( '#adminmenu li#menu-posts' ) ).toBeVisible();
 	await expect( page.locator( '#adminmenu li#menu-pages' ) ).toBeVisible();
 	await expect( page.locator( '#adminmenu li#menu-media' ) ).toBeVisible();
 } );
 
-test( "client_editor's block inserter excludes Custom HTML but offers Reference Callout", async ( { page } ) => {
+test( "client_editor's block inserter excludes Custom HTML and Shortcode but offers Reference Callout", async ( { page } ) => {
 	await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 	await page.goto( adminUrl( 'post-new.php?post_type=page' ) );
 
 	await openBlockInserter( page );
 
 	await searchInserter( page, 'Custom HTML' );
-	// core/html is deliberately excluded from EditorRestrictions::ALLOWED_BLOCKS
-	// (see web/app/mu-plugins/agency-platform/src/Editor/EditorRestrictions.php).
-	// Waiting for the panel's own "No results found." empty state (rather than
-	// asserting absence immediately) avoids a false pass racing the search
-	// debounce — the assertion only succeeds once filtering has genuinely
-	// settled on zero matches.
+	// core/html and core/shortcode are in BlockPolicy::ALWAYS_DENIED, which no
+	// filter can override. Waiting for the panel's own empty state avoids a
+	// false pass racing the search debounce.
+	await expect( page.getByText( /no results found/i ) ).toBeVisible();
+
+	await searchInserter( page, 'Shortcode' );
 	await expect( page.getByText( /no results found/i ) ).toBeVisible();
 
 	await searchInserter( page, 'Reference Callout' );
-	// agency/reference-callout IS in EditorRestrictions::ALLOWED_BLOCKS.
 	await expect( page.getByText( 'Reference Callout', { exact: true } ).first() ).toBeVisible();
+
+	// The registered-block policy offers every core block in an approved
+	// namespace, including a block outside the old fixed allow-list.
+	await searchInserter( page, 'Cover' );
+	await expect( page.getByText( 'Cover', { exact: true } ).first() ).toBeVisible();
 } );
 
 test( 'control: administrators keep the Plugins menu', async ( { page }, testInfo ) => {
