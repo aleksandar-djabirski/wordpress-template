@@ -1,10 +1,10 @@
 {
-  "capturedAtCommit": "TO-BE-FILLED-BY-CAPTURE-RUN",
-  "capturedAtUtc": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "capturedAtCommit": "40e4c2b84b9133b2c73a8706494fdcfcb7b38b9f",
+  "capturedAtUtc": "2026-08-03T10:16:18Z",
   "runnerImage": "ubuntu-24.04",
   "browser": "chromium",
-  "browserVersion": "TO-BE-FILLED-BY-CAPTURE-RUN",
-  "playwrightVersion": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "browserVersion": "149.0.7827.55",
+  "playwrightVersion": "1.61.1",
   "fontStack": "DejaVu Sans",
   "fontPackage": "fonts-dejavu-core",
   "contentFixtures": [
@@ -12,11 +12,33 @@
     "One classic nav menu assigned to the primary location (scripts/setup step 9)"
   ],
   "projects": {
-    "parity-desktop": { "viewport": { "width": 1440, "height": 900 }, "deviceScaleFactor": 1 },
-    "parity-mobile": { "viewport": { "width": 390, "height": 844 }, "deviceScaleFactor": 1 }
+    "parity-desktop": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "deviceScaleFactor": 1
+    },
+    "parity-mobile": {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "deviceScaleFactor": 1
+    }
   },
   "pages": [
-    { "name": "home", "path": "/", "maxDiffRatio": 0.05, "maskSelectors": [] },
-    { "name": "sample-page", "path": "/sample-page/", "maxDiffRatio": 0.05, "maskSelectors": [] }
+    {
+      "name": "home",
+      "path": "/",
+      "maxDiffRatio": 0.05,
+      "maskSelectors": []
+    },
+    {
+      "name": "sample-page",
+      "path": "/sample-page/",
+      "maxDiffRatio": 0.05,
+      "maskSelectors": []
+    }
   ]
 }
