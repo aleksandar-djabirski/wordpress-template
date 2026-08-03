@@ -5272,7 +5272,7 @@ git commit -m "feat: add starter patterns, the demo page fixture, and a real dyn
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `tests/fixtures/demo-page.html` and `tests/fixtures/demo-media.png` from Task 6; `parts/site-header.html` from Task 5.
+- Consumes: `tests/fixtures/demo-page.html` and `tests/fixtures/demo-media.png` from Task 7; `parts/site-header.html` from Task 5.
 - Produces, in every freshly bootstrapped install (local and CI):
   - exactly one published `wp_navigation` post titled `Primary`, holding a Home link and a link to Sample Page;
   - a published page titled `Demo` with slug `demo`, whose content is `tests/fixtures/demo-page.html` with `{{MEDIA_ID}}`/`{{MEDIA_URL}}` substituted;
@@ -5343,8 +5343,11 @@ In `.github/workflows/ci.yml`, in the `e2e` job:
 ```yaml
       - name: Create the site navigation menu
         # Mirrors scripts/setup step 9. parts/site-header.html renders a
-        # ref-less <!-- wp:navigation /-->, which resolves unambiguously only
-        # when exactly one wp_navigation post exists.
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # MOST RECENTLY PUBLISHED non-empty wp_navigation record
+        # (WP_Navigation_Fallback::get_most_recently_published_navigation()).
+        # Seeding one named record is what makes CI deterministic; it does NOT
+        # depend on no other record existing.
         run: |
           SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
           ddev wp post create \
