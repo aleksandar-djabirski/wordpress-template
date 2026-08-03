@@ -1,17 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { CREDS, loginAs } from './helpers/auth';
-import { openSiteEditorCanvas, saveInEditor, siteEditorUrl } from './helpers/wp';
+import { openSiteEditorCanvas, saveInEditor, siteEditorUrl, type EditorBlock, type WpEditor } from './helpers/wp';
 
 declare global {
 	interface Window {
 		wpApiSettings?: { nonce?: string };
-		wp: {
-			data: {
-				dispatch: ( store: string ) => {
-					saveEntityRecord: ( kind: string, name: string, record: { id: number; content: string } ) => Promise< unknown >;
-				};
-			};
-		};
 	}
 }
 
@@ -60,7 +53,8 @@ async function restHeaders( page: Page ): Promise< { 'X-WP-Nonce': string } > {
 
 async function saveNavigationRecord( page: Page, id: number, content: string ): Promise< void > {
 	await page.evaluate( async ( record ) => {
-		await window.wp.data.dispatch( 'core' ).saveEntityRecord( 'postType', 'wp_navigation', record );
+		const wp = ( window as unknown as { wp: WpEditor } ).wp;
+		await wp.data.dispatch( 'core' ).saveEntityRecord( 'postType', 'wp_navigation', record );
 	}, { id, content } );
 }
 
@@ -71,7 +65,7 @@ type GlobalStylesRecord = {
 };
 
 async function getGlobalStylesRecord( page: Page ): Promise< GlobalStylesRecord > {
-	const id = await page.evaluate( () => ( window as Window & { wp: any } ).wp.data.select( 'core' ).__experimentalGetCurrentGlobalStylesId() );
+	const id = await page.evaluate( () => ( window as unknown as { wp: WpEditor } ).wp.data.select( 'core' ).__experimentalGetCurrentGlobalStylesId() );
 	expect( id ).toBeGreaterThan( 0 );
 	const response = await page.request.get( `/wp-json/wp/v2/global-styles/${ id }?context=edit`, { headers: await restHeaders( page ) } );
 	expect( response.status() ).toBe( 200 );
@@ -92,11 +86,12 @@ test( 'client_editor edits header text and saves', async ( { page } ) => {
 
 	const canvas = await openSiteEditorCanvas( page, '/wp_template_part/site-theme//site-header' );
 	try {
+		await expect( canvas.locator( '.site-header__inner' ) ).toBeVisible();
 		await page.evaluate( ( text ) => {
-			const wp = ( window as Window & { wp: any } ).wp;
+			const wp = ( window as unknown as { wp: WpEditor } ).wp;
 			const select = wp.data.select( 'core/block-editor' );
 			const editor = wp.data.dispatch( 'core/block-editor' );
-			const findTagline = ( blocks: any[] ): any => {
+			const findTagline = ( blocks: EditorBlock[] ): EditorBlock | null => {
 				for ( const block of blocks ) {
 					if ( 'core/site-tagline' === block.name ) {
 						return block;
@@ -144,9 +139,11 @@ test( 'client_editor adds a core block, reorders it, then removes it', async ( {
 		// shipped Site Editor renders this toolbar inside its own canvas state,
 		// so the data action is the stable equivalent of the Move up control.
 		const clientId = await canvas.getByText( marker, { exact: true } ).getAttribute( 'data-block' );
-		expect( clientId ).toBeTruthy();
+		if ( null === clientId ) {
+			throw new Error( 'The added paragraph block has no client ID.' );
+		}
 		await page.evaluate( ( id ) => {
-			( window as Window & { wp: any } ).wp.data.dispatch( 'core/block-editor' ).moveBlocksUp( [ id ] );
+			( window as unknown as { wp: WpEditor } ).wp.data.dispatch( 'core/block-editor' ).moveBlocksUp( [ id ] );
 		}, clientId );
 
 		await saveInEditor( page );
@@ -156,7 +153,7 @@ test( 'client_editor adds a core block, reorders it, then removes it', async ( {
 
 		// Remove the block again, leaving the template as it was.
 		await page.evaluate( ( id ) => {
-			( window as Window & { wp: any } ).wp.data.dispatch( 'core/block-editor' ).removeBlocks( [ id ] );
+			( window as unknown as { wp: WpEditor } ).wp.data.dispatch( 'core/block-editor' ).removeBlocks( [ id ] );
 		}, clientId );
 		await expect( canvas.getByText( marker, { exact: true } ) ).toHaveCount( 0 );
 		await expect( canvas.getByText( 'The page you were looking for could not be found. Try a search instead.', { exact: true } ) ).toBeVisible();

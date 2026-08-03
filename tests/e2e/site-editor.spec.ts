@@ -1,17 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 import { CREDS, loginAs } from './helpers/auth';
-import { adminUrl, dismissWelcomeGuideIfPresent, openSiteEditorCanvas, saveInEditor, siteEditorUrl } from './helpers/wp';
+import { adminUrl, dismissWelcomeGuideIfPresent, openSiteEditorCanvas, saveInEditor, siteEditorUrl, type EditorBlock, type WpEditor } from './helpers/wp';
 
 declare global {
 	interface Window {
 		wpApiSettings?: { nonce?: string };
-		wp: {
-			data: {
-				dispatch: ( store: string ) => {
-					saveEntityRecord: ( kind: string, name: string, record: { id: number; content: string } ) => Promise< unknown >;
-				};
-			};
-		};
 	}
 }
 
@@ -49,7 +42,8 @@ async function restHeaders( page: Page ): Promise< { 'X-WP-Nonce': string } > {
 
 async function saveNavigationRecord( page: Page, id: number, content: string ): Promise< void > {
 	await page.evaluate( async ( record ) => {
-		await window.wp.data.dispatch( 'core' ).saveEntityRecord( 'postType', 'wp_navigation', record );
+		const wp = ( window as unknown as { wp: WpEditor } ).wp;
+		await wp.data.dispatch( 'core' ).saveEntityRecord( 'postType', 'wp_navigation', record );
 	}, { id, content } );
 }
 
@@ -60,7 +54,7 @@ type GlobalStylesRecord = {
 };
 
 async function getGlobalStylesRecord( page: Page ): Promise< GlobalStylesRecord > {
-	const id = await page.evaluate( () => ( window as Window & { wp: any } ).wp.data.select( 'core' ).__experimentalGetCurrentGlobalStylesId() );
+	const id = await page.evaluate( () => ( window as unknown as { wp: WpEditor } ).wp.data.select( 'core' ).__experimentalGetCurrentGlobalStylesId() );
 	expect( id ).toBeGreaterThan( 0 );
 	const response = await page.request.get( `/wp-json/wp/v2/global-styles/${ id }?context=edit`, { headers: await restHeaders( page ) } );
 	expect( response.status() ).toBe( 200 );
@@ -118,10 +112,10 @@ test( 'client_editor can edit and save the header template part, and the change 
 	try {
 		await expect( canvas.locator( '.site-header__inner' ) ).toBeVisible();
 		await page.evaluate( ( text ) => {
-			const wp = ( window as Window & { wp: any } ).wp;
+			const wp = ( window as unknown as { wp: WpEditor } ).wp;
 			const select = wp.data.select( 'core/block-editor' );
 			const editor = wp.data.dispatch( 'core/block-editor' );
-			const findTagline = ( blocks: any[] ): any => {
+			const findTagline = ( blocks: EditorBlock[] ): EditorBlock | null => {
 				for ( const block of blocks ) {
 					if ( 'core/site-tagline' === block.name ) {
 						return block;
@@ -225,7 +219,7 @@ test( 'client_editor has no code editor in the post editor', async ( { page } ) 
 
 	await dismissWelcomeGuideIfPresent( page );
 	const codeEditingEnabled = await page.evaluate( () => {
-		const wp = ( window as Window & { wp: any } ).wp;
+		const wp = ( window as unknown as { wp: WpEditor } ).wp;
 		return wp.data.select( 'core/editor' ).getEditorSettings().codeEditingEnabled;
 	} );
 	expect( codeEditingEnabled ).toBe( false );
@@ -237,7 +231,7 @@ test( 'control: an administrator sees the code editor option', async ( { page } 
 
 	await dismissWelcomeGuideIfPresent( page );
 	const codeEditingEnabled = await page.evaluate( () => {
-		const wp = ( window as Window & { wp: any } ).wp;
+		const wp = ( window as unknown as { wp: WpEditor } ).wp;
 		return wp.data.select( 'core/editor' ).getEditorSettings().codeEditingEnabled;
 	} );
 	expect( codeEditingEnabled ).toBe( true );

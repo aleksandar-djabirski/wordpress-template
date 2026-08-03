@@ -31,16 +31,9 @@ test( 'home page has no WCAG 2 A/AA violations', async ( { page } ) => {
 } );
 
 test( 'a content page (Sample Page) has no WCAG 2 A/AA violations', async ( { page } ) => {
-	// Fresh WordPress installs ship a default "Sample Page" at /sample-page/
-	// (wp core install seeds it). If a project has since deleted/renamed it,
-	// soft-skip rather than fail — this suite verifies the theme's page
-	// template is accessible, not that any specific content exists.
 	const response = await page.goto( '/sample-page/' );
 
-	if ( ! response || response.status() === 404 ) {
-		test.skip( true, '/sample-page/ returned 404 — default Sample Page not present on this install, skipping.' );
-		return;
-	}
+	expect( response?.status() ).toBe( 200 );
 
 	const results = await new AxeBuilder( { page } ).withTags( [ 'wcag2a', 'wcag2aa' ] ).analyze();
 

@@ -1,5 +1,36 @@
 import { expect, type FrameLocator, type Page } from '@playwright/test';
 
+export type EditorBlock = {
+	clientId: string;
+	innerBlocks?: EditorBlock[];
+	name: string;
+};
+
+export type WpEditor = {
+	blocks: {
+		createBlock: ( name: string, attributes: { content: string } ) => EditorBlock;
+	};
+	data: {
+		dispatch( store: 'core' ): {
+			saveEntityRecord: ( kind: string, name: string, record: { id: number; content: string } ) => Promise< unknown >;
+		};
+		dispatch( store: 'core/block-editor' ): {
+			moveBlocksUp: ( clientIds: string[] ) => void;
+			removeBlocks: ( clientIds: string[] ) => void;
+			replaceBlocks: ( clientId: string, block: EditorBlock ) => void;
+		};
+		select( store: 'core' ): {
+			__experimentalGetCurrentGlobalStylesId: () => number;
+		};
+		select( store: 'core/block-editor' ): {
+			getBlocks: () => EditorBlock[];
+		};
+		select( store: 'core/editor' ): {
+			getEditorSettings: () => { codeEditingEnabled: boolean };
+		};
+	};
+};
+
 /**
  * Small WordPress-shaped URL/assertion helpers shared across the e2e
  * suites. Paths are returned relative (leading `/`) rather than absolute so

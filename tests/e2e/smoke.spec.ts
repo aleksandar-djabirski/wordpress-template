@@ -26,7 +26,8 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 	const hrefs = await page.$$eval(
 		'a[href]',
 		( anchors, base ) => {
-			// Resolve each href against the page's base URL and compare origins.
+			// Compare URL origins. String-prefix matching would treat
+			// https://base.evil.com as internal to https://base.com.
 			let baseOrigin: string;
 			try {
 				baseOrigin = new URL( base ).origin;
