@@ -101,10 +101,10 @@ final class MigrationBaselineGuardTest extends TestCase {
 
 		// Every ParityPage literal is one { ... } block. The master specification
 		// sets five percent as the maximum, not a default that pages may raise.
-		preg_match_all( '/\{[^{}]*maxDiffRatio:[^{}]*\}/', $helper, $entries );
+		preg_match_all( '/\{[^{}]*maxDiffRatio\s*:[^{}]*\}/', $helper, $entries );
 
 		foreach ( $entries[0] as $entry ) {
-			if ( 1 !== preg_match( '/maxDiffRatio:\s*([0-9.]+)/', $entry, $ratio ) ) {
+			if ( 1 !== preg_match( '/maxDiffRatio\s*:\s*([0-9.]+)/', $entry, $ratio ) ) {
 				continue;
 			}
 
