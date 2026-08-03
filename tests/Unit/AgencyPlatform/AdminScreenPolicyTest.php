@@ -80,4 +80,15 @@ final class AdminScreenPolicyTest extends TestCase {
 
 		self::assertNotContains( AdminScreenPolicy::SITE_EDITOR_SCREEN, AdminScreenPolicy::DENIED_SCREENS );
 	}
+
+	public function test_legacy_design_rest_routes_are_denied_without_covering_site_editor_routes(): void {
+		foreach ( AdminScreenPolicy::DENIED_REST_ROUTE_PREFIXES as $route ) {
+			self::assertTrue( AdminScreenPolicy::is_denied_rest_route( $route ) );
+			self::assertTrue( AdminScreenPolicy::is_denied_rest_route( $route . '/example' ) );
+		}
+
+		foreach ( array( '/wp/v2/navigation', '/wp/v2/templates', '/wp/v2/template-parts', '/wp/v2/global-styles', '/wp/v2/font-families' ) as $route ) {
+			self::assertFalse( AdminScreenPolicy::is_denied_rest_route( $route ), $route . ' must stay available to the Site Editor.' );
+		}
+	}
 }

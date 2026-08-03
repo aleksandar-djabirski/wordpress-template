@@ -52,9 +52,22 @@ final class AdminScreenPolicy {
 		'options.php',
 	);
 
+	/**
+	 * @var string[]
+	 */
+	public const DENIED_REST_ROUTE_PREFIXES = array(
+		'/wp/v2/widgets',
+		'/wp/v2/widget-types',
+		'/wp/v2/sidebars',
+		'/wp/v2/menus',
+		'/wp/v2/menu-items',
+		'/wp/v2/menu-locations',
+	);
+
 	public function register(): void {
 		add_action( 'admin_init', array( $this, 'block_denied_screens' ) );
 		add_action( 'admin_menu', array( $this, 'replace_appearance_menu' ), 999 );
+		add_filter( 'rest_pre_dispatch', array( $this, 'block_legacy_design_rest_routes' ), 10, 3 );
 	}
 
 	/**
@@ -100,6 +113,28 @@ final class AdminScreenPolicy {
 	}
 
 	/**
+	 * Blocks the legacy Widgets and Menus REST APIs. Core gates these routes on
+	 * `edit_theme_options`, which clients need for the Site Editor.
+	 *
+	 * @param mixed $result
+	 * @return mixed
+	 */
+	public function block_legacy_design_rest_routes( $result, \WP_REST_Server $server, \WP_REST_Request $request ) {
+		if ( null !== $result || current_user_can( 'manage_options' ) || ! self::is_denied_rest_route( $request->get_route() ) ) {
+			return $result;
+		}
+
+		return new \WP_REST_Response(
+			array(
+				'code'    => 'agency_platform_legacy_design_rest_forbidden',
+				'message' => __( 'This legacy design route is not part of the editing model for your role.', 'agency-platform' ),
+				'data'    => array( 'status' => 403 ),
+			),
+			403
+		);
+	}
+
+	/**
 	 * Pure policy decision, so it is directly unit-testable without a
 	 * WordPress runtime.
 	 */
@@ -109,5 +144,15 @@ final class AdminScreenPolicy {
 		}
 
 		return in_array( $pagenow, self::DENIED_SCREENS, true );
+	}
+
+	public static function is_denied_rest_route( string $route ): bool {
+		foreach ( self::DENIED_REST_ROUTE_PREFIXES as $prefix ) {
+			if ( $prefix === $route || 0 === strpos( $route, $prefix . '/' ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 }

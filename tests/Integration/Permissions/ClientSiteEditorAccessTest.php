@@ -22,6 +22,11 @@ use Tests\Integration\IntegrationTestCase;
  */
 final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 
+	/**
+	 * @var array{message: string, args: array<mixed>}|null
+	 */
+	private static ?array $wp_die_call = null;
+
 	public function set_up(): void {
 		parent::set_up();
 
@@ -113,9 +118,100 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 		}
 	}
 
+	/**
+	 * @return list<array{0: string}>
+	 */
+	public static function legacy_design_rest_routes(): array {
+		return array(
+			array( '/wp/v2/widgets' ),
+			array( '/wp/v2/widget-types' ),
+			array( '/wp/v2/sidebars' ),
+			array( '/wp/v2/menus' ),
+			array( '/wp/v2/menu-items' ),
+			array( '/wp/v2/menu-locations' ),
+		);
+	}
+
+	/**
+	 * @dataProvider legacy_design_rest_routes
+	 */
+	public function test_client_editor_cannot_access_legacy_design_rest_routes( string $route ): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$response = rest_do_request( new \WP_REST_Request( 'GET', $route ) );
+
+		self::assertSame( 403, $response->get_status(), $route . ' must stay outside the Site Editor.' );
+		self::assertSame( 'agency_platform_legacy_design_rest_forbidden', $response->get_data()['code'] ?? null );
+	}
+
+	public function test_client_editor_cannot_write_a_legacy_widget(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$response = rest_do_request( new \WP_REST_Request( 'POST', '/wp/v2/widgets' ) );
+
+		self::assertSame( 403, $response->get_status() );
+		self::assertSame( 'agency_platform_legacy_design_rest_forbidden', $response->get_data()['code'] ?? null );
+	}
+
+	public function test_client_editor_cannot_use_customize_changeset_capability_aliases(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$capabilities = get_post_type_object( 'customize_changeset' )->cap;
+
+		foreach ( array( 'create_posts', 'edit_posts', 'edit_others_posts', 'delete_posts', 'publish_posts', 'read_private_posts' ) as $property ) {
+			self::assertFalse( current_user_can( $capabilities->{$property} ), $property . ' must map to the denied customize meta capability.' );
+		}
+	}
+
+	public function test_a_direct_customize_request_is_blocked_for_client_editor(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$original_pagenow  = $GLOBALS['pagenow'] ?? null;
+		self::$wp_die_call = null;
+		add_filter( 'wp_die_handler', array( self::class, 'replace_wp_die_handler' ) );
+		$GLOBALS['pagenow'] = 'customize.php'; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- A wp-admin request sets this global before admin_init.
+
+		try {
+			( new AdminScreenPolicy() )->block_denied_screens();
+			self::fail( 'A direct customize.php request must stop at AdminScreenPolicy.' );
+		} catch ( \RuntimeException $exception ) {
+			self::assertSame( 'AdminScreenPolicy blocked the request.', $exception->getMessage() );
+			self::assertNotNull( self::$wp_die_call );
+			self::assertSame( 403, self::$wp_die_call['args']['response'] ?? null );
+		} finally {
+			remove_filter( 'wp_die_handler', array( self::class, 'replace_wp_die_handler' ) );
+
+			if ( null === $original_pagenow ) {
+				unset( $GLOBALS['pagenow'] );
+			} else {
+				$GLOBALS['pagenow'] = $original_pagenow; // phpcs:ignore WordPress.WP.GlobalVariablesOverride.Prohibited -- Restore the simulated wp-admin request state.
+			}
+		}
+	}
+
 	public function test_the_admin_screen_deny_list_still_names_every_forbidden_screen(): void {
 		foreach ( array( 'themes.php', 'theme-install.php', 'theme-editor.php', 'plugin-install.php', 'plugin-editor.php', 'customize.php', 'widgets.php', 'nav-menus.php' ) as $screen ) {
 			self::assertTrue( AdminScreenPolicy::is_denied( $screen, false ), $screen . ' must be denied.' );
 		}
+	}
+
+	/**
+	 * @param callable $handler
+	 */
+	public static function replace_wp_die_handler( $handler ): array {
+		return array( self::class, 'capture_wp_die' );
+	}
+
+	/**
+	 * @param string|\WP_Error $message
+	 * @param array<mixed>      $args
+	 */
+	public static function capture_wp_die( $message, string $title, array $args ): void {
+		self::$wp_die_call = array(
+			'message' => (string) $message,
+			'args'    => $args,
+		);
+
+		throw new \RuntimeException( 'AdminScreenPolicy blocked the request.' );
 	}
 }
