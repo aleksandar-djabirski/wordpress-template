@@ -106,7 +106,7 @@ final class SaveValidation {
 		);
 
 		if ( false === $allowed ) {
-			return new \WP_Error( // @phpstan-ignore arguments.count
+			return new \WP_Error(
 				'agency_platform_no_blocks_allowed',
 				__( 'Block editing is disabled for your role in this editor.', 'agency-platform' ),
 				array( 'status' => 403 )
@@ -116,7 +116,7 @@ final class SaveValidation {
 		$forbidden = BlockPolicy::forbidden_blocks( $parsed, (array) $allowed );
 
 		if ( array() !== $forbidden ) {
-			return new \WP_Error( // @phpstan-ignore arguments.count
+			return new \WP_Error(
 				'agency_platform_forbidden_block',
 				sprintf(
 					/* translators: 1: block name, 2: block path within the content. */
@@ -134,7 +134,7 @@ final class SaveValidation {
 		$raw_html = BlockPolicy::raw_html_violations( $parsed );
 
 		if ( array() !== $raw_html ) {
-			return new \WP_Error( // @phpstan-ignore arguments.count
+			return new \WP_Error(
 				'agency_platform_raw_html',
 				__( 'Raw HTML is not allowed for your role. Rebuild this content with blocks and save again.', 'agency-platform' ),
 				array(
@@ -147,7 +147,7 @@ final class SaveValidation {
 		$shortcodes = BlockPolicy::shortcode_violations( $content, get_shortcode_regex() );
 
 		if ( array() !== $shortcodes ) {
-			return new \WP_Error( // @phpstan-ignore arguments.count
+			return new \WP_Error(
 				'agency_platform_shortcode',
 				sprintf(
 					/* translators: %s: shortcode tag. */
@@ -164,7 +164,7 @@ final class SaveValidation {
 		$block_css = BlockPolicy::block_css_violations( $parsed );
 
 		if ( array() !== $block_css ) {
-			return new \WP_Error( // @phpstan-ignore arguments.count
+			return new \WP_Error(
 				'agency_platform_block_custom_css',
 				sprintf(
 					/* translators: %s: block name. */

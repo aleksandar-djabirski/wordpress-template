@@ -62,7 +62,7 @@ final class GlobalStylesGuard {
 			return $result;
 		}
 
-		return new \WP_Error( // @phpstan-ignore arguments.count
+		return new \WP_Error(
 			'agency_platform_global_styles_custom_css',
 			sprintf(
 				/* translators: %s: dotted path to the offending custom CSS, e.g. styles.blocks.core/group.css */
