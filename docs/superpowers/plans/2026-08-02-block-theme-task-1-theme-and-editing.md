@@ -5388,10 +5388,27 @@ git worktree add --detach $expectedRoot HEAD
 if ( (Resolve-Path -LiteralPath $expectedRoot).Path -ne $expectedRoot ) { throw 'The proof worktree path is not exact.' }
 ddev stop
 Push-Location $expectedRoot
-ddev config --project-name=bt-task-1-setup-proof --project-type=wordpress --docroot=web/wp --create-docroot=false
+ddev config --project-name=bt-task-1-setup-proof --project-type=wordpress --docroot=web --create-docroot=false
 ddev start
+# The proof project has its OWN hostname. .env.example still ships the
+# agency-starter host, so scripts/setup would otherwise install WordPress with
+# the wrong WP_HOME and every by-hand URL check below would exercise the wrong
+# site. Set the proof host BEFORE the first setup run.
+ddev exec bash -c 'sed -i "s|^WP_HOME=.*|WP_HOME=https://bt-task-1-setup-proof.ddev.site|" .env 2>/dev/null || true'
 ddev exec bash scripts/setup
 ```
+
+**Docroot.** This repository is Bedrock and its own `.ddev/config.yaml` declares
+`docroot: web`, not `web/wp`. `web/index.php` is Bedrock's front controller and
+`web/wp/` is only the Composer-installed core directory. A proof configured with
+`--docroot=web/wp` does not serve the docroot the real project serves, so its
+by-hand render checks do not prove the shipped configuration. Always mirror the
+tracked `.ddev/config.yaml` value.
+
+**On this host** DDEV runs inside WSL2, so every `ddev` call above must be
+shelled through `wsl -d Ubuntu -e bash -lc "cd /mnt/c/... && ddev <cmd>"`, and
+`https://` may be unavailable without `mkcert` — record whether the checks used
+HTTP or HTTPS.
 
 Then check by hand:
 - `https://bt-task-1-setup-proof.ddev.site/` renders the header with a visible navigation, a posts list, and the footer.
