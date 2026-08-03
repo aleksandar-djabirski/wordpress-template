@@ -37,7 +37,8 @@ No commit in this plan lands with a gate that the plan already knows is red. Eac
 - Run `ddev composer verify:fast` immediately before **every** commit. Also run the default declared gates: `ddev composer verify` plus `npm run lint` for any commit touching JS or CSS.
 - A commit that changes rendered markup also declares `npm run test:e2e` and `npm run test:accessibility`.
 - A commit that changes rendered pixels also declares `npm run test:visual`.
-- Exactly **three** commits use the narrow browser-gate exception: the Task 5 spike commit and Task 6 conversion commits 2 and 3. The exception starts at `spike: prove native block theme and editor styles`, covers only the time while the existing browser and visual assertions still name classic markup, and ends only when Task 9 commits the rewritten browser, accessibility, and visual suites. Task 7 must run `npm run test:e2e`, `npm run test:accessibility`, and `npm run test:visual` against its changed demo content before its commit. No other commit may omit a required browser gate.
+- Exactly **six** commits use the narrow browser-gate exception: the Task 5 spike commit, Task 6 conversion commits 1, 2 and 3, the Task 7 commit, and the Task 8 commit. The exception starts at `spike: prove native block theme and editor styles`, covers only the time while the existing browser and visual assertions still name classic markup, and ends only when Task 9 commits the rewritten browser and visual suites. No other commit may omit a required browser gate.
+- The exception covers **only** `npm run test:e2e` and `npm run test:visual`. It does **not** cover `npm run test:accessibility`, which asserts no classic selector and stays green across the conversion. From Task 7 onward every commit that changes rendered markup must run `npm run test:accessibility` and it must pass. Accessibility is the one browser gate that can still catch a landmark or contrast regression while the other two are blind, so it is never waived.
 - Unit 1 owns all edits to `web/app/mu-plugins/agency-platform/src/Plugin.php` and `web/app/mu-plugins/agency-platform/src/Cli/AgencyCommands.php` in this release. Units 2 and 3 may change `Plugin.php` only by adding their one sequenced provider-registration line at the position this plan leaves for it. They must not reformat, reorder, or otherwise edit either file.
 - Unit 1 owns the Release 1 capability-matrix change in `tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php`. Unit 4A retains ownership of all other commerce test and profile work.
 - Unit 1 documentation is limited to `AGENTS.md`, `docs/architecture.md`, `docs/editing-strictness.md`, `docs/ownership-rules.md`, `docs/adding-a-block.md`, `docs/validation-scenarios.md`, `docs/generated-block-index.md`, and `docs/block-theme-migration-baseline.md`. Unit 0 owns the `README.md` repair. Unit 4B owns `README.md`, `ops/**`, the state runbook, proof records, and the final documentation and operations sweep.
@@ -5240,9 +5241,12 @@ npm run build
 ddev exec php scripts/generate-block-index
 ddev composer verify
 npm run lint
+npm run test:accessibility
 ```
 
-Expected: all PASS. This task creates a fixture and editor-only preview, but does not yet seed a page that the frontend can render. Task 8 owns that seed. Task 9 adds the demo browser, accessibility, and visual assertions and runs their gates, all within the bounded narrow migration window. `git status` must show a modified `blocks/reference-callout/build/index.js` (CI's build-drift check compares the committed copy against a fresh build) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
+Expected: all PASS. This task creates a fixture and editor-only preview, but does not yet seed a page that the frontend can render. Task 8 owns that seed. Task 9 adds the demo browser and visual assertions and runs their gates, all within the bounded narrow migration window.
+
+**Browser-gate scope for this commit.** `npm run test:e2e` and `npm run test:visual` are NOT gates here. They still assert the classic markup that Task 6 deleted, so they are red for reasons this task neither causes nor can fix, and Task 9 rewrites them. Measured at `b6c7ce1`, before any Task 7 change: e2e 4 failed / 9 passed / 5 skipped, every failure on `.site-header__site-title`, `#site-header-nav`, or `.site-header__toggle`; visual 2 failed / 2 skipped, both home-page snapshots. `npm run test:accessibility` IS a gate and passed 4 / 4 at the same commit. Do not edit, weaken, skip, or delete any browser or visual spec or any snapshot in this task — Task 9 owns that rewrite. `git status` must show a modified `blocks/reference-callout/build/index.js` (CI's build-drift check compares the committed copy against a fresh build) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
 
 - [ ] **Step 6: Commit**
 
@@ -5405,9 +5409,12 @@ After recording the proof, run `ddev stop`, `Pop-Location`, then remove the proo
 
 ```bash
 ddev composer verify:fast
+npm run test:accessibility
 git add scripts/setup .github/workflows/ci.yml
 git commit -m "chore: seed block-theme navigation, the demo page, and permalinks"
 ```
+
+This task seeds navigation and the Demo page, so it changes rendered markup. `npm run test:accessibility` is therefore a required gate and must pass, including on the newly seeded `/demo/` page once it exists. `npm run test:e2e` and `npm run test:visual` remain covered by the narrow browser-gate exception until Task 9 rewrites them.
 
 ---
 
