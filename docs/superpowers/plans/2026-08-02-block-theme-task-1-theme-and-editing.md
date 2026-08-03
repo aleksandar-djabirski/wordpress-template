@@ -4900,6 +4900,7 @@ git commit -m "chore: remove classic theme path and stale tests"
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/editor.css`
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/README.md`
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/build/index.js` (rebuilt output, committed)
+- Modify: `web/app/themes/site-theme/blocks/reference-callout/build/index.asset.php` (rebuilt output, committed — `npm run build` rewrites its `version` hash whenever `index.js` changes, and both build files are tracked, so committing one without the other leaves the build drifted)
 - Modify: `docs/generated-block-index.md` (regenerated)
 
 **Interfaces:**
@@ -5246,7 +5247,7 @@ npm run test:accessibility
 
 Expected: all PASS. This task creates a fixture and editor-only preview, but does not yet seed a page that the frontend can render. Task 8 owns that seed. Task 9 adds the demo browser and visual assertions and runs their gates, all within the bounded narrow migration window.
 
-**Browser-gate scope for this commit.** `npm run test:e2e` and `npm run test:visual` are NOT gates here. They still assert the classic markup that Task 6 deleted, so they are red for reasons this task neither causes nor can fix, and Task 9 rewrites them. Measured at `b6c7ce1`, before any Task 7 change: e2e 4 failed / 9 passed / 5 skipped, every failure on `.site-header__site-title`, `#site-header-nav`, or `.site-header__toggle`; visual 2 failed / 2 skipped, both home-page snapshots. `npm run test:accessibility` IS a gate and passed 4 / 4 at the same commit. Do not edit, weaken, skip, or delete any browser or visual spec or any snapshot in this task — Task 9 owns that rewrite. `git status` must show a modified `blocks/reference-callout/build/index.js` (CI's build-drift check compares the committed copy against a fresh build) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
+**Browser-gate scope for this commit.** `npm run test:e2e` and `npm run test:visual` are NOT gates here. They still assert the classic markup that Task 6 deleted, so they are red for reasons this task neither causes nor can fix, and Task 9 rewrites them. Measured at `b6c7ce1`, before any Task 7 change: e2e 4 failed / 9 passed / 5 skipped, every failure on `.site-header__site-title`, `#site-header-nav`, or `.site-header__toggle`; visual 2 failed / 2 skipped, both home-page snapshots. `npm run test:accessibility` IS a gate and passed 4 / 4 at the same commit. Do not edit, weaken, skip, or delete any browser or visual spec or any snapshot in this task — Task 9 owns that rewrite. `git status` must show a modified `blocks/reference-callout/build/index.js` AND a modified `blocks/reference-callout/build/index.asset.php` (CI's build-drift check compares the committed copies against a fresh build, and the asset file carries the bundle `version` hash, so it changes on every rebuild) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
 
 - [ ] **Step 6: Commit**
 
