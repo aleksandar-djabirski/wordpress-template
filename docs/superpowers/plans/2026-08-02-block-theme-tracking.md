@@ -10,8 +10,8 @@ The `cinq-wp` back-port remains outside this engagement. Do not create or change
 
 | Unit | Plan file and scope | Gate | Depends on | Branch | Status |
 |---|---|---|---|---|---|
-| 0 | Planning pack, clean base, integration branch | Execution ready | — | `feat/block-theme-fse-migration` | in-progress |
-| 1 | `2026-08-02-block-theme-task-1-theme-and-editing.md` | Release 1 | 0 | `feat/bt-task-1-theme-and-editing` | planned |
+| 0 | Planning pack, clean base, integration branch | Execution ready | — | `feat/block-theme-fse-migration` | merged |
+| 1 | `2026-08-02-block-theme-task-1-theme-and-editing.md` | Release 1 | 0 | `feat/bt-task-1-theme-and-editing` | in-progress |
 | 2 | `2026-08-02-block-theme-task-2-state-export-diff.md` | Release 2 | 1 | `feat/bt-task-2-state-export-diff` | planned |
 | 3A | `2026-08-02-block-theme-task-3-promotion-lifecycle.md`, Tasks 1–21 | Release 3 | 2 | `feat/bt-task-3-promotion-lifecycle` | planned |
 | 3B | `2026-08-02-block-theme-task-3-promotion-lifecycle.md`, Tasks 22–23 | Release 4 | 3A | `feat/bt-task-3-global-styles` | planned |
@@ -31,7 +31,7 @@ The orchestrator completes every item before Unit 1 starts:
 5. Confirm `git status --porcelain` is empty.
 6. Create `feat/block-theme-fse-migration` from the recorded local `main` SHA.
 7. Push the integration branch because the migration-baseline workflow must run from GitHub.
-8. Confirm DDEV, Docker, Node 22 or newer, npm 10 for lock generation, Composer through DDEV, GitHub CLI authentication, and GitHub Actions access.
+8. Confirm DDEV, Docker, Node 22 or newer, npm 10 for lock generation, Composer through DDEV, authenticated Windows Git access through Git Credential Manager, and GitHub Actions access through the connected GitHub app. Do not require a second GitHub CLI token when the existing Windows and app connections provide the required operations.
 9. Confirm the task runner can open and inspect downloaded PNG artifacts.
 10. Confirm the Claude Code command and the requested Opus 5 model are callable before the final-review gate. If they are unavailable, report the blocker before Unit 1 starts. Do not claim that another model performed the requested independent review.
 
@@ -68,7 +68,9 @@ The existing cross-task ownership grants remain:
 
 ## Model and review policy
 
-The primary session uses `gpt-5.6-sol` with high reasoning as the orchestrator.
+The primary session uses Claude Code Opus 5 as the orchestrator. The user made this change on 2026-08-03 after the earlier `gpt-5.6-sol` session stopped. Opus 5 owns orchestration, integration decisions, plan and tracking corrections, final verification, and the single final independent review. Opus 5 does not perform bounded implementation work while a Codex worker is callable.
+
+Record the model and the reasoning level for every delegated task in the log below. Never record a model that did not run.
 
 When `gpt-5.6-luna` is callable, use it with max reasoning for bounded implementation steps. Give it one plan task, its owned files, the exact acceptance checks, and the required report. Run code-writing workers in the exact task worktree with `codex exec -m gpt-5.6-luna -c 'model_reasoning_effort="max"' -C <worktree>`. Keep the returned thread identifier so a bounded fix can resume the same task context. If any runner reports a lower reasoning level, stop that code-writing task and replace it with the exact CLI invocation. The Sol orchestrator reviews every returned diff and runs the required gates. If Luna is not callable, the Sol session performs the work itself and records that fallback. Never claim that Luna ran when it did not.
 
@@ -76,13 +78,15 @@ Use Terra high for each bounded task review and for every accepted review-fix wa
 
 Run a Sol high-reasoning review at the end of each execution unit. Do not merge a unit with unresolved critical or important findings.
 
-After Unit 4B is merged into the integration branch, run Claude Code Opus 5 exactly once over the complete diff from the recorded base SHA to `feat/block-theme-fse-migration`. Save its report outside tracked customer-state paths. Classify every finding as accepted or rejected with evidence.
+After Unit 4B is merged into the integration branch, the Opus 5 orchestrator runs its final review exactly once over the complete diff from the recorded base SHA to `feat/block-theme-fse-migration`. Save its report outside tracked customer-state paths. Classify every finding as accepted or rejected with evidence.
 
-Use Terra high for accepted fixes. Use Sol high as the fallback. Then run a Sol high-reasoning review of the fix diff. The independent Opus review is not a substitute for this post-fix review.
+Known reduction in independence: Opus 5 now writes no implementation code but does orchestrate the work it later reviews. The earlier plan gave the final review to a model that had seen none of the execution. The user accepted this reduction when it made Opus 5 the orchestrator. The per-unit Terra and Sol reviews are the compensating independent gates, and every unit still passes a Sol review by a model that did not write the diff.
+
+Use Terra high for accepted fixes. Use Sol high as the fallback. Then run a Sol high-reasoning review of the fix diff. The final Opus review is not a substitute for this post-fix review.
 
 ## Required CI inputs
 
-Task 1's two image workflows are orchestrator gates. The orchestrator uses GitHub CLI or the GitHub UI to start them, downloads the artifacts, inspects every PNG, updates the metadata, and commits the accepted files. No separate human action is required when the orchestrator can perform these actions.
+Task 1's two image workflows are orchestrator gates. The workflow files must provide an agent-runnable push trigger in addition to `workflow_dispatch` when no authenticated workflow-dispatch tool is available. The orchestrator uses Windows Git Credential Manager to push the exact trigger ref and the connected GitHub app to inspect runs and download artifacts. It inspects every PNG, updates the metadata, and commits the accepted files. No second GitHub CLI token or separate human action is required.
 
 Promotion CI uses a fixed or generated test-only HMAC key inside the isolated CI job. It does not depend on a repository secret. Production still requires `AGENCY_PROMOTION_HMAC_KEYS` and `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID` from the host secret store.
 
@@ -127,3 +131,11 @@ Before the push:
 - 2026-08-03: The accidental README text was an uncommitted working-tree insertion. The required one-line repair restored the tracked `HEAD` text exactly, so `git diff -- README.md` is empty. Unit 0 does not create an empty repair commit.
 - 2026-08-03: The model policy was corrected after the Codex app displayed lower reasoning on read-only Luna plan audits. Code-writing tasks now use the local Codex CLI with explicit `gpt-5.6-luna` and max reasoning in the exact worktree. Terra high owns bounded reviews and all accepted review fixes. Sol high remains the unit and fix-diff reviewer. The exact Luna max CLI call completed successfully before Unit 1.
 - 2026-08-03: Terra high corrected all four implementation plans after the read-only audit wave. The corrections fix unit ownership, commit gates, required-environment failures, deterministic state hashing, provider seams, staged promotion contracts, raw Theme JSON writes, lock release, commerce profile safety, exact fresh-clone inputs, wrapper verification, and the complete Global Styles proof. Sol reviewed the corrected cross-plan controls before the planning-pack commit.
+- 2026-08-03: Unit 0 pushed `feat/block-theme-fse-migration` at `92df012d484b6604f82399890826df01e2864b46` through Windows Git Credential Manager and confirmed GitHub Actions read access through the connected GitHub app. This matches the existing Claude Code access path. The execution does not copy the Windows Git credential into a separate CLI store. Task 1 must add agent-runnable push triggers for its two image gates while retaining `workflow_dispatch` for maintainers.
+- 2026-08-03: Orchestrator handover. The `gpt-5.6-sol` session stopped after Unit 0. Claude Code Opus 5 is now the orchestrator by user instruction. Unit 0 is confirmed complete and merged. No later unit had authorization from the stopped session, so execution restarts at Unit 1.
+- 2026-08-03: Environment re-verified for the new orchestrator. DDEV v1.25.3 runs inside WSL2 Ubuntu, not on Windows; the `agency-starter` project is registered at the `/mnt/c/...` approot of this checkout. Every PHP and Composer command therefore runs as `wsl -d Ubuntu -e bash -lc "cd /mnt/c/Users/Aleksandar/Projects/wordpress-template && ddev composer <script>"`. Docker 29.4.3, Node v24.16.0, and npm 11.16.0 are on Windows. npm lock regeneration still uses `npx -y npm@10 install` because CI runs npm 10.
+- 2026-08-03: GitHub access re-verified. `gh` is not installed. The Git Credential Manager token for `aleksandar-djabirski` returns HTTP 200 from the REST API with repository admin permission and carries the `repo` and `workflow` scopes. The orchestrator can therefore start a workflow dispatch, list runs, and download artifacts over REST, and can push a trigger ref with Windows Git. The repository is public and its default branch is `main`.
+- 2026-08-03: Baseline gate re-run before any Unit 1 work. `ddev composer verify:fast` passed on `92df012` with deptrac at 0 violations, PHPStan clean, 22 architecture tests and 121 unit tests green.
+- 2026-08-03: Task 1 plan corrected for the image gates, per the Required CI inputs rule. `on.push.branches` gains only `ci-capture/**`. `migration-baseline-capture` and the four visual-baseline steps now accept both `workflow_dispatch` and their dedicated capture ref. `e2e` and `commerce-e2e` skip the migration capture ref so the push costs no wasted WordPress boot. The parity step excludes both capture refs. Capture branches are disposable, are never merged, and no job commits a PNG.
+- 2026-08-03: Model policy confirmed against the local Codex CLI 0.145.0 model cache. `gpt-5.6-luna`, `gpt-5.6-terra`, and `gpt-5.6-sol` all exist and all support `high`, `xhigh`, and `max`. Their defaults are medium, medium, and low, so every call must set the level explicitly. The bundled Codex plugin helper caps `--effort` at `xhigh` and cannot express `max`. The limit is in the helper script only. The model accepts `max`. The user decided to keep `max`, so bounded implementation uses the already-recorded direct CLI form `codex exec -m gpt-5.6-luna -c 'model_reasoning_effort="max"' -C <worktree>`. This is the same installed Codex toolchain, not a substitute model. A probe run on 2026-08-03 returned the banner `model: gpt-5.6-luna` and `reasoning effort: max`. Every delegated call records that banner as its proof.
+- 2026-08-03: Unit 1 starts. Implementation uses `gpt-5.6-luna` at max. Bounded task review and all accepted review fixes use `gpt-5.6-terra` at high. The unit review uses `gpt-5.6-sol` at high. Every delegated call is logged below with its model and level.

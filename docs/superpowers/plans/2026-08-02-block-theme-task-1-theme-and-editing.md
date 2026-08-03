@@ -28,7 +28,7 @@ These apply to **every** task. They are copied from `BLOCK_THEME_PROPOSAL.md` §
 - When npm dependencies change, regenerate the lock with `npx -y npm@10 install` (CI runs Node 22 / npm 10 and enforces `npm ci` lock sync).
 - Do not add Elementor or any page builder, do not add an editing-mode switch, do not keep a parallel classic template path, do not add outbound HTTP to `agency-platform`, do not commit secrets or customer state.
 - The final theme has exactly one rendering path.
-- Visual screenshots are **Linux-CI-authoritative**. Never generate or commit a baseline PNG from Windows/macOS. Baselines are produced by the documented `workflow_dispatch` CI flow and committed from the uploaded artifact.
+- Visual screenshots are **Linux-CI-authoritative**. Never generate or commit a baseline PNG from Windows/macOS. Baselines are produced by the documented CI capture flow and committed from the uploaded artifact. Both image gates keep `workflow_dispatch` for maintainers **and** carry a narrow agent-runnable push trigger on the `ci-capture/**` branch namespace, so an agent session with Git push access can start either capture without a workflow-dispatch tool. Neither trigger commits a PNG automatically.
 
 ### Commit-gate policy
 
@@ -425,7 +425,21 @@ In `package.json`, add to `scripts`:
 
 The capture must be runnable on a commit where the classic frontend still exists. It therefore cannot live in the `e2e` job: that job declares `needs: [php-qa, frontend]`, so a single red PHP check anywhere in the repository would make the baselines uncapturable. It gets its own job with **no `needs:`**.
 
+Both image gates must be startable by a maintainer **and** by an agent session that has Git push access but no workflow-dispatch tool. So each gate keeps its `workflow_dispatch` input and gains a narrow push trigger on a dedicated, single-purpose branch namespace. A capture branch is disposable: it is pushed, it produces an artifact, and it is deleted. It is never merged.
+
 In `.github/workflows/ci.yml`:
+
+0. Widen the push trigger to the capture namespace, and nothing else:
+
+```yaml
+on:
+  push:
+    branches:
+      - main
+      - 'ci-capture/**'
+  pull_request:
+  workflow_dispatch:
+```
 
 1. Add a second `workflow_dispatch` input beside `update_visual_snapshots`:
 
@@ -459,8 +473,10 @@ In `.github/workflows/ci.yml`:
   #    same font package as the e2e job, because a parity baseline is only
   #    comparable against a run with identical font rendering.
   migration-baseline-capture:
-    name: Capture migration parity baselines (manual)
-    if: github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true
+    name: Capture migration parity baselines (manual or ci-capture ref)
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+      || github.ref == 'refs/heads/ci-capture/migration-baselines'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -545,6 +561,44 @@ In `.github/workflows/ci.yml`:
 
 The `browserVersion` command launches the installed Chromium build and records its real version. Do not leave `capture-environment.txt` in the repository. Step 9 copies its values into `metadata.json` and deletes it.
 
+4. Give the **visual-baseline** gate the same dual trigger. In the `e2e` job, the two regeneration steps gain the capture ref and the two normal-path steps exclude it. Change all four `if:` expressions:
+
+```yaml
+      - name: Regenerate visual baselines (manual or ci-capture ref)
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines'
+
+      - name: Upload regenerated visual baselines
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines'
+
+      - name: Run visual regression suite
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+          && steps.visual_baselines.outputs.exists == 'true'
+
+      - name: Skip visual regression (no committed baselines yet)
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+          && steps.visual_baselines.outputs.exists == 'false'
+```
+
+Keep the existing three-path comment block above those steps and extend it to name the `ci-capture/visual-baselines` ref, so the reason each path exists stays readable.
+
+5. Keep the migration-capture push cheap. `migration-baseline-capture` deliberately has no `needs:`, so it cannot be blocked; the two DDEV browser jobs, however, would burn a full WordPress boot for nothing on that ref. Add to **both** the `e2e` job and the `commerce-e2e` job:
+
+```yaml
+    if: github.ref != 'refs/heads/ci-capture/migration-baselines'
+```
+
+Do not add that guard to `php-qa`, `frontend`, or `integration`: they are cheap, they are real signal on the exact commit being photographed, and `migration-baseline-capture` does not depend on them.
+
+6. Do not widen the trigger any further. `ci-capture/**` is the only added push namespace, no capture branch is ever merged, and no job commits a PNG. A capture branch is deleted with `git push origin --delete <ref>` once its artifact is downloaded and accepted.
+
 - [ ] **Step 8: Commit the harness (green: no guard test yet)**
 
 Run first, and require green:
@@ -565,10 +619,14 @@ git push -u origin feat/bt-task-1-theme-and-editing
 
 - [ ] **Step 9: ORCHESTRATOR GATE — capture the baselines in CI and commit them**
 
-The Sol orchestrator performs this gate through GitHub CLI or the GitHub UI. It downloads and visually inspects the artifact. Do not start the block-theme conversion until this gate passes. If the session lacks GitHub workflow access or cannot inspect the PNG files, stop and report that exact blocker.
+The orchestrator performs this gate itself. It starts the run, downloads the artifact, and opens every PNG. Do not start the block-theme conversion until this gate passes. If the session can neither start the run nor inspect the PNG files, stop and report that exact blocker.
 
-1. In GitHub Actions, run the **CI** workflow via **Run workflow** on `feat/bt-task-1-theme-and-editing` with `capture_migration_baselines = true`. Only the `migration-baseline-capture` job runs.
-2. Download the `migration-baselines` artifact.
+1. Start the capture on the task commit by **either** path, whichever the session actually has:
+   - **Workflow dispatch** — the GitHub UI's **Run workflow** on the task branch with `capture_migration_baselines = true`, or the REST equivalent `POST /repos/{owner}/{repo}/actions/workflows/ci.yml/dispatches` with `{"ref":"<branch>","inputs":{"capture_migration_baselines":"true"}}` and a token carrying the `workflow` scope.
+   - **Agent push trigger** — push the exact commit to the capture ref: `git push origin HEAD:refs/heads/ci-capture/migration-baselines`. This needs only Git push access. Delete the ref after the artifact is accepted.
+
+   Either path runs `migration-baseline-capture` on that commit and nothing else that matters.
+2. Download the `migration-baselines` artifact (`GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts`, then the `archive_download_url` zip).
 3. Unpack it over `tests/parity/__migration_baselines__/`.
 4. Open `capture-environment.txt`, copy `capturedAtCommit`, `capturedAtUtc`, `playwrightVersion`, and `browserVersion` into `metadata.json`, then **delete `capture-environment.txt`**.
 5. Confirm `metadata.json` contains no remaining `TO-BE-FILLED-BY-CAPTURE-RUN` value and that four PNGs exist (`parity-desktop/home.png`, `parity-desktop/sample-page.png`, `parity-mobile/home.png`, `parity-mobile/sample-page.png`).
@@ -6234,7 +6292,10 @@ In `.github/workflows/ci.yml`'s `e2e` job (already pinned to `ubuntu-24.04` and 
 
 ```yaml
       - name: Run migration and editing parity suites
-        if: "!(github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)"
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+          || github.ref == 'refs/heads/ci-capture/migration-baselines'
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
         env:
           WP_BASE_URL: https://agency-starter.ddev.site
         run: npm run test:parity
