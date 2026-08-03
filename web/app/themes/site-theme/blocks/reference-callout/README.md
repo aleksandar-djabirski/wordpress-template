@@ -21,6 +21,14 @@ form with that block's own `--output-path=<slug>/build` — rather than
 committed-build-output note in `.gitignore` — so a fresh clone has a working
 block editor without running `npm install`/`npm run build` first.
 
+## Frontend-only behaviour
+
+The testimonial shown in the editor is REPRESENTATIVE placeholder content.
+The real testimonial comes from `SiteCore\Contracts\Testimonials::latest()` at
+render time (see `render.php`) and is frontend-only. The editor uses a
+client-side preview instead of `ServerSideRender`, because the preview is
+faster and editable.
+
 ## Template for a new block
 
 Copy this directory, rename it, update `block.json`, rewrite `render.php`,

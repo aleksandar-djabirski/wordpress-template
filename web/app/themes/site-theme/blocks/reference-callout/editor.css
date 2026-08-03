@@ -8,3 +8,13 @@
 .wp-block-agency-reference-callout {
 	margin-block: var(--wp--preset--spacing--20);
 }
+
+/*
+ * The testimonial shown in the editor is representative placeholder content —
+ * the real one is loaded server-side at render time (see render.php). The
+ * dashed edge tells the client this specific text is not what visitors see.
+ */
+.reference-callout__testimonial--preview {
+	border-left: 3px dashed var(--wp--preset--color--neutral-300);
+	color: var(--wp--preset--color--neutral-700);
+}
