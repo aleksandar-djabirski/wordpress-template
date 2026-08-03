@@ -15,29 +15,6 @@ body {
 	margin: 0;
 }
 
-/* Keep the still-live classic path pixel-stable until the conversion commit
-   removes its root templates and PHP chrome. These selectors are unused by
-   the block templates. */
-.site-main {
-	max-width: var(--wp--style--global--content-size, 720px);
-	margin-inline: auto;
-	padding-inline: var(--wp--preset--spacing--30);
-}
-
-.skip-link {
-	position: absolute;
-	top: -999px;
-	left: 0;
-	z-index: 100000;
-	padding: var(--wp--preset--spacing--10) var(--wp--preset--spacing--20);
-	background-color: var(--wp--preset--color--base);
-	color: var(--wp--preset--color--neutral-900);
-}
-
-.skip-link:focus {
-	top: 0;
-}
-
 img,
 video {
 	max-width: 100%;
