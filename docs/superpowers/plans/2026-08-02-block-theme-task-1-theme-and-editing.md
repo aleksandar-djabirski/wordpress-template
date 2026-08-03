@@ -4907,7 +4907,7 @@ git commit -m "chore: remove classic theme path and stale tests"
 - Consumes: `templates/page.html` and the two parts from Task 5.
 - Produces:
   - Five unlocked patterns registered under the slugs `agency/hero`, `agency/split-content`, `agency/feature-grid`, `agency/cta`, `agency/content-page`.
-  - `tests/fixtures/demo-page.html` — block markup for the Phase 1 demonstration page, containing the placeholder tokens `{{MEDIA_ID}}` and `{{MEDIA_URL}}` that Task 7's `scripts/setup` substitutes.
+  - `tests/fixtures/demo-page.html` — block markup for the Phase 1 demonstration page, containing the placeholder tokens `{{MEDIA_ID}}` and `{{MEDIA_URL}}` that Task 8's `scripts/setup` substitutes. The raw fixture is deliberately NOT valid block markup — `"id":{{MEDIA_ID}}` is invalid JSON inside a block attribute — so nothing may parse it before substitution.
   - `tests/fixtures/demo-media.png` — a deterministic 1200×675 solid `#1a3c34` PNG imported as the demo page's media.
   - The demo page at `/demo/` (created by Task 8), which the editing-parity suite in Task 10 photographs.
 
