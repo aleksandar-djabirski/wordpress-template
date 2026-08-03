@@ -15,7 +15,6 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Permissions;
 
-use AgencyPlatform\Editor\EditorRestrictions;
 use Tests\Integration\IntegrationTestCase;
 
 /**
@@ -167,7 +166,7 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		self::assertTrue( wp_is_application_passwords_available_for_user( $admin ) );
 	}
 
-	public function test_code_editing_and_block_locking_are_disabled_for_client_editor(): void {
+	public function test_code_editing_is_disabled_and_block_locking_is_enabled_for_client_editor(): void {
 		$client_editor = $this->make_client_editor();
 		wp_set_current_user( $client_editor->ID );
 
@@ -181,7 +180,7 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		);
 
 		self::assertFalse( $settings['codeEditingEnabled'] );
-		self::assertFalse( $settings['canLockBlocks'] );
+		self::assertTrue( $settings['canLockBlocks'] );
 	}
 
 	public function test_code_editing_and_block_locking_are_unchanged_for_administrators(): void {
@@ -201,18 +200,36 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		self::assertTrue( $settings['canLockBlocks'] );
 	}
 
-	public function test_client_editor_is_restricted_to_the_approved_block_allow_list(): void {
+	public function test_client_editor_gets_a_registered_block_policy_not_a_fixed_list(): void {
 		$client_editor = $this->make_client_editor();
 		wp_set_current_user( $client_editor->ID );
 
-		$allowed_blocks = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
+		$allowed = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
 
-		self::assertIsArray( $allowed_blocks );
-		self::assertSame( EditorRestrictions::ALLOWED_BLOCKS, $allowed_blocks );
-		self::assertContains( 'agency/reference-callout', $allowed_blocks );
-		self::assertContains( 'core/paragraph', $allowed_blocks );
-		self::assertNotContains( 'core/html', $allowed_blocks );
-		self::assertNotContains( 'core/shortcode', $allowed_blocks );
+		self::assertIsArray( $allowed );
+		self::assertContains( 'agency/reference-callout', $allowed );
+		self::assertContains( 'core/paragraph', $allowed );
+		self::assertContains( 'core/template-part', $allowed );
+		self::assertContains( 'core/navigation', $allowed );
+		self::assertNotContains( 'core/html', $allowed );
+		self::assertNotContains( 'core/shortcode', $allowed );
+		self::assertNotContains( 'core/freeform', $allowed );
+	}
+
+	public function test_the_allowed_block_namespace_filter_is_honoured(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$filter = static fn(): array => array( 'agency' );
+		add_filter( 'agency_platform_allowed_block_namespaces', $filter );
+
+		try {
+			$allowed = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
+
+			self::assertContains( 'agency/reference-callout', (array) $allowed );
+			self::assertNotContains( 'core/paragraph', (array) $allowed );
+		} finally {
+			remove_filter( 'agency_platform_allowed_block_namespaces', $filter );
+		}
 	}
 
 	public function test_administrators_get_unrestricted_block_types(): void {

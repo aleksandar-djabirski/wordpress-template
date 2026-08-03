@@ -6,6 +6,8 @@ namespace AgencyPlatform;
 
 use AgencyPlatform\Cli\AgencyCommands;
 use AgencyPlatform\Editor\EditorRestrictions;
+use AgencyPlatform\Editor\GlobalStylesGuard;
+use AgencyPlatform\Editor\SaveValidation;
 use AgencyPlatform\Environment\EnvironmentIndicator;
 use AgencyPlatform\Roles\RolesProvider;
 use AgencyPlatform\Roles\ShopRole;
@@ -33,6 +35,8 @@ final class Plugin {
 			new CapabilityPolicy(),
 			new AdminScreenPolicy(),
 			new EditorRestrictions(),
+			new SaveValidation(),
+			new GlobalStylesGuard(),
 			new ApplicationPasswords(),
 			new FileModGuard(),
 			new MailGuard(),
