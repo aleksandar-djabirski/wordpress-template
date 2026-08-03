@@ -6062,7 +6062,7 @@ git commit -m "test: add reconciliation security and visual coverage"
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `MIGRATION_PARITY_PAGES`, `EDITING_PARITY_PAGES`, `PARITY_FONT_CSS`, `MIGRATION_BASELINE_DIR`, `applyParityFonts()`, `captureFrontend()`, `compareToBaseline()` (Task 2); the committed baselines; the demo page (Task 7); `openSiteEditorCanvas()` (Task 8).
+- Consumes: `MIGRATION_PARITY_PAGES`, `EDITING_PARITY_PAGES`, `PARITY_FONT_CSS`, `MIGRATION_BASELINE_DIR`, `applyParityFonts()`, `captureFrontend()`, `compareToBaseline()` (Task 2); the committed baselines; the demo page fixture (Task 7) seeded into a real page by `scripts/setup` and CI (Task 8); `openSiteEditorCanvas()` from `tests/e2e/helpers/wp.ts` (Task 9).
 - Produces: `tests/parity/helpers/parity.ts` additionally exports
   `export type Box = { x: number; y: number; width: number; height: number }`
   `export async function captureEditorCanvas( page: Page, route: string, maskSelectors: string[] ): Promise<Buffer>`
