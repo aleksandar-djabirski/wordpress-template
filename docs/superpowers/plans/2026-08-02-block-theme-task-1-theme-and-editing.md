@@ -5390,12 +5390,24 @@ ddev stop
 Push-Location $expectedRoot
 ddev config --project-name=bt-task-1-setup-proof --project-type=wordpress --docroot=web --create-docroot=false
 ddev start
-# The proof project has its OWN hostname. .env.example still ships the
-# agency-starter host, so scripts/setup would otherwise install WordPress with
-# the wrong WP_HOME and every by-hand URL check below would exercise the wrong
-# site. Set the proof host BEFORE the first setup run.
-ddev exec bash -c 'sed -i "s|^WP_HOME=.*|WP_HOME=https://bt-task-1-setup-proof.ddev.site|" .env 2>/dev/null || true'
 ddev exec bash scripts/setup
+```
+
+**The proof hostname needs a second pass.** `.env` does not exist before the
+first run — `scripts/setup` step 2 creates it from `.env.example`, which ships
+`WP_HOME=https://agency-starter.ddev.site`, and step 2 then leaves any existing
+`.env` untouched. So the first run always installs at the wrong host for a
+proof project with its own name, and editing `.env` beforehand is impossible
+without losing the generated salts. `WP_SITEURL` is `${WP_HOME}/wp`, so only
+`WP_HOME` needs changing. Correct it after the first run, reset only the
+disposable database, and run setup again — that second run is the real
+fresh-install proof:
+
+```bash
+ddev exec bash -c "sed -i 's|^WP_HOME=.*|WP_HOME=https://bt-task-1-setup-proof.ddev.site|' .env"
+ddev exec wp db reset --yes
+ddev exec bash scripts/setup   # the proof run
+ddev exec bash scripts/setup   # the idempotence run — must print every skip line
 ```
 
 **Docroot.** This repository is Bedrock and its own `.ddev/config.yaml` declares
