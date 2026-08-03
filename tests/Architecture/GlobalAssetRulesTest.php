@@ -20,7 +20,7 @@ final class GlobalAssetRulesTest extends TestCase {
 
 	use FormatsArchitectureFailures;
 
-	private const ALLOWED_GLOBAL_CSS = array( 'base.css', 'typography.css' );
+	private const ALLOWED_GLOBAL_CSS = array( 'base.css', 'typography.css', 'editor.css' );
 
 	private function theme(): string {
 		return $this->repo_root() . '/web/app/themes/site-theme';

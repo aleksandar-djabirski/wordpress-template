@@ -24,6 +24,18 @@ use SiteTheme\Support\Parts;
  */
 final class ThemeBootstrap {
 
+	/**
+	 * Stylesheets loaded into the block editor canvas. The frontend reset is
+	 * deliberately absent — a document-level reset fights the canvas's own
+	 * layout. GlobalAssetRulesTest asserts that exclusion once the CSS split
+	 * lands.
+	 *
+	 * @var string[]
+	 */
+	public const EDITOR_STYLESHEETS = array(
+		'assets/global/editor.css',
+	);
+
 	public static function boot(): void {
 		add_action( 'after_setup_theme', array( self::class, 'setup' ) );
 		add_action( 'wp_enqueue_scripts', array( self::class, 'enqueue_assets' ) );
@@ -52,6 +64,7 @@ final class ThemeBootstrap {
 			)
 		);
 		add_theme_support( 'editor-styles' );
+		add_editor_style( self::EDITOR_STYLESHEETS );
 		add_theme_support( 'responsive-embeds' );
 
 		register_nav_menus(

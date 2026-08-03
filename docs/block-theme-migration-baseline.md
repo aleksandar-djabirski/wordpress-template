@@ -111,3 +111,23 @@ Each listed path exists. This task changes none of these test files. The plan af
 - `scripts/setup` step 9/9 runs the menu commands. `scripts/setup:198` has `echo "==> [9/9] Ensuring a primary navigation menu exists"`. `scripts/setup:202` has `"${WP[@]}" menu create "Primary" >/dev/null`. `scripts/setup:203` has `"${WP[@]}" menu item add-custom primary "Home" "${WP_HOME_VALUE}/" >/dev/null`. `scripts/setup:208` has `"${WP[@]}" menu item add-post primary "${sample_page_id}" >/dev/null`. `scripts/setup:210` has `"${WP[@]}" menu location assign primary primary >/dev/null`. A block theme has no nav-menu locations. The location assignment fails after conversion. The current classic theme registers `primary` and `footer` at `web/app/themes/site-theme/src/Bootstrap/ThemeBootstrap.php:57-61`.
 - The refusal message says the script creates pretty permalinks. `scripts/setup:66` has `echo "    - a 'Primary' navigation menu and pretty permalinks" >&2`. `scripts/setup` has no `wp rewrite structure` call.
 - The `.github/workflows/ci.yml` `e2e` job starts at line 165. Its `Create primary navigation menu` step is at `.github/workflows/ci.yml:223`. Lines 230-233 have `ddev wp menu create "Primary"`, `ddev wp menu item add-custom primary "Home" https://agency-starter.ddev.site/`, `ddev wp menu item add-post primary "$(ddev wp post list --post_type=page --name=sample-page --field=ID)"`, and `ddev wp menu location assign primary primary`.
+
+## Phase 0 spike findings
+
+The Phase 0 spike moves the posts-index front page (`/`) and page requests such as `/sample-page/` to block rendering through `templates/index.html` and the temporary `templates/page.html`. Requests whose hierarchy resolves to a PHP template without an equal-or-higher block template remain classic; `single.php` continues to serve `/hello-world/`. `locate_block_template()` first finds the PHP template and slices the hierarchy at that template, so only block templates with equal or higher specificity can replace it.
+
+## Intentional content differences
+
+The block footer drops the classic `gmdate( 'Y' )` year and the `get_bloginfo( 'name' )` interpolation because no core block produces either. The copyright line is client-editable static text.
+
+## Required test replacements
+
+This spike widens `GlobalAssetRulesTest::ALLOWED_GLOBAL_CSS` to include `editor.css`. Tasks 6 and 7 must replace the classic-path assertions coupled to the migration:
+
+- `tests/Architecture/DirectoryRulesTest.php`
+- `tests/Architecture/ThemeBootstrapTest.php`
+- `tests/Architecture/GlobalAssetRulesTest.php`
+- `tests/Unit/SiteTheme/PartsTest.php`
+- `tests/e2e/smoke.spec.ts`
+- `tests/visual/__screenshots__/chromium-desktop/home-desktop.png`
+- `tests/visual/__screenshots__/chromium-mobile/home-mobile.png`

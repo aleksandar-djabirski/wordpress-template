@@ -1,6 +1,10 @@
 {
   "$schema": "https://schemas.wp.org/trunk/theme.json",
   "version": 3,
+  "templateParts": [
+    { "name": "site-header", "title": "Site Header", "area": "header" },
+    { "name": "site-footer", "title": "Site Footer", "area": "footer" }
+  ],
   "settings": {
     "appearanceTools": false,
     "useRootPaddingAwareAlignments": true,
