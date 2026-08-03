@@ -26,7 +26,7 @@ final class GlobalAssetRulesTest extends TestCase {
 		return $this->repo_root() . '/web/app/themes/site-theme';
 	}
 
-	public function test_global_stylesheet_directory_holds_only_base_and_typography(): void {
+	public function test_global_stylesheet_directory_holds_only_the_allowed_files(): void {
 		$global  = $this->theme() . '/assets/global';
 		$entries = is_dir( $global ) ? scandir( $global ) : false;
 
