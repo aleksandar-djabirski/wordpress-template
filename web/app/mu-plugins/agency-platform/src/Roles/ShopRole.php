@@ -33,10 +33,12 @@ final class ShopRole {
 	 * It deliberately stays INSIDE the product/coupon/order surface: no
 	 * `delete_others_*` (a shop manager can remove their own catalogue entries
 	 * but not sweep away colleagues' work), and nothing store-wide-admin —
-	 * `manage_options`, `edit_theme_options`, `install_plugins`, `switch_themes`
-	 * are all still withheld (proven by ShopManagerCapabilitiesTest's negative
-	 * assertions). `manage_woocommerce` (WooCommerce Settings access) is a
-	 * documented per-project dial — see docs/editing-strictness.md.
+	 * `manage_options`, `install_plugins`, `switch_themes` are all still
+	 * withheld; `edit_theme_options` IS inherited from `client_editor` so a
+	 * shop manager gets the same Site Editor access, bounded by
+	 * `AgencyPlatform\Security\AdminScreenPolicy` (proven by
+	 * ShopManagerCapabilitiesTest). `manage_woocommerce` (WooCommerce Settings
+	 * access) is a documented per-project dial — see docs/editing-strictness.md.
 	 *
 	 * @var string[]
 	 */

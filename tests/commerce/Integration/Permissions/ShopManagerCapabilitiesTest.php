@@ -7,8 +7,9 @@
  * The base ClientEditorCapabilitiesTest already proves this role is ABSENT in
  * the base profile (ShopRole's class_exists('WooCommerce') guard). This is its
  * commerce-profile mirror: the role exists, carries the full workflow-complete
- * shop cap set on top of client_editor's, and still cannot install plugins,
- * switch themes, or edit theme options.
+ * shop cap set on top of client_editor's, and still cannot install plugins or
+ * switch themes, and can reach the Site Editor but not the Themes, Customizer,
+ * Widgets or file-editor screens.
  *
  * @package Tests\Commerce\Integration
  */
@@ -101,11 +102,26 @@ final class ShopManagerCapabilitiesTest extends IntegrationTestCase {
 		$shop_manager = $this->make_shop_manager();
 		wp_set_current_user( $shop_manager->ID );
 
-		foreach ( array( 'install_plugins', 'switch_themes', 'edit_theme_options', 'manage_options', 'unfiltered_html' ) as $capability ) {
+		foreach ( array( 'install_plugins', 'switch_themes', 'manage_options', 'unfiltered_html' ) as $capability ) {
 			self::assertFalse(
 				current_user_can( $capability ),
 				"client_shop_manager must NOT have the '{$capability}' capability."
 			);
 		}
+	}
+
+	/**
+	 * client_shop_manager derives from client_editor, so it inherits the Site
+	 * Editor capability. The screens edit_theme_options would otherwise expose
+	 * are closed by AgencyPlatform\Security\AdminScreenPolicy, not by
+	 * withholding the capability.
+	 */
+	public function test_shop_manager_inherits_site_editor_access(): void {
+		$shop_manager = $this->make_shop_manager();
+		wp_set_current_user( $shop_manager->ID );
+
+		self::assertTrue( current_user_can( 'edit_theme_options' ) );
+		self::assertFalse( current_user_can( 'edit_css' ) );
+		self::assertFalse( current_user_can( 'customize' ) );
 	}
 }
