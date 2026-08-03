@@ -213,6 +213,25 @@ final class BlockThemeStructureTest extends TestCase {
 		}
 	}
 
+	public function test_theme_registers_the_pages_pattern_category(): void {
+		self::assertMatchesRegularExpression(
+			"/register_block_pattern_category\(\s*'pages'/",
+			$this->read( $this->theme() . '/src/Bootstrap/ThemeBootstrap.php' ),
+			'Patterns that declare the pages category need the category to be registered, or WordPress does not expose them under that inserter category.'
+		);
+	}
+
+	public function test_git_owned_pattern_markup_is_included_in_ref_guard(): void {
+		$method = new \ReflectionMethod( $this, 'markup_files' );
+		$files  = $method->invoke( $this );
+
+		self::assertContains(
+			$this->theme() . '/patterns/content-page.php',
+			$files,
+			'Git-owned pattern markup must be checked for database-bound ref attributes.'
+		);
+	}
+
 	public function test_no_classic_php_remains_under_templates_or_parts(): void {
 		foreach ( array( '/templates', '/parts' ) as $directory ) {
 			foreach ( $this->entries( $this->theme() . $directory ) as $entry ) {
@@ -246,7 +265,7 @@ final class BlockThemeStructureTest extends TestCase {
 	private function markup_files(): array {
 		$files = array();
 
-		foreach ( array( '/templates', '/parts' ) as $directory ) {
+		foreach ( array( '/templates', '/parts', '/patterns' ) as $directory ) {
 			foreach ( $this->entries( $this->theme() . $directory ) as $entry ) {
 				$files[] = $this->theme() . $directory . '/' . $entry;
 			}

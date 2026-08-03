@@ -54,6 +54,7 @@ final class ThemeBootstrap {
 	public static function boot(): void {
 		add_action( 'after_setup_theme', array( self::class, 'setup' ) );
 		add_action( 'wp_enqueue_scripts', array( self::class, 'enqueue_assets' ) );
+		add_action( 'init', array( self::class, 'register_pattern_categories' ), 9 );
 		add_action( 'init', array( self::class, 'register_block' ) );
 	}
 
@@ -65,6 +66,15 @@ final class ThemeBootstrap {
 	public static function setup(): void {
 		add_theme_support( 'editor-styles' );
 		add_editor_style( self::EDITOR_STYLESHEETS );
+	}
+
+	public static function register_pattern_categories(): void {
+		register_block_pattern_category(
+			'pages',
+			array(
+				'label' => __( 'Pages', 'site-theme' ),
+			)
+		);
 	}
 
 	/**
