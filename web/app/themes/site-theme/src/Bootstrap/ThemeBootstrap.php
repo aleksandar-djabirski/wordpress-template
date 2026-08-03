@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace SiteTheme\Bootstrap;
 
-use SiteTheme\Support\Parts;
-
 /**
  * Site Theme's single wiring point. functions.php stays a thin ≤50-line shell
  * (an ABSPATH guard plus one boot() call); every setup step lives here as its
@@ -67,13 +65,6 @@ final class ThemeBootstrap {
 	public static function setup(): void {
 		add_theme_support( 'editor-styles' );
 		add_editor_style( self::EDITOR_STYLESHEETS );
-
-		register_nav_menus(
-			array(
-				'primary' => __( 'Primary', 'site-theme' ),
-				'footer'  => __( 'Footer', 'site-theme' ),
-			)
-		);
 	}
 
 	/**
@@ -95,20 +86,6 @@ final class ThemeBootstrap {
 			);
 
 			$dependencies = array( $handle );
-		}
-
-		foreach ( Parts::MANIFEST as $part ) {
-			foreach ( Parts::assets( $part ) as $type => $relative_path ) {
-				$file = "{$theme_dir}/{$relative_path}";
-				$uri  = "{$theme_uri}/{$relative_path}";
-				$ver  = (string) filemtime( $file );
-
-				if ( 'css' === $type ) {
-					wp_enqueue_style( "site-theme-{$part}", $uri, array( 'site-theme-frontend-reset' ), $ver );
-				} else {
-					wp_enqueue_script( "site-theme-{$part}", $uri, array(), $ver, true );
-				}
-			}
 		}
 	}
 

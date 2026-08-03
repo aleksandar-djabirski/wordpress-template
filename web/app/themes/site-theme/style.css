@@ -3,7 +3,7 @@ Theme Name: Site Theme
 Theme URI: https://github.com/agency/agency-starter
 Author: Agency
 Author URI: https://github.com/agency
-Description: The hybrid/classic theme for the agency-starter Bedrock project — PHP templates for structure, theme.json for design tokens, blocks for editable UI, and non-editable "parts" for chrome. No page builder, no full Site Editor.
+Description: The native block theme for the agency-starter Bedrock project — HTML block templates and parts, theme.json for design tokens, blocks and patterns for editable UI. Full Site Editor control for client roles within the approved block system. No page builder, no classic fallback.
 Version: 0.1.0
 Requires at least: 6.8
 Requires PHP: 8.3
@@ -13,10 +13,10 @@ License URI: https://opensource.org/licenses/MIT
 Text Domain: site-theme
 
 This file intentionally contains only the theme header comment above.
-Global CSS lives in assets/global/ (base.css, typography.css); part and
-block CSS live alongside their PHP under parts/ and blocks/ (for example
-parts/site-header/site-header.css, blocks/reference-callout/style.css)
-and are enqueued by SiteTheme\Bootstrap\ThemeBootstrap::enqueue_assets().
+Global CSS lives in assets/global/ (frontend-reset.css, shared.css,
+editor.css); block CSS lives alongside its block under blocks/ and is
+enqueued by SiteTheme\Bootstrap\ThemeBootstrap::enqueue_assets(). Parts are
+HTML block markup under parts/.
 
 Note for maintainers: keep this comment free of a literal asterisk
 immediately followed by a slash — that two-character sequence closes a

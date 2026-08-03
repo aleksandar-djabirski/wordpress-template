@@ -4,7 +4,8 @@
  *
  * Deliberately minimal, and kept that way on purpose (architecture tests
  * enforce a line-count ceiling on this exact file): every real setup step
- * lives in \SiteTheme\Bootstrap\ThemeBootstrap, wired via named hook
+ * lives in \SiteTheme\Bootstrap\ThemeBootstrap; this is a native block theme
+ * whose templates live in templates/*.html. It is wired via named hook
  * callbacks rather than closures or inline code here. Bedrock's
  * web/wp-config.php requires vendor/autoload.php before WordPress loads
  * any theme, so SiteTheme\* classes are already autoloadable by the time
