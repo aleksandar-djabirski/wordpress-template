@@ -1520,9 +1520,7 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 	 * READ BACK, because the whole point of Release 1 is that a client's Site
 	 * Editor save actually persists.
 	 *
-	 * Task 5 runs before this task and creates the required block-theme
-	 * environment. These required tests have no skip path.
-	 *
+	 * These two required tests have no skip path.
 	 */
 	public function test_client_editor_can_create_and_read_back_a_template(): void {
 		wp_set_current_user( $this->make_client_editor()->ID );
@@ -1613,6 +1611,31 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 	}
 }
 ```
+
+**ORCHESTRATOR CORRECTION, 2026-08-03 — ordering defect.** The two write-back
+methods above, `test_client_editor_can_create_and_read_back_a_template` and
+`test_client_editor_can_create_and_read_back_a_template_part`, are **NOT added in
+Task 3**. Task 6 Step 12 adds them.
+
+The original text of this step claimed "Task 5 runs before this task and creates
+the required block-theme environment." That claim is false: the execution order
+is Task 3, then Task 4, then Task 5. Both methods send a REST **update** to
+`<stylesheet>//index` and `<stylesheet>//site-footer`. Those identifiers resolve
+only once `templates/index.html` and `parts/site-footer.html` exist, which
+happens in Task 5's spike and Task 6's conversion. Before then WordPress returns
+404, `wp_is_block_theme()` returns `0`, and Task 3's own Step 14 gate is red.
+That contradicts this plan's commit-gate policy, which forbids landing a commit
+on a gate the plan already knows is red.
+
+Proven on 2026-08-03: with the classic theme still in place, both methods failed
+with a 404, and the rest of Task 3 passed — unit 160 tests / 352 assertions,
+integration 39 tests / 112 assertions with only these two red, deptrac 0
+violations.
+
+So Task 3 creates `ClientSiteEditorAccessTest.php` WITHOUT those two methods.
+Everything else in the file stays. The collection-read, navigation-create, and
+Global Styles tests all pass against the classic theme and are kept here,
+because they prove capability wiring rather than block-template resolution.
 
 - [ ] **Step 13: Update the commerce capability test**
 
@@ -4679,6 +4702,66 @@ final class BlockTemplateIntegrityTest extends IntegrationTestCase {
 	}
 }
 ```
+
+**ORCHESTRATOR CORRECTION, 2026-08-03 — deferred from Task 3.** Also add these
+two methods to `tests/Integration/Permissions/ClientSiteEditorAccessTest.php`
+now. Task 3 Step 12 created that file but deliberately left these two out,
+because before the conversion they returned 404. See the correction note in
+Task 3 Step 12 for the evidence.
+
+They belong here and not earlier because both send a REST **update** to a
+file-backed identifier. `<stylesheet>//index` resolves only once
+`templates/index.html` exists, and `<stylesheet>//site-footer` only once
+`parts/site-footer.html` exists. Both exist after this task's conversion.
+
+```php
+	/**
+	 * Reading a collection proves nothing about editing. These two write, then
+	 * READ BACK, because the whole point of Release 1 is that a client's Site
+	 * Editor save actually persists.
+	 *
+	 * These two required tests have no skip path.
+	 */
+	public function test_client_editor_can_create_and_read_back_a_template(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//index';
+		$content = "<!-- wp:paragraph -->\n<p>Client template write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/templates/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client template write.',
+			(string) get_block_template( $id, 'wp_template' )->content
+		);
+	}
+
+	public function test_client_editor_can_create_and_read_back_a_template_part(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//site-footer';
+		$content = "<!-- wp:paragraph -->\n<p>Client footer write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/template-parts/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client footer write.',
+			(string) get_block_template( $id, 'wp_template_part' )->content
+		);
+	}
+```
+
+Confirm `wp_is_block_theme()` returns `1` before you run these. If it returns
+`0`, the conversion is incomplete and these tests will fail with a 404 for that
+reason, not because the capability wiring is wrong.
 
 - [ ] **Step 13: Teach the block index generator about HTML templates (HARD GATE for the commerce track)**
 
