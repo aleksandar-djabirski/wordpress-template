@@ -1,0 +1,22 @@
+{
+  "capturedAtCommit": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "capturedAtUtc": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "runnerImage": "ubuntu-24.04",
+  "browser": "chromium",
+  "browserVersion": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "playwrightVersion": "TO-BE-FILLED-BY-CAPTURE-RUN",
+  "fontStack": "DejaVu Sans",
+  "fontPackage": "fonts-dejavu-core",
+  "contentFixtures": [
+    "WordPress core install defaults: Sample Page (slug sample-page), Hello world! post",
+    "One classic nav menu assigned to the primary location (scripts/setup step 9)"
+  ],
+  "projects": {
+    "parity-desktop": { "viewport": { "width": 1440, "height": 900 }, "deviceScaleFactor": 1 },
+    "parity-mobile": { "viewport": { "width": 390, "height": 844 }, "deviceScaleFactor": 1 }
+  },
+  "pages": [
+    { "name": "home", "path": "/", "maxDiffRatio": 0.05, "maskSelectors": [] },
+    { "name": "sample-page", "path": "/sample-page/", "maxDiffRatio": 0.05, "maskSelectors": [] }
+  ]
+}

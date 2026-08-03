@@ -46,6 +46,7 @@ export default defineConfig({
 	projects: [
 		{
 			name: 'chromium-desktop',
+			testIgnore: /[\\/]parity[\\/]/,
 			use: {
 				...devices[ 'Desktop Chrome' ],
 				viewport: { width: 1280, height: 800 },
@@ -53,8 +54,30 @@ export default defineConfig({
 		},
 		{
 			name: 'chromium-mobile',
+			testIgnore: /[\\/]parity[\\/]/,
 			use: {
 				...devices[ 'Pixel 7' ],
+			},
+		},
+		// Parity projects use the exact viewports BLOCK_THEME_PROPOSAL.md §9.6
+		// mandates, and run ONLY the parity specs.
+		{
+			name: 'parity-desktop',
+			testMatch: /[\\/]parity[\\/].*\.spec\.ts$/,
+			use: {
+				...devices[ 'Desktop Chrome' ],
+				viewport: { width: 1440, height: 900 },
+				deviceScaleFactor: 1,
+			},
+		},
+		{
+			name: 'parity-mobile',
+			testMatch: /[\\/]parity[\\/].*\.spec\.ts$/,
+			use: {
+				...devices[ 'Desktop Chrome' ],
+				viewport: { width: 390, height: 844 },
+				deviceScaleFactor: 1,
+				hasTouch: true,
 			},
 		},
 	],
