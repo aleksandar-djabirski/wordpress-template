@@ -2,7 +2,7 @@
  * Editor-only canvas corrections. WordPress scopes every selector in this file
  * to .editor-styles-wrapper automatically (see add_editor_style()), so write
  * them unscoped. Nothing here may be needed on the frontend — if a rule is,
- * it belongs in a stylesheet the frontend also loads.
+ * it belongs in shared.css.
  */
 
 body {

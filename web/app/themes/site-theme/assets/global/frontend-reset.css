@@ -1,0 +1,81 @@
+/*
+ * Frontend-only reset and accessibility helpers. NEVER passed to
+ * add_editor_style() — see SiteTheme\Bootstrap\ThemeBootstrap::EDITOR_STYLESHEETS
+ * and GlobalAssetRulesTest. Colors come exclusively from theme.json design
+ * tokens (var(--wp--preset--*)); no raw values here.
+ */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+}
+
+/* Keep the still-live classic path pixel-stable until the conversion commit
+   removes its root templates and PHP chrome. These selectors are unused by
+   the block templates. */
+.site-main {
+	max-width: var(--wp--style--global--content-size, 720px);
+	margin-inline: auto;
+	padding-inline: var(--wp--preset--spacing--30);
+}
+
+.skip-link {
+	position: absolute;
+	top: -999px;
+	left: 0;
+	z-index: 100000;
+	padding: var(--wp--preset--spacing--10) var(--wp--preset--spacing--20);
+	background-color: var(--wp--preset--color--base);
+	color: var(--wp--preset--color--neutral-900);
+}
+
+.skip-link:focus {
+	top: 0;
+}
+
+img,
+video {
+	max-width: 100%;
+	height: auto;
+}
+
+/* Visually hidden, but available to assistive tech. clip-path replaces the
+   deprecated clip property; inset(50%) collapses the box to a point. */
+.screen-reader-text {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* WordPress injects the block-theme skip link as
+   <a class="skip-link screen-reader-text" ...> and points it at the first
+   <main> element's id, which every template sets to site-main. Revealing it
+   on focus is the theme's job. */
+.screen-reader-text:focus {
+	position: fixed;
+	top: var(--wp--preset--spacing--10);
+	left: var(--wp--preset--spacing--10);
+	z-index: 100000;
+	width: auto;
+	height: auto;
+	padding: var(--wp--preset--spacing--10) var(--wp--preset--spacing--20);
+	clip-path: none;
+	background-color: var(--wp--preset--color--base);
+	color: var(--wp--preset--color--neutral-900);
+}
+
+:focus-visible {
+	outline: 2px solid var(--wp--preset--color--accent);
+	outline-offset: 2px;
+}

@@ -1,0 +1,27 @@
+/*
+ * Editor-safe design-system classes. Loaded on the frontend by
+ * ThemeBootstrap::enqueue_assets() and into the editor canvas by
+ * add_editor_style() — that shared load is what makes the Site Editor canvas
+ * match the frontend.
+ *
+ * Colors, spacing and typography come exclusively from theme.json design
+ * tokens. Git-authored templates and parts carry NO inline style attributes
+ * (hand-writing a block's serialized style output is how "unexpected or
+ * invalid content" warnings happen); everything visual lives here, keyed off
+ * the className the block markup sets.
+ */
+
+body {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.6;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.2;
+}
