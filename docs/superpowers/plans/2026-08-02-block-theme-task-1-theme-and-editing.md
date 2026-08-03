@@ -1704,6 +1704,37 @@ git commit -m "feat: add client Site Editor capability policy"
 
 ## Task 4: Registered-block policy and server-side save validation
 
+> **ORCHESTRATOR CORRECTION, 2026-08-03 — EXECUTION ORDER. Run Task 5 BEFORE
+> this task.**
+>
+> This task's Step 10 requires block templates on disk. Its own text says "Task 5
+> has already put block templates on disk" and adds an execution correction
+> repeating that a missing block-theme environment is a failing task gate. Task 3
+> Step 12 made the same assumption. Both are right about the dependency and wrong
+> about the order: the numbering says Task 5 comes third, and it does not.
+>
+> Task 5 settles it. Its own `Interfaces` block states "Consumes: nothing from
+> Tasks 3–4." Task 5 depends on neither task, and both depend on Task 5's
+> `templates/index.html`, `parts/site-header.html`, and `parts/site-footer.html`.
+> So the real dependency order is Task 1, Task 2, **Task 5**, Task 3, Task 4,
+> Task 6.
+>
+> Proven on 2026-08-03: with the classic theme still active, Luna stopped before
+> Step 1 and reported that `templates/index.html` was absent and
+> `wp_is_block_theme()` returned false, exactly as this brief required instead of
+> writing tests that could not pass.
+>
+> Task 3 already shipped at `1ae633e` before this was understood. That is safe
+> and needs no rework: its two block-dependent tests were deferred to Task 6,
+> which still creates the files they need. Do not move them again.
+>
+> **Second correction, same task.** Step 11 says
+> `ClientEditorCapabilitiesTest::test_code_editing_is_disabled_and_block_locking_is_enabled_for_client_editor`
+> is written here and that `canLockBlocks` becomes `true`. The repository still
+> carries the older `test_code_editing_and_block_locking_are_disabled_for_client_editor`,
+> which asserts `canLockBlocks === false`. This task must REPLACE that older test
+> rather than leave both. Two tests asserting opposite values cannot both pass.
+
 Background facts verified against WordPress 7.0.2:
 
 - `rest_pre_insert_{$post_type}` is applied by `WP_REST_Posts_Controller::prepare_item_for_database()` (line 1531) **and** by `WP_REST_Templates_Controller::prepare_item_for_database()` (line 661). Returning a `WP_Error` from it aborts the request with that error. This is the only save filter that can reject cleanly, which is why it is the enforcement point (see Decision 3).
