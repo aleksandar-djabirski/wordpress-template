@@ -46,6 +46,15 @@ export const EDITING_PARITY_PAGES: ParityPage[] = [
 	{ name: 'sample-page', path: '/sample-page/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
 ];
 
+/**
+ * The demo's testimonial is an editor-only preview with no frontend
+ * counterpart. Editing parity compares the equivalent post-content projection
+ * and the e2e suite separately verifies that editors can see this preview.
+ */
+export const EDITING_EDITOR_ONLY_SELECTORS: Record< string, string[] > = {
+	demo: [ '.reference-callout__testimonial--preview' ],
+};
+
 export async function applyParityFonts( target: Page | Frame ): Promise< void > {
 	await target.addStyleTag( { content: PARITY_FONT_CSS } );
 }
@@ -75,17 +84,27 @@ export async function captureEditorCanvas(
 	route: string,
 	maskSelectors: string[],
 	rootSelector = '.editor-styles-wrapper',
-	matchFrontendContentWidth = false
+	frontendContentWidth?: number,
+	editorOnlySelectors: string[] = []
 ): Promise< Buffer > {
 	const canvas = await openSiteEditorCanvas( page, route );
 	const root = canvas.locator( rootSelector ).first();
+	const editorGuideContinue = page.getByRole( 'dialog' ).getByRole( 'button', { name: /^continue$/i } ).first();
 
-	if ( matchFrontendContentWidth ) {
-		await root.evaluate( ( element ) => {
-			element.style.setProperty( 'width', 'min(100%, var(--wp--style--global--content-size))', 'important' );
+	if ( await editorGuideContinue.isVisible().catch( () => false ) ) {
+		await editorGuideContinue.click();
+	}
+
+	if ( undefined !== frontendContentWidth ) {
+		if ( ! Number.isFinite( frontendContentWidth ) || frontendContentWidth <= 0 ) {
+			throw new Error( `captureEditorCanvas: frontend content width must be a positive finite number, got ${ frontendContentWidth }.` );
+		}
+
+		await root.evaluate( ( element, width ) => {
+			element.style.setProperty( 'width', `${ width }px`, 'important' );
 			element.style.setProperty( 'margin-inline', 'auto', 'important' );
 			element.style.setProperty( 'padding-inline', '0', 'important' );
-		} );
+		}, frontendContentWidth );
 	}
 
 	await applyParityFonts( page );
@@ -95,12 +114,117 @@ export async function captureEditorCanvas(
 		element.ownerDocument.head.appendChild( style );
 	}, PARITY_FONT_CSS );
 	await root.evaluate( ( element ) => element.ownerDocument.fonts.ready );
-
-	return root.screenshot( {
-		animations: 'disabled',
-		caret: 'hide',
-		mask: maskSelectors.map( ( selector ) => canvas.locator( selector ) ),
+	await root.locator( 'img' ).evaluateAll( async ( images ) => {
+		await Promise.all(
+			images.map(
+				( image ) =>
+					image.complete
+						? image.decode().catch( () => undefined )
+						: new Promise< void >( ( resolve ) => {
+							image.addEventListener( 'load', () => resolve(), { once: true } );
+							image.addEventListener( 'error', () => resolve(), { once: true } );
+						} )
+			)
+		);
 	} );
+
+	for ( const selector of editorOnlySelectors ) {
+		const editorOnlyContent = root.locator( selector );
+
+		if ( 0 === ( await editorOnlyContent.count() ) ) {
+			throw new Error( `captureEditorCanvas: editor-only selector "${ selector }" was not found.` );
+		}
+
+		await editorOnlyContent.evaluateAll( ( elements ) => elements.forEach( ( element ) => element.remove() ) );
+	}
+
+	const frame = page.locator( 'iframe[name="editor-canvas"]' );
+	const frameBox = await frame.boundingBox();
+	const rootBox = await root.boundingBox();
+
+	if ( ! frameBox || ! rootBox ) {
+		throw new Error( 'captureEditorCanvas: the editor canvas or capture root is not visible.' );
+	}
+
+	const geometry = await root.evaluate( ( element ) => {
+		const frameWindow = element.ownerDocument.defaultView;
+		const rect = element.getBoundingClientRect();
+
+		frameWindow?.scrollTo( 0, 0 );
+
+		return {
+			top: rect.top,
+			width: rect.width,
+			height: rect.height,
+			viewportHeight: frameWindow?.innerHeight ?? 0,
+		};
+	} );
+
+	if ( geometry.height <= geometry.viewportHeight ) {
+		return root.screenshot( {
+			animations: 'disabled',
+			caret: 'hide',
+			mask: maskSelectors.map( ( selector ) => canvas.locator( selector ) ),
+		} );
+	}
+
+	if ( maskSelectors.length > 0 ) {
+		throw new Error( 'captureEditorCanvas: tall canvas capture does not support masks.' );
+	}
+
+	const width = Math.round( geometry.width );
+	const height = Math.ceil( geometry.height );
+	const viewportHeight = Math.floor( geometry.viewportHeight );
+	const stitched = new PNG( { width, height } );
+	let offset = 0;
+
+	while ( offset < height ) {
+		await root.evaluate( ( element, scrollTop ) => {
+			element.ownerDocument.defaultView?.scrollTo( 0, scrollTop );
+			return new Promise< void >( ( resolve ) => {
+				requestAnimationFrame( () => requestAnimationFrame( () => resolve() ) );
+			} );
+		}, Math.max( 0, geometry.top ) + offset );
+
+		const rootTop = await root.evaluate( ( element ) => ( {
+			top: element.getBoundingClientRect().top,
+		} ) );
+		const visibleRootOffset = Math.max( 0, -rootTop.top );
+		const clipOffset = offset - visibleRootOffset;
+		const tileHeight = Math.min( height - offset, Math.floor( viewportHeight - Math.max( 0, clipOffset ) ) );
+
+		if ( clipOffset < -1 || tileHeight <= 0 ) {
+			throw new Error( 'captureEditorCanvas: the editor canvas has no visible tile area.' );
+		}
+
+		const tileBuffer = await page.screenshot( {
+			clip: {
+				x: Math.round( rootBox.x ),
+				y: Math.round( frameBox.y + Math.max( 0, clipOffset ) ),
+				width,
+				height: tileHeight,
+			},
+			animations: 'disabled',
+			caret: 'hide',
+		} );
+		const tile = PNG.sync.read( tileBuffer );
+
+		PNG.bitblt(
+			tile,
+			stitched,
+			0,
+			0,
+			Math.min( tile.width, width ),
+			Math.min( tile.height, tileHeight ),
+			0,
+			offset
+		);
+		offset += tileHeight;
+	}
+
+	await root.evaluate( ( element ) => element.ownerDocument.defaultView?.scrollTo( 0, 0 ) );
+
+	return PNG.sync.write( stitched );
 }
 
 export type Box = { x: number; y: number; width: number; height: number };
@@ -154,11 +278,27 @@ export async function effectiveCanvasWidth(
 	page: Page,
 	rootSelector = '.editor-styles-wrapper'
 ): Promise< number > {
-	return page
+	const width = await page
 		.frameLocator( 'iframe[name="editor-canvas"]' )
 		.locator( rootSelector )
 		.first()
 		.evaluate( ( element ) => element.getBoundingClientRect().width );
+
+	if ( ! Number.isFinite( width ) ) {
+		throw new Error( `effectiveCanvasWidth: expected a finite number, got ${ width }.` );
+	}
+
+	return width;
+}
+
+export async function layoutWidth( scope: Page | FrameLocator, selector: string ): Promise< number > {
+	const width = await scope.locator( selector ).first().evaluate( ( element ) => element.getBoundingClientRect().width );
+
+	if ( ! Number.isFinite( width ) ) {
+		throw new Error( `layoutWidth: "${ selector }" returned a non-number width: ${ width }.` );
+	}
+
+	return width;
 }
 
 export async function computedStyles(

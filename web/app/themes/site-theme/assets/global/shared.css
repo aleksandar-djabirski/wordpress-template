@@ -16,6 +16,27 @@ body {
 	line-height: 1.6;
 }
 
+#site-main {
+	max-width: var(--wp--style--global--content-size);
+	margin-inline: auto;
+	padding-inline: var(--wp--preset--spacing--30);
+}
+
+.wp-block-post-content blockquote,
+.editor-styles-wrapper .wp-block-post-content blockquote {
+	margin-inline: var(--wp--preset--spacing--40) !important;
+	margin-left: var(--wp--preset--spacing--40) !important;
+	margin-right: var(--wp--preset--spacing--40) !important;
+}
+
+.wp-block-post-content > * {
+	margin-block: 1em 0 !important;
+}
+
+.wp-block-post-content > :first-child {
+	margin-block-start: 0.25em !important;
+}
+
 h1,
 h2,
 h3,

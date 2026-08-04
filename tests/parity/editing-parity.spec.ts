@@ -1,11 +1,13 @@
 import { expect, test } from '@playwright/test';
 import {
 	EDITING_PARITY_PAGES,
+	EDITING_EDITOR_ONLY_SELECTORS,
 	captureEditorCanvas,
 	captureFrontendRegion,
 	compareBuffers,
 	computedStyles,
 	effectiveCanvasWidth,
+	layoutWidth,
 	resolvePageId,
 } from './helpers/parity';
 import { CREDS, loginAs } from '../e2e/helpers/auth';
@@ -15,7 +17,10 @@ import { CREDS, loginAs } from '../e2e/helpers/auth';
  * The `/page/{id}` route is a post-editing context, so it renders content only
  * and has no template chrome. Both screenshots therefore use the matching
  * post-content subtree. This excludes the frontend title and the editor
- * wrapper padding from the comparison.
+ * wrapper padding from the comparison. The demo's testimonial preview is an
+ * intentional editor-only projection with no frontend counterpart, so the
+ * comparison removes that content from the editor projection; the e2e suite
+ * separately verifies that the preview remains available to editors.
  */
 for ( const parityPage of EDITING_PARITY_PAGES ) {
 	test( `editing parity: ${ parityPage.name }`, async ( { page }, testInfo ) => {
@@ -42,10 +47,7 @@ for ( const parityPage of EDITING_PARITY_PAGES ) {
 			parityPage.maskSelectors,
 			frontendContentSelector
 		);
-		const frontendWidth = await page
-			.locator( frontendContentSelector )
-			.first()
-			.evaluate( ( element ) => element.getBoundingClientRect().width );
+		const frontendWidth = await layoutWidth( page, frontendContentSelector );
 		const frontendStyles = await computedStyles( page, frontendContentSelector, styleProperties );
 
 		await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
@@ -56,7 +58,8 @@ for ( const parityPage of EDITING_PARITY_PAGES ) {
 			`/page/${ postId }`,
 			parityPage.maskSelectors,
 			editorContentSelector,
-			true
+			frontendWidth,
+			EDITING_EDITOR_ONLY_SELECTORS[ parityPage.name ] ?? []
 		);
 		const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
 		const canvasWidth = await effectiveCanvasWidth( page, editorContentSelector );
