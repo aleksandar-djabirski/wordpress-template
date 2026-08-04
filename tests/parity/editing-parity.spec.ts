@@ -13,16 +13,16 @@ import { CREDS, loginAs } from '../e2e/helpers/auth';
 /**
  * Compares the client Site Editor canvas with the frontend for the same page.
  * The `/page/{id}` route is a post-editing context, so it renders content only
- * and has no template chrome. Both screenshots therefore use their content
- * roots: `main#site-main` on the frontend and `.editor-styles-wrapper` in the
- * editor canvas.
+ * and has no template chrome. Both screenshots therefore use the matching
+ * post-content subtree. This excludes the frontend title and the editor
+ * wrapper padding from the comparison.
  */
 for ( const parityPage of EDITING_PARITY_PAGES ) {
 	test( `editing parity: ${ parityPage.name }`, async ( { page }, testInfo ) => {
 		test.setTimeout( 120_000 );
 
-		const frontendContentSelector = 'main#site-main';
-		const editorContentSelector = '.editor-styles-wrapper';
+		const frontendContentSelector = 'main#site-main .wp-block-post-content';
+		const editorContentSelector = '.wp-block-post-content';
 		const styleProperties = [
 			'font-family',
 			'font-size',
@@ -51,9 +51,15 @@ for ( const parityPage of EDITING_PARITY_PAGES ) {
 		await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 
 		const postId = await resolvePageId( page, parityPage.path );
-		const canvasShot = await captureEditorCanvas( page, `/page/${ postId }`, parityPage.maskSelectors );
+		const canvasShot = await captureEditorCanvas(
+			page,
+			`/page/${ postId }`,
+			parityPage.maskSelectors,
+			editorContentSelector,
+			true
+		);
 		const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
-		const canvasWidth = await effectiveCanvasWidth( page );
+		const canvasWidth = await effectiveCanvasWidth( page, editorContentSelector );
 
 		expect(
 			Math.abs( canvasWidth - frontendWidth ),

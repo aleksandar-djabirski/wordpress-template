@@ -7,6 +7,10 @@
  * Post Types: page
  * Description: A complete starting page: hero, split content, feature grid, and a closing call to action.
  *
+ * Component markup below deliberately copies hero, split-content, feature-grid, and cta.
+ * core/pattern nesting is forbidden for this composite pattern. Keep each copy
+ * in sync with its source pattern; ContentPagePatternParityTest enforces this.
+ *
  * @package SiteTheme
  */
 

@@ -24,8 +24,9 @@ namespace AgencyPlatform\Security;
  * `manage_options` by core; listing them keeps the boundary explicit rather
  * than implied.
  *
- * REST is deliberately untouched: the Site Editor is a REST client, and core's
- * own `edit_theme_options` gate on those routes is the correct check.
+ * REST blocks the six legacy Widgets and Menus route groups for client roles.
+ * The Site Editor uses its own REST routes, where core's `edit_theme_options`
+ * gate remains the correct check.
  */
 final class AdminScreenPolicy {
 

@@ -37,7 +37,7 @@ export const PARITY_FONT_CSS = `
 `;
 
 export const MIGRATION_PARITY_PAGES: ParityPage[] = [
-	{ name: 'home', path: '/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
+	{ name: 'home', path: '/', maxDiffRatio: 0.02, maskSelectors: [], maxEdgeDeltaPx: 8 },
 	{ name: 'sample-page', path: '/sample-page/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
 ];
 
@@ -67,18 +67,26 @@ export async function captureFrontend(
 }
 
 /**
- * Photographs the Site Editor canvas with the editor chrome cropped out. The
- * screenshot is taken of the .editor-styles-wrapper element inside the editor
- * canvas iframe, which is the region a visitor's viewport shows on the
- * frontend.
+ * Photographs one Site Editor canvas subtree with the editor chrome excluded.
+ * Callers select the same content subtree that they capture on the frontend.
  */
 export async function captureEditorCanvas(
 	page: Page,
 	route: string,
-	maskSelectors: string[]
+	maskSelectors: string[],
+	rootSelector = '.editor-styles-wrapper',
+	matchFrontendContentWidth = false
 ): Promise< Buffer > {
 	const canvas = await openSiteEditorCanvas( page, route );
-	const root = canvas.locator( '.editor-styles-wrapper' );
+	const root = canvas.locator( rootSelector ).first();
+
+	if ( matchFrontendContentWidth ) {
+		await root.evaluate( ( element ) => {
+			element.style.setProperty( 'width', 'min(100%, var(--wp--style--global--content-size))', 'important' );
+			element.style.setProperty( 'margin-inline', 'auto', 'important' );
+			element.style.setProperty( 'padding-inline', '0', 'important' );
+		} );
+	}
 
 	await applyParityFonts( page );
 	await root.evaluate( ( element, css ) => {
@@ -142,10 +150,13 @@ export async function boundingBoxes(
  * Measures the editor canvas content width. The iframe width can differ from
  * the browser viewport when the Site Editor sidebars are open.
  */
-export async function effectiveCanvasWidth( page: Page ): Promise< number > {
+export async function effectiveCanvasWidth(
+	page: Page,
+	rootSelector = '.editor-styles-wrapper'
+): Promise< number > {
 	return page
 		.frameLocator( 'iframe[name="editor-canvas"]' )
-		.locator( '.editor-styles-wrapper' )
+		.locator( rootSelector )
 		.first()
 		.evaluate( ( element ) => element.getBoundingClientRect().width );
 }
