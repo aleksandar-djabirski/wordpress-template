@@ -7,7 +7,7 @@ synonyms, no slang or idioms. This applies to prose only
 - do not change code,
 code comments, commit messages, file contents, or command output.
 
-AI-first WordPress agency starter: Bedrock + DDEV, a hybrid block/classic theme, and layered plugins (`agency-platform`, `site-core`, `site-integrations`, `site-commerce`).
+AI-first WordPress agency starter: Bedrock + DDEV, a native block theme (full Site Editor), and layered plugins (`agency-platform`, `site-core`, `site-integrations`, `site-commerce`).
 
 ## Project lifecycle
 
@@ -16,8 +16,8 @@ New client: GitHub "Use this template" → `scripts/rename-project --apply` → 
 ## Routing table
 
 Customer-editable UI → block (`site-theme/blocks/`)
-Non-editable site chrome → part (`site-theme/parts/`)
-Page shell → PHP template (`site-theme/templates/`)
+Site chrome (header, footer) → template part (`site-theme/parts/*.html`)
+Page shell → block template (`site-theme/templates/*.html`)
 Composition of blocks → pattern (`site-theme/patterns/`)
 Business rule → `site-core`
 External service → `site-integrations`
@@ -26,11 +26,11 @@ WooCommerce markup override → `site-theme/woocommerce/`
 
 ## Layer ownership
 
-- `agency-platform` (mu-plugin): guardrails only — roles, editor/site-editor lockdown, app-password lockdown, file-mod guard, database-override detection, `wp agency *` WP-CLI commands. Never business logic, never WooCommerce, never a dependency on any other project layer.
+- `agency-platform` (mu-plugin): guardrails only — roles, editor block policy, server-side save validation, admin-screen boundary, app-password lockdown, file-mod guard, database-override detection, `wp agency *` WP-CLI commands. Never business logic, never WooCommerce, never a dependency on any other project layer.
 - `site-core`: business rules plus the public `SiteCore\Contracts\*` API — the ONLY site-core namespace other layers may reference. Never renders markup, never makes network calls, never references WooCommerce or the theme.
 - `site-integrations`: implementations of `SiteCore\Contracts\*` that talk outward (webhooks, APIs). The base profile's only outbound-HTTP home. Never referenced by site-core.
 - `site-commerce`: WooCommerce-only behavior; activates only when WooCommerce is present (`Requires Plugins` header). Its `src/Integrations/` is the commerce profile's outbound-HTTP home. Never referenced by the base profile.
-- `site-theme`: hybrid theme — root delegates hand off to `templates/`; `header.php`/`footer.php` render `parts/` via `SiteTheme\Support\Parts`. May depend only on `SiteCore\Contracts\*`; never on site-core internals, site-integrations, or site-commerce.
+- `site-theme`: native block theme — `templates/*.html` are the only rendering path; `parts/*.html` hold the chrome and are declared in `theme.json.templateParts`. May depend only on `SiteCore\Contracts\*`; never on site-core internals, site-integrations, or site-commerce.
 
 ## Dependency direction (deptrac-enforced)
 
@@ -39,13 +39,14 @@ WooCommerce markup override → `site-theme/woocommerce/`
 ## Hard rules the architecture tests enforce
 
 - No closures in `add_action`/`add_filter` anywhere in production code — named class methods only (`HookOwnershipTest`).
-- `functions.php` stays ≤50 lines and only calls `ThemeBootstrap::boot()`; root template delegates stay ≤10 significant lines and register no hooks (`ThemeBootstrapTest`).
+- `functions.php` stays ≤50 lines and only calls `ThemeBootstrap::boot()`; the theme contains no root-level PHP templates and no `templates/*.php` (`ThemeBootstrapTest`, `BlockThemeStructureTest`).
 - No `components/`, `layouts/`, `inc/`, `includes/`, `helpers/`, `misc/`, `common/`, `lib/`, or `utils/` directories in the theme or any plugin (`DirectoryRulesTest`).
 - Every block needs a valid `block.json`: name `agency/<folder>`, integer `apiVersion`, `file:` asset references that resolve inside the block (`BlockManifestTest`).
 - WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) may only appear in `site-commerce/`, `site-theme/woocommerce/`, `tests/commerce/`, or a reviewed entry in `tests/Architecture/woocommerce-allowlist.php` (`WooCommerceIsolationTest`).
 - Outbound HTTP (`wp_remote_*`, cURL, Guzzle, `file_get_contents('http...')`) only inside `site-integrations/` or `site-commerce/src/Integrations/` (`IntegrationBoundaryTest`).
 - CSS colors must be design tokens (`var(--wp--preset--color--*)` / `var(--wp--custom--*)`), never raw hex/rgb (stylelint `declaration-strict-value`).
-- `assets/global/` holds exactly `base.css` + `typography.css` — a genuinely new global stylesheet requires deliberately editing `GlobalAssetRulesTest`'s allow-list, not just adding the file (`GlobalAssetRulesTest`).
+- `assets/global/` holds exactly `frontend-reset.css` + `shared.css` + `editor.css`; `frontend-reset.css` is never loaded into the editor.
+- Git-owned templates and parts carry no hard-coded `ref` and no inline `style` attribute — colours and spacing live in `theme.json` and `assets/global/shared.css` (`BlockThemeStructureTest`).
 - `docs/generated-block-index.md` must match `php scripts/generate-block-index`'s output — run it after any block/pattern change and commit the result (`GeneratedIndexFreshnessTest`).
 
 ## Block decision order
@@ -58,7 +59,7 @@ WooCommerce markup override → `site-theme/woocommerce/`
 
 ## Frontend behavior order
 
-CSS first, then native HTML/ARIA, then block-local JS declared via `block.json` (e.g. `viewScript`), then the Interactivity API for anything stateful. No global JS bundles or ad hoc `<script>` tags — see `parts/site-header/site-header.js` for the enqueued-per-part pattern.
+CSS first, then native HTML/ARIA, then block-local JS declared via `block.json` (e.g. `viewScript`), then the Interactivity API for anything stateful. No global JS bundles or ad hoc `<script>` tags — see `blocks/reference-callout/block.json` for the declared-per-block pattern; native `core/navigation` already provides the responsive overlay, so no theme-level JS is needed for it.
 
 ## Commands
 
@@ -71,6 +72,8 @@ When changing npm dependencies, regenerate the lock with `npx -y npm@10 install`
 - `npm run build` / `npm run start` — production/watch block build (wp-scripts).
 - `npm run lint` (`lint:js` + `lint:css`) — ESLint + Stylelint.
 - `npm run test:e2e` / `test:visual` / `test:accessibility` — Playwright; needs a running site (`WP_BASE_URL`, defaults to the DDEV URL).
+- `npm run test:parity` — migration + editing parity; needs a running site.
+- `npm run capture:migration-baseline` — one-off pre-migration capture.
 - Commerce profile (optional; WooCommerce stays OUT of the base template): `bash scripts/enable-commerce` installs WooCommerce (ephemeral `composer require` — commit it only for a real commerce client), configures a deterministic store + fixtures. Then `ddev composer test:integration:commerce` (WooCommerce-backed PHPUnit, incl. the HPOS sanitize step) and `COMMERCE=1 npm run test:e2e:commerce` (storefront journeys). Neither runs in base `verify`/`test:integration`; CI's `commerce-e2e` job runs both.
 - `scripts/setup` — full bootstrap from a fresh clone (composer install, `.env` + salts, WP core install, theme/plugin activation, `npm ci && npm run build`, client-editor test user). Run inside DDEV.
 - `scripts/verify` — mirrors CI: `composer verify`, `npm run lint`, `npm run build`.
@@ -82,7 +85,7 @@ Environment is read via core `wp_get_environment_type()`, never `WP_ENV` directl
 
 ## Editing model
 
-Customers hold `client_editor` or `client_shop_manager`. Theme structure, styles, templates/parts, plugins, and file editing are locked down by `agency-platform` and unavailable regardless of role. Page **composition** from the block allow-list IS editable by default — customers arrange allow-listed blocks freely; server-side block-tree validation is deliberately deferred until real behaviour proves it needed. How strict composition editing is is a per-project choice — see `docs/editing-strictness.md` for the dials (trim the allow-list, `templateLock` a post type, drop page caps) and `ops/launch-checklist.md` for recording the chosen dial at launch.
+Customers hold `client_editor` or `client_shop_manager`. Both have **full visual Site Editor control within the approved block system**: templates, template parts, navigation, Global Styles, and page composition are all editable. They cannot switch or install themes, install or activate plugins, edit theme/plugin files, use the code editor, insert `core/html`, `core/shortcode` or `core/freeform`, or edit Additional CSS — `edit_css` and `customize` are mapped to `do_not_allow`, and `AgencyPlatform\Security\AdminScreenPolicy` refuses `themes.php`, `theme-editor.php`, `plugin-editor.php`, `customize.php`, `widgets.php` and `nav-menus.php` outright. The block set is derived from the REGISTERED blocks filtered to approved namespaces (`core/`, `agency/`, `woocommerce/`), extensible through `agency_platform_allowed_block_namespaces`, `agency_platform_allowed_blocks` and `agency_platform_disallowed_blocks`. That policy is re-applied server side on save (`rest_pre_insert_*`), which also rejects content-level shortcodes and per-block custom CSS. How strict editing is per project is a dial — see `docs/editing-strictness.md`, recorded at launch per `ops/launch-checklist.md`.
 
 ## Verification expectations
 
@@ -90,4 +93,4 @@ Run `ddev composer verify:fast` before every commit; run `ddev composer test:int
 
 ## Where docs live
 
-`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/editing-strictness.md` (per-project editing-lockdown dials), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `launch-checklist.md`, `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.
+`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/editing-strictness.md` (per-project editing-lockdown dials), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/block-theme-migration-baseline.md` (the Phase 0 record), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `launch-checklist.md`, `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.

@@ -2,7 +2,8 @@
 /**
  * Proves the `client_editor` role (AgencyPlatform\Roles\RolesProvider) and
  * every guardrail that keys off it (AgencyPlatform\Editor\EditorRestrictions,
- * AgencyPlatform\Editor\SiteEditorLockdown,
+ * AgencyPlatform\Security\CapabilityPolicy,
+ * AgencyPlatform\Security\AdminScreenPolicy,
  * AgencyPlatform\Security\ApplicationPasswords) behave the way the naming
  * contract promises, against a real WordPress install rather than the
  * function stubs the `unit` suite uses.
@@ -14,22 +15,22 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Permissions;
 
-use AgencyPlatform\Editor\EditorRestrictions;
 use Tests\Integration\IntegrationTestCase;
 
 /**
  * @covers \AgencyPlatform\Roles\RolesProvider
  * @covers \AgencyPlatform\Editor\EditorRestrictions
- * @covers \AgencyPlatform\Editor\SiteEditorLockdown
+ * @covers \AgencyPlatform\Security\CapabilityPolicy
+ * @covers \AgencyPlatform\Security\AdminScreenPolicy
  * @covers \AgencyPlatform\Security\ApplicationPasswords
  */
 final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 
 	/**
 	 * Capabilities RolesProvider::NEVER_GRANT deliberately strips from
-	 * `client_editor` (see that class), plus `edit_theme_options` — which
-	 * SiteEditorLockdown additionally maps to `do_not_allow` via
-	 * `map_meta_cap` for anyone who can't `manage_options`.
+	 * `client_editor` (see that class). `edit_theme_options` is explicitly
+	 * granted for Site Editor access; CapabilityPolicy and AdminScreenPolicy
+	 * bound the screens and meta capabilities it would otherwise expose.
 	 *
 	 * @return list<string>
 	 */
@@ -41,7 +42,6 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 			'edit_files',
 			'edit_plugins',
 			'edit_themes',
-			'edit_theme_options',
 			'manage_options',
 			'update_core',
 			'unfiltered_html',
@@ -61,18 +61,60 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 	}
 
 	/**
-	 * `edit_css` (the Additional CSS / custom-CSS meta capability) is not
-	 * itself in RolesProvider::NEVER_GRANT — WordPress core's own
-	 * map_meta_cap() maps it to requiring `unfiltered_html` (see
-	 * wp-includes/capabilities.php), which client_editor already lacks. This
-	 * is a derived guarantee, not a directly-granted one, so it gets its own
-	 * assertion rather than living in the never_grant_capabilities() list.
+	 * `edit_css` gates Additional CSS, per-block custom CSS, and the
+	 * `custom_css` post type. Core maps it to `unfiltered_html` (which
+	 * client_editor lacks); AgencyPlatform\Security\CapabilityPolicy
+	 * additionally maps it to `do_not_allow`, so the denial survives a plugin
+	 * granting the underlying capability.
 	 */
 	public function test_client_editor_cannot_edit_custom_css(): void {
 		$client_editor = $this->make_client_editor();
 		wp_set_current_user( $client_editor->ID );
 
 		self::assertFalse( current_user_can( 'edit_css' ) );
+
+		$client_editor->add_cap( 'unfiltered_html' );
+		wp_set_current_user( $client_editor->ID );
+
+		self::assertFalse(
+			current_user_can( 'edit_css' ),
+			'CapabilityPolicy must keep edit_css denied even when unfiltered_html is granted directly.'
+		);
+	}
+
+	public function test_client_editor_capability_matrix(): void {
+		$client_editor = $this->make_client_editor();
+		wp_set_current_user( $client_editor->ID );
+
+		self::assertTrue( current_user_can( 'edit_theme_options' ) );
+		self::assertFalse( current_user_can( 'edit_css' ) );
+		self::assertFalse( current_user_can( 'unfiltered_html' ) );
+		self::assertFalse( current_user_can( 'customize' ) );
+	}
+
+	/**
+	 * CapabilityPolicy's map_meta_cap callback must return BEFORE it calls
+	 * user_can(), because user_can() re-enters map_meta_cap. Without the early
+	 * return, every capability check on the site recurses. A blown stack shows
+	 * up as a fatal, not a failed assertion, so these three calls completing at
+	 * all is the assertion that matters.
+	 */
+	public function test_the_meta_cap_policy_does_not_recurse(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		self::assertFalse( current_user_can( 'edit_css' ) );
+		self::assertFalse( current_user_can( 'customize' ) );
+		self::assertTrue( current_user_can( 'edit_posts' ) );
+		self::assertTrue( current_user_can( 'edit_theme_options' ) );
+		self::assertFalse( current_user_can( 'manage_options' ) );
+	}
+
+	public function test_the_meta_cap_policy_does_not_recurse_for_administrators(): void {
+		wp_set_current_user( $this->make_admin()->ID );
+
+		self::assertTrue( current_user_can( 'edit_css' ) );
+		self::assertTrue( current_user_can( 'customize' ) );
+		self::assertTrue( current_user_can( 'manage_options' ) );
 	}
 
 	public function test_client_editor_retains_core_editor_capabilities(): void {
@@ -124,7 +166,7 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		self::assertTrue( wp_is_application_passwords_available_for_user( $admin ) );
 	}
 
-	public function test_code_editing_and_block_locking_are_disabled_for_client_editor(): void {
+	public function test_code_editing_is_disabled_and_block_locking_is_enabled_for_client_editor(): void {
 		$client_editor = $this->make_client_editor();
 		wp_set_current_user( $client_editor->ID );
 
@@ -138,7 +180,7 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		);
 
 		self::assertFalse( $settings['codeEditingEnabled'] );
-		self::assertFalse( $settings['canLockBlocks'] );
+		self::assertTrue( $settings['canLockBlocks'] );
 	}
 
 	public function test_code_editing_and_block_locking_are_unchanged_for_administrators(): void {
@@ -158,18 +200,36 @@ final class ClientEditorCapabilitiesTest extends IntegrationTestCase {
 		self::assertTrue( $settings['canLockBlocks'] );
 	}
 
-	public function test_client_editor_is_restricted_to_the_approved_block_allow_list(): void {
+	public function test_client_editor_gets_a_registered_block_policy_not_a_fixed_list(): void {
 		$client_editor = $this->make_client_editor();
 		wp_set_current_user( $client_editor->ID );
 
-		$allowed_blocks = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
+		$allowed = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
 
-		self::assertIsArray( $allowed_blocks );
-		self::assertSame( EditorRestrictions::ALLOWED_BLOCKS, $allowed_blocks );
-		self::assertContains( 'agency/reference-callout', $allowed_blocks );
-		self::assertContains( 'core/paragraph', $allowed_blocks );
-		self::assertNotContains( 'core/html', $allowed_blocks );
-		self::assertNotContains( 'core/shortcode', $allowed_blocks );
+		self::assertIsArray( $allowed );
+		self::assertContains( 'agency/reference-callout', $allowed );
+		self::assertContains( 'core/paragraph', $allowed );
+		self::assertContains( 'core/template-part', $allowed );
+		self::assertContains( 'core/navigation', $allowed );
+		self::assertNotContains( 'core/html', $allowed );
+		self::assertNotContains( 'core/shortcode', $allowed );
+		self::assertNotContains( 'core/freeform', $allowed );
+	}
+
+	public function test_the_allowed_block_namespace_filter_is_honoured(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$filter = static fn(): array => array( 'agency' );
+		add_filter( 'agency_platform_allowed_block_namespaces', $filter );
+
+		try {
+			$allowed = apply_filters( 'allowed_block_types_all', true, new \WP_Block_Editor_Context() );
+
+			self::assertContains( 'agency/reference-callout', (array) $allowed );
+			self::assertNotContains( 'core/paragraph', (array) $allowed );
+		} finally {
+			remove_filter( 'agency_platform_allowed_block_namespaces', $filter );
+		}
 	}
 
 	public function test_administrators_get_unrestricted_block_types(): void {

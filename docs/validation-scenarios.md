@@ -1,6 +1,6 @@
 # Validation Scenarios
 
-Twelve deliberate mutations that each break one guardrail this starter
+Fifteen deliberate mutations that each break one guardrail this starter
 enforces, the exact command to trigger the check, the failure signature the
 mutation should produce, and how to revert. Use these to prove a guardrail
 actually fails closed (not just that it exists) — for example after
@@ -12,9 +12,9 @@ five-line shape (see `tests/support/FormatsArchitectureFailures.php`):
 `Where the code belongs` / `How to validate the fix`. That shape is quoted
 verbatim below wherever the check is a PHPUnit architecture test.
 
-Scenarios 1–7 and 12 run with no database and are the same checks CI's
+Scenarios 1–7, 12, 14 and 15 run with no database and are the same checks CI's
 `php-qa`/`frontend` jobs run on every push — **proven in this repo's CI**.
-Scenarios 8–11 need a live WordPress install (DDEV); scenario 11
+Scenarios 8–10 and 13 need a live WordPress install (DDEV); scenario 11
 additionally relies on the committed, Linux-CI-authoritative visual
 baselines — **requires DDEV/CI context**.
 
@@ -221,7 +221,7 @@ Revert: remove the added line.
 
 ---
 
-## 8. Unexpected database template record
+## 8. Database template record drift
 
 **Requires DDEV/CI context** — needs a live database.
 
@@ -236,13 +236,24 @@ Check:
 ddev wp agency check-overrides
 ```
 
-Expected failure (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
+Expected report (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
 ```
 Template/template-part overrides: 1
   - front-page (wp_template) [publish]
 Expected core-generated global-styles records: <N>
 Synced patterns (informational only): <N>
-Error: Database overrides found — Git owns templates/template-parts. Reconcile or intentionally re-export them to disk.
+Success: 1 database override(s) reported. Overrides are expected under the Site Editor editing model; pass --fail-on-drift to make them a hard failure.
+```
+Exits **zero**. A database template row is a legitimate client edit under the block-theme editing model, not a guardrail breach.
+
+Gate check:
+```sh
+ddev wp agency check-overrides --fail-on-drift
+```
+
+Expected failure:
+```
+Error: 1 database override(s) found and --fail-on-drift was requested. Reconcile them through the promotion workflow, or re-run without the flag to report only.
 ```
 Exits non-zero (`WP_CLI::error()`).
 
@@ -443,3 +454,88 @@ git checkout -- web/app/themes/site-theme/blocks/reference-callout/block.json
 # or, having intentionally kept the block.json change:
 php scripts/generate-block-index
 ```
+
+---
+
+## 13. Forbidden block saved through REST
+
+**Requires DDEV/CI context** — needs a live WordPress install and the
+`client-editor` user.
+
+Mutation — send a REST page update as `client-editor` with a `core/html` block:
+```sh
+ddev wp eval '
+$page = get_page_by_path( "demo" );
+$before = $page->post_content;
+$user = get_user_by( "login", "client-editor" );
+wp_set_current_user( $user->ID );
+$request = new WP_REST_Request( "POST", "/wp/v2/pages/" . $page->ID );
+$request->set_body_params( array( "content" => "<!-- wp:html -->bad<!-- /wp:html -->" ) );
+$response = rest_do_request( $request );
+echo wp_json_encode( array(
+	"status" => $response->get_status(),
+	"data" => $response->get_data(),
+	"unchanged" => $before === get_post_field( "post_content", $page->ID ),
+) );
+'
+```
+
+Check: the REST response.
+
+Expected failure:
+```text
+HTTP 403
+code: agency_platform_forbidden_block
+violations[0].block: core/html
+unchanged: true
+```
+
+Guardrail: `AgencyPlatform\Editor\SaveValidation`.
+
+Revert: no revert is needed; the rejected request leaves the page unchanged.
+
+---
+
+## 14. Classic PHP template reintroduced
+
+Mutation:
+```powershell
+New-Item -ItemType File -Path web/app/themes/site-theme/index.php
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure:
+```text
+ThemeBootstrapTest::test_no_classic_root_template_files_remain
+DirectoryRulesTest::test_theme_top_level_files_are_on_the_whitelist
+```
+
+Revert:
+```powershell
+Remove-Item -LiteralPath web/app/themes/site-theme/index.php
+```
+
+---
+
+## 15. Hard-coded navigation ref in a Git-owned part
+
+Mutation — change `parts/site-header.html`'s navigation block to:
+```html
+<!-- wp:navigation {"ref":42} /-->
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure:
+```text
+BlockThemeStructureTest::test_no_hardcoded_database_refs_in_git_owned_markup
+```
+
+Revert: restore the original navigation block in `parts/site-header.html`.

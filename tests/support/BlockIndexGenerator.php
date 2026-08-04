@@ -82,7 +82,7 @@ final class BlockIndexGenerator {
 			'editorStyle'  => $assets['editorStyle'],
 			'patterns'     => self::references_cell( $root, self::files_containing( $theme . '/patterns', $name, false ) ),
 			'templates'    => self::references_cell( $root, self::files_containing( $theme . '/templates', $name, false ) ),
-			'tests'        => self::references_cell( $root, self::related_tests( $root, $slug ) ),
+			'tests'        => self::references_cell( $root, self::related_tests( $root, $name, $slug ) ),
 		);
 	}
 
@@ -156,7 +156,8 @@ final class BlockIndexGenerator {
 	}
 
 	/**
-	 * PHP files directly inside $dir whose contents contain $needle.
+	 * PHP pattern files and HTML block templates directly inside $dir whose
+	 * contents contain $needle.
 	 *
 	 * @return list<string> Absolute, sorted paths.
 	 */
@@ -164,7 +165,9 @@ final class BlockIndexGenerator {
 		$found = array();
 
 		foreach ( self::list_files( $dir, $recursive ) as $file ) {
-			if ( 'php' !== strtolower( pathinfo( $file, PATHINFO_EXTENSION ) ) ) {
+			$extension = strtolower( pathinfo( $file, PATHINFO_EXTENSION ) );
+
+			if ( 'php' !== $extension && 'html' !== $extension ) {
 				continue;
 			}
 
@@ -179,14 +182,16 @@ final class BlockIndexGenerator {
 	}
 
 	/**
-	 * Tests related to a block: any file under tests/ whose name or contents
-	 * mention the block slug, EXCLUDING tests/Architecture/ — the enforcement
-	 * layer names block slugs to police structure, not to exercise a block,
-	 * so including it would make this index churn on every rule-message edit.
+	 * Tests related to a block: files whose names contain the block slug, or
+	 * whose source declares the block in serialized markup, a blockName fixture,
+	 * or register_block_type(). Mere prose, assertions, and configuration
+	 * strings do not establish a block relation. Architecture tests remain
+	 * excluded because that enforcement layer names block slugs to police
+	 * structure, not to exercise a block.
 	 *
 	 * @return list<string> Repo-relative-input absolute paths, sorted.
 	 */
-	private static function related_tests( string $root, string $slug ): array {
+	private static function related_tests( string $root, string $block_name, string $slug ): array {
 		$tests_dir = $root . '/tests';
 		$found     = array();
 
@@ -197,7 +202,7 @@ final class BlockIndexGenerator {
 				continue;
 			}
 
-			if ( str_contains( basename( $file ), $slug ) || str_contains( self::read( $file ), $slug ) ) {
+			if ( str_contains( basename( $file ), $slug ) || self::contains_block_declaration( self::read( $file ), $block_name ) ) {
 				$found[] = $file;
 			}
 		}
@@ -205,6 +210,14 @@ final class BlockIndexGenerator {
 		sort( $found );
 
 		return $found;
+	}
+
+	private static function contains_block_declaration( string $source, string $block_name ): bool {
+		$name = preg_quote( $block_name, '/' );
+
+		return 1 === preg_match( '/<!--\s*wp:' . $name . '(?:\s|\/|-->)/', $source )
+			|| 1 === preg_match( '/[\'"]blockName[\'"]\s*(?:=>|:)\s*[\'"]' . $name . '[\'"]/', $source )
+			|| 1 === preg_match( '/\bregister_block_type\s*\(\s*[\'"]' . $name . '[\'"]/', $source );
 	}
 
 	/**

@@ -2,10 +2,9 @@
 /**
  * Keeps WooCommerce quarantined. WooCommerce symbols (WooCommerce, WC_*,
  * wc_*, woocommerce_*) may only appear inside the site-commerce plugin and
- * the theme's woocommerce/ overrides, so the base profile runs without
- * WooCommerce installed. Every other location is scanned; the only permitted
- * references outside the commerce plugin are the reviewed entries in
- * tests/Architecture/woocommerce-allowlist.php.
+ * the commerce-owned theme override locations listed in
+ * tests/Architecture/woocommerce-allowlist.php; every other location is
+ * scanned.
  *
  * @package Tests\Architecture
  */
@@ -56,7 +55,7 @@ final class WooCommerceIsolationTest extends TestCase {
 			$this->architecture_failure(
 				'WooCommerce symbol found outside the commerce boundary',
 				implode( "\n                          ", $violations ),
-				'The base profile must run without WooCommerce; commerce code belongs only in site-commerce and the theme woocommerce/ overrides.',
+				'The base profile must run without WooCommerce; commerce PHP belongs only in site-commerce and the commerce-owned theme override locations.',
 				'Move the code into web/app/plugins/site-commerce/, or — if it is a reviewed exception — add it to tests/Architecture/woocommerce-allowlist.php with a reason.'
 			)
 		);

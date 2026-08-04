@@ -1,4 +1,35 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type FrameLocator, type Page } from '@playwright/test';
+
+export type EditorBlock = {
+	clientId: string;
+	innerBlocks?: EditorBlock[];
+	name: string;
+};
+
+export type WpEditor = {
+	blocks: {
+		createBlock: ( name: string, attributes: { content: string } ) => EditorBlock;
+	};
+	data: {
+		dispatch( store: 'core' ): {
+			saveEntityRecord: ( kind: string, name: string, record: { id: number; content: string } ) => Promise< unknown >;
+		};
+		dispatch( store: 'core/block-editor' ): {
+			moveBlocksUp: ( clientIds: string[] ) => void;
+			removeBlocks: ( clientIds: string[] ) => void;
+			replaceBlocks: ( clientId: string, block: EditorBlock ) => void;
+		};
+		select( store: 'core' ): {
+			__experimentalGetCurrentGlobalStylesId: () => number;
+		};
+		select( store: 'core/block-editor' ): {
+			getBlocks: () => EditorBlock[];
+		};
+		select( store: 'core/editor' ): {
+			getEditorSettings: () => { codeEditingEnabled: boolean };
+		};
+	};
+};
 
 /**
  * Small WordPress-shaped URL/assertion helpers shared across the e2e
@@ -43,6 +74,14 @@ export async function dismissWelcomeGuideIfPresent( page: Page ): Promise<void> 
 	} catch {
 		// No welcome guide shown — nothing to close.
 	}
+
+	const getStartedButton = page.getByRole( 'dialog' ).getByRole( 'button', { name: /get started/i } ).first();
+	try {
+		await getStartedButton.waitFor( { state: 'visible', timeout: 3000 } );
+		await getStartedButton.click();
+	} catch {
+		// The Site Editor onboarding dialog is not shown.
+	}
 }
 
 /**
@@ -68,4 +107,49 @@ export async function openBlockInserter( page: Page ): Promise<void> {
  */
 export async function searchInserter( page: Page, term: string ): Promise<void> {
 	await page.getByPlaceholder( 'Search' ).fill( term );
+}
+
+/**
+ * The Site Editor's WordPress 7.0 route shape: site-editor.php?p=<route>, with
+ * &canvas=edit to land directly in the editing canvas rather than the browse
+ * view.
+ */
+export function siteEditorUrl( route = '/template', canvas = false ): string {
+	const suffix = canvas ? '&canvas=edit' : '';
+	return adminUrl( `site-editor.php?p=${ encodeURIComponent( route ) }${ suffix }` );
+}
+
+/**
+ * Opens a Site Editor route and returns its block canvas frame.
+ */
+export async function openSiteEditorCanvas( page: Page, route: string ): Promise< FrameLocator > {
+	await page.goto( siteEditorUrl( route, true ) );
+	await dismissWelcomeGuideIfPresent( page );
+
+	const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
+	await canvas.locator( '.editor-styles-wrapper' ).waitFor( { state: 'visible' } );
+
+	return canvas;
+}
+
+/**
+ * Clicks the editor's Save button and waits for the confirmation.
+ */
+export async function saveInEditor( page: Page ): Promise< void > {
+	await page.keyboard.press( 'Escape' );
+
+	const reviewButton = page.getByRole( 'button', { name: /^review \d+ changes?/i } ).first();
+	const saveButton = page.getByRole( 'button', { name: /^save$/i } );
+	if ( await saveButton.count() === 0 && await reviewButton.count() > 0 ) {
+		await reviewButton.click();
+	}
+
+	await saveButton.first().click();
+
+	const panelSave = page.getByRole( 'button', { name: /^save$/i } );
+	if ( await panelSave.count() > 0 ) {
+		await panelSave.last().click().catch( () => undefined );
+	}
+
+	await expect( page.getByText( /saved|updated/i ).first() ).toBeVisible( { timeout: 30_000 } );
 }

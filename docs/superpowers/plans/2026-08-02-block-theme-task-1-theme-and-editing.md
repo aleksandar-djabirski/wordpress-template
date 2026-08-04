@@ -37,7 +37,8 @@ No commit in this plan lands with a gate that the plan already knows is red. Eac
 - Run `ddev composer verify:fast` immediately before **every** commit. Also run the default declared gates: `ddev composer verify` plus `npm run lint` for any commit touching JS or CSS.
 - A commit that changes rendered markup also declares `npm run test:e2e` and `npm run test:accessibility`.
 - A commit that changes rendered pixels also declares `npm run test:visual`.
-- Exactly **three** commits use the narrow browser-gate exception: the Task 5 spike commit and Task 6 conversion commits 2 and 3. The exception starts at `spike: prove native block theme and editor styles`, covers only the time while the existing browser and visual assertions still name classic markup, and ends only when Task 9 commits the rewritten browser, accessibility, and visual suites. Task 7 must run `npm run test:e2e`, `npm run test:accessibility`, and `npm run test:visual` against its changed demo content before its commit. No other commit may omit a required browser gate.
+- Exactly **six** commits use the narrow browser-gate exception: the Task 5 spike commit, Task 6 conversion commits 1, 2 and 3, the Task 7 commit, and the Task 8 commit. The exception starts at `spike: prove native block theme and editor styles`, covers only the time while the existing browser and visual assertions still name classic markup, and ends only when Task 9 commits the rewritten browser and visual suites. No other commit may omit a required browser gate.
+- The exception covers **only** `npm run test:e2e` and `npm run test:visual`. It does **not** cover `npm run test:accessibility`, which asserts no classic selector and stays green across the conversion. From Task 7 onward every commit that changes rendered markup must run `npm run test:accessibility` and it must pass. Accessibility is the one browser gate that can still catch a landmark or contrast regression while the other two are blind, so it is never waived.
 - Unit 1 owns all edits to `web/app/mu-plugins/agency-platform/src/Plugin.php` and `web/app/mu-plugins/agency-platform/src/Cli/AgencyCommands.php` in this release. Units 2 and 3 may change `Plugin.php` only by adding their one sequenced provider-registration line at the position this plan leaves for it. They must not reformat, reorder, or otherwise edit either file.
 - Unit 1 owns the Release 1 capability-matrix change in `tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php`. Unit 4A retains ownership of all other commerce test and profile work.
 - Unit 1 documentation is limited to `AGENTS.md`, `docs/architecture.md`, `docs/editing-strictness.md`, `docs/ownership-rules.md`, `docs/adding-a-block.md`, `docs/validation-scenarios.md`, `docs/generated-block-index.md`, and `docs/block-theme-migration-baseline.md`. Unit 0 owns the `README.md` repair. Unit 4B owns `README.md`, `ops/**`, the state runbook, proof records, and the final documentation and operations sweep.
@@ -54,7 +55,9 @@ No commit in this plan lands with a gate that the plan already knows is red. Eac
 7. **`reference-landing-section` stays `templateLock: contentOnly`.** It is the repository's documented example of a locked pattern and its purpose is to demonstrate locking. The five new patterns are unlocked. `tests/e2e/locked-pattern.spec.ts` therefore needs no change.
 8. **Parity determinism** comes from pinning the browser job to `ubuntu-24.04`, installing `fonts-dejavu-core`, and injecting a fixed `DejaVu Sans` / `DejaVu Serif` font stack into both sides of every parity comparison. No font binary is committed, so no licence review is required.
 9. **Migration baselines are compared with `pixelmatch`/`pngjs`, never `toHaveScreenshot()`**, so `--update-snapshots` can never regenerate them.
-10. **Only ONE layer emits each semantic element.** `render_block_core_template_part()` (`web/wp/wp-includes/blocks/template-part.php:170-181`) always wraps the part's content in a tag — `tagName` when set, otherwise the area's `area_tag`, which for the `header`/`footer` areas is `<header>`/`<footer>`. If the part FILE also opened a `core/group` with `tagName`, every page would ship nested `<header><header>`, which is invalid landmark structure and fails accessibility review. So: the **template** carries `{"tagName":"header","area":"header","className":"site-header"}` on the `core/template-part` block, and the **part file** opens a plain `core/group` with `className:"site-header__inner"`. Same for the footer. Selector consequence: `header.site-header` exists on the frontend and in a *page/template* canvas; when a client edits the part on its own (`site-editor.php?p=/wp_template_part/...`) only `.site-header__inner` is present, and the part-only tests target that.
+10. **Only ONE layer emits each semantic element.** `render_block_core_template_part()` (`web/wp/wp-includes/blocks/template-part.php:170-181`) always wraps the part's content in a tag — `tagName` when set, otherwise the area's `area_tag`, which for the `header`/`footer` areas is `<header>`/`<footer>`. If the part FILE also opened a `core/group` with `tagName`, every page would ship nested `<header><header>`, which is invalid landmark structure and fails accessibility review. So: the **template** carries `{"tagName":"header","area":"header","className":"site-header"}` on the `core/template-part` block, and the **part file** opens a plain `core/group` with `className:"site-header__inner"`. Same for the footer. Selector consequence: `header.site-header` exists on the frontend and in a *template* canvas (`site-editor.php?p=/wp_template/...`); when a client edits the part on its own (`site-editor.php?p=/wp_template_part/...`) only `.site-header__inner` is present, and the part-only tests target that.
+
+**Correction of 2026-08-04.** This decision originally said "*page/template* canvas", grouping the `/page/{id}` route with the template route. That is wrong in WordPress 7.0 and it made the editing-parity spec unwritable as specified. `wp-admin/site-editor.php:144-149` sets `$context_settings['post']` from `postId`, or from the `/page/(\d+)` route, which makes `/page/{id}` a POST editing context: it renders the page CONTENT only and emits no header, no footer and no `main`. Confirmed empirically — the Task 10 editing-parity run failed before any pixel comparison because `header.site-header` was absent from the `/page/{id}` canvas. Editing parity must therefore either drive the TEMPLATE route, which does render the chrome, or compare only the content region on both sides. It must not assert template chrome inside a `/page/{id}` canvas.
 11. **Header and footer flex layout lives in `assets/global/shared.css`, not in a block `layout` attribute.** A `core/group` with `layout:{type:flex}` makes WordPress generate a `.wp-container-core-group-is-layout-*` rule whose specificity fights our own stylesheet and whose exact class name is unstable. Because `shared.css` is loaded into the editor canvas as well as the frontend, plain CSS on `.site-header__inner` / `.site-footer__inner` renders identically in both and stays fully under our control. This is the same reasoning as Decision 5.
 12. **Global Styles writes need their own guard.** `WP_REST_Global_Styles_Controller` extends `WP_REST_Posts_Controller` but overrides `prepare_item_for_database()` (`class-wp-rest-global-styles-controller.php:238`) and applies **no** `rest_pre_insert_wp_global_styles` filter — verified, the file contains no `apply_filters()` call at all. So `SaveValidation` cannot see a Global Styles write. `GlobalStylesGuard` hooks `rest_pre_dispatch` (`class-wp-rest-server.php:1079`, returning non-null short-circuits the request) and rejects root `styles.css`, per-block `styles.blocks.*.css`, per-element `styles.elements.*.css`, and variation CSS for client roles.
 13. **The Phase 0 spike is a real, separate commit.** `locate_block_template()` (`web/wp/wp-includes/block-template.php:62-92`) keeps a PHP template found by `locate_template()` as a fallback and only considers block templates of **equal or higher** specificity, and `wp_enable_block_templates()` (`theme-templates.php:132-141`) has already added `block-templates` support to this theme because it ships a `theme.json`. So `templates/index.html` alone changes only the requests whose hierarchy bottoms out at `index` — every `page.php`/`single.php`/`archive.php`/`search.php`/`404.php` request still renders classically. The spike genuinely coexists, exactly as §8.2 says, and it ships as its own commit with its own §8.3 gate.
@@ -1520,9 +1523,7 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 	 * READ BACK, because the whole point of Release 1 is that a client's Site
 	 * Editor save actually persists.
 	 *
-	 * Task 5 runs before this task and creates the required block-theme
-	 * environment. These required tests have no skip path.
-	 *
+	 * These two required tests have no skip path.
 	 */
 	public function test_client_editor_can_create_and_read_back_a_template(): void {
 		wp_set_current_user( $this->make_client_editor()->ID );
@@ -1614,6 +1615,31 @@ final class ClientSiteEditorAccessTest extends IntegrationTestCase {
 }
 ```
 
+**ORCHESTRATOR CORRECTION, 2026-08-03 — ordering defect.** The two write-back
+methods above, `test_client_editor_can_create_and_read_back_a_template` and
+`test_client_editor_can_create_and_read_back_a_template_part`, are **NOT added in
+Task 3**. Task 6 Step 12 adds them.
+
+The original text of this step claimed "Task 5 runs before this task and creates
+the required block-theme environment." That claim is false: the execution order
+is Task 3, then Task 4, then Task 5. Both methods send a REST **update** to
+`<stylesheet>//index` and `<stylesheet>//site-footer`. Those identifiers resolve
+only once `templates/index.html` and `parts/site-footer.html` exist, which
+happens in Task 5's spike and Task 6's conversion. Before then WordPress returns
+404, `wp_is_block_theme()` returns `0`, and Task 3's own Step 14 gate is red.
+That contradicts this plan's commit-gate policy, which forbids landing a commit
+on a gate the plan already knows is red.
+
+Proven on 2026-08-03: with the classic theme still in place, both methods failed
+with a 404, and the rest of Task 3 passed — unit 160 tests / 352 assertions,
+integration 39 tests / 112 assertions with only these two red, deptrac 0
+violations.
+
+So Task 3 creates `ClientSiteEditorAccessTest.php` WITHOUT those two methods.
+Everything else in the file stays. The collection-read, navigation-create, and
+Global Styles tests all pass against the classic theme and are kept here,
+because they prove capability wiring rather than block-template resolution.
+
 - [ ] **Step 13: Update the commerce capability test**
 
 In `tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php`:
@@ -1680,6 +1706,37 @@ git commit -m "feat: add client Site Editor capability policy"
 ---
 
 ## Task 4: Registered-block policy and server-side save validation
+
+> **ORCHESTRATOR CORRECTION, 2026-08-03 — EXECUTION ORDER. Run Task 5 BEFORE
+> this task.**
+>
+> This task's Step 10 requires block templates on disk. Its own text says "Task 5
+> has already put block templates on disk" and adds an execution correction
+> repeating that a missing block-theme environment is a failing task gate. Task 3
+> Step 12 made the same assumption. Both are right about the dependency and wrong
+> about the order: the numbering says Task 5 comes third, and it does not.
+>
+> Task 5 settles it. Its own `Interfaces` block states "Consumes: nothing from
+> Tasks 3–4." Task 5 depends on neither task, and both depend on Task 5's
+> `templates/index.html`, `parts/site-header.html`, and `parts/site-footer.html`.
+> So the real dependency order is Task 1, Task 2, **Task 5**, Task 3, Task 4,
+> Task 6.
+>
+> Proven on 2026-08-03: with the classic theme still active, Luna stopped before
+> Step 1 and reported that `templates/index.html` was absent and
+> `wp_is_block_theme()` returned false, exactly as this brief required instead of
+> writing tests that could not pass.
+>
+> Task 3 already shipped at `1ae633e` before this was understood. That is safe
+> and needs no rework: its two block-dependent tests were deferred to Task 6,
+> which still creates the files they need. Do not move them again.
+>
+> **Second correction, same task.** Step 11 says
+> `ClientEditorCapabilitiesTest::test_code_editing_is_disabled_and_block_locking_is_enabled_for_client_editor`
+> is written here and that `canLockBlocks` becomes `true`. The repository still
+> carries the older `test_code_editing_and_block_locking_are_disabled_for_client_editor`,
+> which asserts `canLockBlocks === false`. This task must REPLACE that older test
+> rather than leave both. Two tests asserting opposite values cannot both pass.
 
 Background facts verified against WordPress 7.0.2:
 
@@ -3288,7 +3345,7 @@ git worktree add --detach $expectedRoot HEAD
 if ( (Resolve-Path -LiteralPath $expectedRoot).Path -ne $expectedRoot ) { throw 'The proof worktree path is not exact.' }
 ddev stop
 Push-Location $expectedRoot
-ddev config --project-name=bt-task-1-spike-proof --project-type=wordpress --docroot=web/wp --create-docroot=false
+ddev config --project-name=bt-task-1-spike-proof --project-type=wordpress --docroot=web --create-docroot=false
 ddev start
 ddev composer install --no-interaction --prefer-dist
 ddev wp core install --url=https://bt-task-1-spike-proof.ddev.site --title='Block theme spike proof' --admin_user=admin --admin_password=admin --admin_email=admin@example.invalid --skip-email
@@ -3300,6 +3357,10 @@ ddev wp post create --post_type=wp_navigation --post_status=publish --post_title
 ```
 
 This is a temporary bootstrap seed. It creates one ref-less `wp_navigation` record and pretty permalinks before the browser gate. Task 8 remains the owner of the tracked `scripts/setup` and CI bootstrap correction. Never run `ddev delete` in the task or main checkout. After recording the gate, run `ddev stop`, `Pop-Location`, remove the proof worktree with `git worktree remove $expectedRoot`, and confirm `git worktree list` no longer names it.
+
+**Docroot corrected 2026-08-04**, after the Unit 1 review found the same defect here that Task 8 already hit. This repository is Bedrock and its tracked `.ddev/config.yaml` declares `docroot: web`. `web/index.php` is Bedrock's front controller; `web/wp/` is only the Composer-installed core directory. Critically, `config/application.php:101-103` sets `CONTENT_DIR` to `/app`, `WP_CONTENT_DIR` to `$webroot_dir . '/app'` and `WP_CONTENT_URL` to `WP_HOME . '/app'`, so under `docroot: web/wp` every `/app/...` request resolves to `web/wp/app/...`, which does not exist. Theme CSS, block build output and uploaded media all 404 while pages still return 200 — a proof that looks green and demonstrates nothing about assets.
+
+**On this host** DDEV runs inside WSL2, so every `ddev` call above must be shelled through `wsl -d Ubuntu -e bash -lc "cd /mnt/c/... && ddev <cmd>"`, and `https://` may be unavailable without `mkcert`. Record whether the checks used HTTP or HTTPS. A reused proof path can also leave a stale drvfs entry that makes `ddev start` fail with `mkdir .ddev/db_snapshots: file exists` while both `ls` and Windows report the path absent; creating that directory from the Windows side clears it.
 
 Then use browser automation as `admin` / `admin` and confirm every item below. Save the result in the unit evidence. No separate human action is required when the orchestrator can control the browser.
 
@@ -4680,6 +4741,66 @@ final class BlockTemplateIntegrityTest extends IntegrationTestCase {
 }
 ```
 
+**ORCHESTRATOR CORRECTION, 2026-08-03 — deferred from Task 3.** Also add these
+two methods to `tests/Integration/Permissions/ClientSiteEditorAccessTest.php`
+now. Task 3 Step 12 created that file but deliberately left these two out,
+because before the conversion they returned 404. See the correction note in
+Task 3 Step 12 for the evidence.
+
+They belong here and not earlier because both send a REST **update** to a
+file-backed identifier. `<stylesheet>//index` resolves only once
+`templates/index.html` exists, and `<stylesheet>//site-footer` only once
+`parts/site-footer.html` exists. Both exist after this task's conversion.
+
+```php
+	/**
+	 * Reading a collection proves nothing about editing. These two write, then
+	 * READ BACK, because the whole point of Release 1 is that a client's Site
+	 * Editor save actually persists.
+	 *
+	 * These two required tests have no skip path.
+	 */
+	public function test_client_editor_can_create_and_read_back_a_template(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//index';
+		$content = "<!-- wp:paragraph -->\n<p>Client template write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/templates/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client template write.',
+			(string) get_block_template( $id, 'wp_template' )->content
+		);
+	}
+
+	public function test_client_editor_can_create_and_read_back_a_template_part(): void {
+		wp_set_current_user( $this->make_client_editor()->ID );
+
+		$id      = get_stylesheet() . '//site-footer';
+		$content = "<!-- wp:paragraph -->\n<p>Client footer write.</p>\n<!-- /wp:paragraph -->";
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/template-parts/' . $id );
+		$request->set_param( 'content', $content );
+
+		$response = rest_do_request( $request );
+
+		self::assertSame( 200, $response->get_status() );
+		self::assertStringContainsString(
+			'Client footer write.',
+			(string) get_block_template( $id, 'wp_template_part' )->content
+		);
+	}
+```
+
+Confirm `wp_is_block_theme()` returns `1` before you run these. If it returns
+`0`, the conversion is incomplete and these tests will fail with a 404 for that
+reason, not because the capability wiring is wrong.
+
 - [ ] **Step 13: Teach the block index generator about HTML templates (HARD GATE for the commerce track)**
 
 In `tests/support/BlockIndexGenerator.php`, `files_containing()` currently skips every file whose extension is not `php`, which makes block usage inside `.html` templates invisible: the generated index's Templates column would stay empty forever, and `GeneratedIndexFreshnessTest` would happily pass while under-reporting. The commerce track's WooCommerce block templates depend on this being fixed first. Change that guard to accept both:
@@ -4785,13 +4906,14 @@ git commit -m "chore: remove classic theme path and stale tests"
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/editor.css`
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/README.md`
 - Modify: `web/app/themes/site-theme/blocks/reference-callout/build/index.js` (rebuilt output, committed)
+- Modify: `web/app/themes/site-theme/blocks/reference-callout/build/index.asset.php` (rebuilt output, committed — `npm run build` rewrites its `version` hash whenever `index.js` changes, and both build files are tracked, so committing one without the other leaves the build drifted)
 - Modify: `docs/generated-block-index.md` (regenerated)
 
 **Interfaces:**
 - Consumes: `templates/page.html` and the two parts from Task 5.
 - Produces:
   - Five unlocked patterns registered under the slugs `agency/hero`, `agency/split-content`, `agency/feature-grid`, `agency/cta`, `agency/content-page`.
-  - `tests/fixtures/demo-page.html` — block markup for the Phase 1 demonstration page, containing the placeholder tokens `{{MEDIA_ID}}` and `{{MEDIA_URL}}` that Task 7's `scripts/setup` substitutes.
+  - `tests/fixtures/demo-page.html` — block markup for the Phase 1 demonstration page, containing the placeholder tokens `{{MEDIA_ID}}` and `{{MEDIA_URL}}` that Task 8's `scripts/setup` substitutes. The raw fixture is deliberately NOT valid block markup — `"id":{{MEDIA_ID}}` is invalid JSON inside a block attribute — so nothing may parse it before substitution.
   - `tests/fixtures/demo-media.png` — a deterministic 1200×675 solid `#1a3c34` PNG imported as the demo page's media.
   - The demo page at `/demo/` (created by Task 8), which the editing-parity suite in Task 10 photographs.
 
@@ -5126,9 +5248,12 @@ npm run build
 ddev exec php scripts/generate-block-index
 ddev composer verify
 npm run lint
+npm run test:accessibility
 ```
 
-Expected: all PASS. This task creates a fixture and editor-only preview, but does not yet seed a page that the frontend can render. Task 8 owns that seed. Task 9 adds the demo browser, accessibility, and visual assertions and runs their gates, all within the bounded narrow migration window. `git status` must show a modified `blocks/reference-callout/build/index.js` (CI's build-drift check compares the committed copy against a fresh build) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
+Expected: all PASS. This task creates a fixture and editor-only preview, but does not yet seed a page that the frontend can render. Task 8 owns that seed. Task 9 adds the demo browser and visual assertions and runs their gates, all within the bounded narrow migration window.
+
+**Browser-gate scope for this commit.** `npm run test:e2e` and `npm run test:visual` are NOT gates here. They still assert the classic markup that Task 6 deleted, so they are red for reasons this task neither causes nor can fix, and Task 9 rewrites them. Measured at `b6c7ce1`, before any Task 7 change: e2e 4 failed / 9 passed / 5 skipped, every failure on `.site-header__site-title`, `#site-header-nav`, or `.site-header__toggle`; visual 2 failed / 2 skipped, both home-page snapshots. `npm run test:accessibility` IS a gate and passed 4 / 4 at the same commit. Do not edit, weaken, skip, or delete any browser or visual spec or any snapshot in this task — Task 9 owns that rewrite. `git status` must show a modified `blocks/reference-callout/build/index.js` AND a modified `blocks/reference-callout/build/index.asset.php` (CI's build-drift check compares the committed copies against a fresh build, and the asset file carries the bundle `version` hash, so it changes on every rebuild) and a modified `docs/generated-block-index.md` if the pattern/test reference lists changed.
 
 - [ ] **Step 6: Commit**
 
@@ -5153,7 +5278,7 @@ git commit -m "feat: add starter patterns, the demo page fixture, and a real dyn
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `tests/fixtures/demo-page.html` and `tests/fixtures/demo-media.png` from Task 6; `parts/site-header.html` from Task 5.
+- Consumes: `tests/fixtures/demo-page.html` and `tests/fixtures/demo-media.png` from Task 7; `parts/site-header.html` from Task 5.
 - Produces, in every freshly bootstrapped install (local and CI):
   - exactly one published `wp_navigation` post titled `Primary`, holding a Home link and a link to Sample Page;
   - a published page titled `Demo` with slug `demo`, whose content is `tests/fixtures/demo-page.html` with `{{MEDIA_ID}}`/`{{MEDIA_URL}}` substituted;
@@ -5224,8 +5349,11 @@ In `.github/workflows/ci.yml`, in the `e2e` job:
 ```yaml
       - name: Create the site navigation menu
         # Mirrors scripts/setup step 9. parts/site-header.html renders a
-        # ref-less <!-- wp:navigation /-->, which resolves unambiguously only
-        # when exactly one wp_navigation post exists.
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # MOST RECENTLY PUBLISHED non-empty wp_navigation record
+        # (WP_Navigation_Fallback::get_most_recently_published_navigation()).
+        # Seeding one named record is what makes CI deterministic; it does NOT
+        # depend on no other record existing.
         run: |
           SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
           ddev wp post create \
@@ -5266,10 +5394,39 @@ git worktree add --detach $expectedRoot HEAD
 if ( (Resolve-Path -LiteralPath $expectedRoot).Path -ne $expectedRoot ) { throw 'The proof worktree path is not exact.' }
 ddev stop
 Push-Location $expectedRoot
-ddev config --project-name=bt-task-1-setup-proof --project-type=wordpress --docroot=web/wp --create-docroot=false
+ddev config --project-name=bt-task-1-setup-proof --project-type=wordpress --docroot=web --create-docroot=false
 ddev start
 ddev exec bash scripts/setup
 ```
+
+**The proof hostname needs a second pass.** `.env` does not exist before the
+first run — `scripts/setup` step 2 creates it from `.env.example`, which ships
+`WP_HOME=https://agency-starter.ddev.site`, and step 2 then leaves any existing
+`.env` untouched. So the first run always installs at the wrong host for a
+proof project with its own name, and editing `.env` beforehand is impossible
+without losing the generated salts. `WP_SITEURL` is `${WP_HOME}/wp`, so only
+`WP_HOME` needs changing. Correct it after the first run, reset only the
+disposable database, and run setup again — that second run is the real
+fresh-install proof:
+
+```bash
+ddev exec bash -c "sed -i 's|^WP_HOME=.*|WP_HOME=https://bt-task-1-setup-proof.ddev.site|' .env"
+ddev exec wp db reset --yes
+ddev exec bash scripts/setup   # the proof run
+ddev exec bash scripts/setup   # the idempotence run — must print every skip line
+```
+
+**Docroot.** This repository is Bedrock and its own `.ddev/config.yaml` declares
+`docroot: web`, not `web/wp`. `web/index.php` is Bedrock's front controller and
+`web/wp/` is only the Composer-installed core directory. A proof configured with
+`--docroot=web/wp` does not serve the docroot the real project serves, so its
+by-hand render checks do not prove the shipped configuration. Always mirror the
+tracked `.ddev/config.yaml` value.
+
+**On this host** DDEV runs inside WSL2, so every `ddev` call above must be
+shelled through `wsl -d Ubuntu -e bash -lc "cd /mnt/c/... && ddev <cmd>"`, and
+`https://` may be unavailable without `mkcert` — record whether the checks used
+HTTP or HTTPS.
 
 Then check by hand:
 - `https://bt-task-1-setup-proof.ddev.site/` renders the header with a visible navigation, a posts list, and the footer.
@@ -5291,9 +5448,12 @@ After recording the proof, run `ddev stop`, `Pop-Location`, then remove the proo
 
 ```bash
 ddev composer verify:fast
+npm run test:accessibility
 git add scripts/setup .github/workflows/ci.yml
 git commit -m "chore: seed block-theme navigation, the demo page, and permalinks"
 ```
+
+This task seeds navigation and the Demo page, so it changes rendered markup. `npm run test:accessibility` is therefore a required gate and must pass, including on the newly seeded `/demo/` page once it exists. `npm run test:e2e` and `npm run test:visual` remain covered by the narrow browser-gate exception until Task 9 rewrites them.
 
 ---
 
@@ -5908,7 +6068,7 @@ git commit -m "test: add reconciliation security and visual coverage"
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
-- Consumes: `MIGRATION_PARITY_PAGES`, `EDITING_PARITY_PAGES`, `PARITY_FONT_CSS`, `MIGRATION_BASELINE_DIR`, `applyParityFonts()`, `captureFrontend()`, `compareToBaseline()` (Task 2); the committed baselines; the demo page (Task 7); `openSiteEditorCanvas()` (Task 8).
+- Consumes: `MIGRATION_PARITY_PAGES`, `EDITING_PARITY_PAGES`, `PARITY_FONT_CSS`, `MIGRATION_BASELINE_DIR`, `applyParityFonts()`, `captureFrontend()`, `compareToBaseline()` (Task 2); the committed baselines; the demo page fixture (Task 7) seeded into a real page by `scripts/setup` and CI (Task 8); `openSiteEditorCanvas()` from `tests/e2e/helpers/wp.ts` (Task 9).
 - Produces: `tests/parity/helpers/parity.ts` additionally exports
   `export type Box = { x: number; y: number; width: number; height: number }`
   `export async function captureEditorCanvas( page: Page, route: string, maskSelectors: string[] ): Promise<Buffer>`
@@ -6307,7 +6467,36 @@ In `.github/workflows/ci.yml`'s `e2e` job (already pinned to `ubuntu-24.04` and 
 npm run test:parity
 ```
 
-Expected: PASS at `maxDiffRatio = 0.05` for all four combinations (two pages × two viewports) in each suite.
+**Parity is Linux-CI-authoritative and CANNOT be judged on Windows or macOS.**
+This mirrors Global Constraint 31 for visual baselines and follows directly from
+fixed Decision 8: parity determinism comes from pinning the job to
+`ubuntu-24.04`, installing `fonts-dejavu-core`, and injecting a fixed
+`DejaVu Sans` stack into both sides. `PARITY_FONT_CSS` sets
+`font-family: "DejaVu Sans", sans-serif !important`, but a host without DejaVu
+installed silently falls back to its own `sans-serif`. Different glyph metrics
+reflow every line, and every element below shifts, so the measured ratio has
+nothing to do with the migration.
+
+Measured on the Windows development host on 2026-08-04, with DejaVu absent:
+home desktop 7.26%, sample-page desktop 18.14%, home mobile 20.41%,
+sample-page mobile 35.69%. Setting `blogname` to the baseline capture value
+moved those numbers by less than 0.3 percentage points, which rules out site
+text as the cause and leaves font fallback as the explanation.
+
+So: run the suite locally for DIAGNOSIS only. The authoritative evaluation is
+the CI job wired up in Step 4. Expected in CI: PASS at `maxDiffRatio = 0.05`
+for all four combinations (two pages × two viewports) in each suite.
+
+**The three site titles must be reconciled before CI parity can pass.** The
+baseline capture job installs `Agency Starter Baseline Capture`
+(`.github/workflows/ci.yml:518`), the `e2e` job installs `Agency Starter CI`
+(line 218), and `scripts/setup` installs `Agency Starter (local)` (line 142).
+The site title is rendered text in the header of every captured page, so the
+comparing environment must install the SAME title the baseline capture used.
+`metadata.json` records the viewport, browser, font stack and font package but
+NOT the site title; that omission is what allowed the mismatch. The parity CI
+job must set `blogname` to the recorded capture value before capturing, and
+`metadata.json` should record it.
 
 If a page fails, close the gap **before** touching the threshold, in this order:
 

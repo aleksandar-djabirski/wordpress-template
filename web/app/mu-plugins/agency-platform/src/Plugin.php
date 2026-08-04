@@ -6,11 +6,14 @@ namespace AgencyPlatform;
 
 use AgencyPlatform\Cli\AgencyCommands;
 use AgencyPlatform\Editor\EditorRestrictions;
-use AgencyPlatform\Editor\SiteEditorLockdown;
+use AgencyPlatform\Editor\GlobalStylesGuard;
+use AgencyPlatform\Editor\SaveValidation;
 use AgencyPlatform\Environment\EnvironmentIndicator;
 use AgencyPlatform\Roles\RolesProvider;
 use AgencyPlatform\Roles\ShopRole;
 use AgencyPlatform\Security\ApplicationPasswords;
+use AgencyPlatform\Security\AdminScreenPolicy;
+use AgencyPlatform\Security\CapabilityPolicy;
 use AgencyPlatform\Security\FileModGuard;
 use AgencyPlatform\Security\MailGuard;
 
@@ -29,8 +32,11 @@ final class Plugin {
 			new EnvironmentIndicator(),
 			new RolesProvider(),
 			new ShopRole(),
+			new CapabilityPolicy(),
+			new AdminScreenPolicy(),
 			new EditorRestrictions(),
-			new SiteEditorLockdown(),
+			new SaveValidation(),
+			new GlobalStylesGuard(),
 			new ApplicationPasswords(),
 			new FileModGuard(),
 			new MailGuard(),

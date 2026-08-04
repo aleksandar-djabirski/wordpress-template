@@ -6,8 +6,9 @@ namespace AgencyPlatform\Roles;
 
 /**
  * Registers the `client_editor` role: everything a WordPress core `editor`
- * can do, minus `unfiltered_html` and every "keys to the kingdom"
- * capability in NEVER_GRANT.
+ * can do, minus `unfiltered_html` and every "keys to the kingdom" capability
+ * in NEVER_GRANT, plus every capability in ALWAYS_GRANT (the Site Editor's
+ * `edit_theme_options`).
  *
  * mu-plugins have no activation hook, so registration happens idempotently
  * on `init`: `add_role()` only runs when the role doesn't exist yet, and an
@@ -34,9 +35,26 @@ final class RolesProvider {
 		'edit_themes',
 		'edit_plugins',
 		'edit_files',
-		'edit_theme_options',
 		'update_core',
 		'unfiltered_html',
+	);
+
+	/**
+	 * Capabilities this role must be granted EXPLICITLY, because core's
+	 * `editor` role does not carry them. Removing a capability from
+	 * NEVER_GRANT is not enough on its own.
+	 *
+	 * `edit_theme_options` is what opens the Site Editor (and the wp_template,
+	 * wp_template_part, wp_global_styles and wp_navigation post types, which
+	 * all map their capabilities to it). The screens it would otherwise expose
+	 * are closed by AgencyPlatform\Security\AdminScreenPolicy, and the
+	 * `customize` / `edit_css` meta capabilities it would otherwise imply are
+	 * denied by AgencyPlatform\Security\CapabilityPolicy.
+	 *
+	 * @var string[]
+	 */
+	private const ALWAYS_GRANT = array(
+		'edit_theme_options',
 	);
 
 	public function register(): void {
@@ -73,6 +91,10 @@ final class RolesProvider {
 
 		foreach ( self::NEVER_GRANT as $capability ) {
 			unset( $capabilities[ $capability ] );
+		}
+
+		foreach ( self::ALWAYS_GRANT as $capability ) {
+			$capabilities[ $capability ] = true;
 		}
 
 		return $capabilities;

@@ -1,9 +1,8 @@
 <?php
 /**
- * Enforces the theme's "thin shell" wiring contract: functions.php and the
- * root template-hierarchy files stay delegates with no logic of their own,
- * so every real setup step and every piece of markup lives in a predictable
- * place (src/Bootstrap for wiring, templates/ for markup).
+ * Enforces the theme's "thin shell" wiring contract: functions.php and
+ * ThemeBootstrap own wiring, while markup lives in templates/*.html and
+ * parts/*.html.
  *
  * @package Tests\Architecture
  */
@@ -23,13 +22,32 @@ final class ThemeBootstrapTest extends TestCase {
 
 	private const FUNCTIONS_MAX_LINES = 50;
 
+	private const CLASSIC_ROOT_TEMPLATES = array(
+		'index.php',
+		'page.php',
+		'single.php',
+		'archive.php',
+		'search.php',
+		'404.php',
+		'header.php',
+		'footer.php',
+	);
+
 	/**
-	 * Delegates carry a mandatory docblock + strict_types + ABSPATH guard,
-	 * so "thin" is measured in SIGNIFICANT source lines (comments and blank
-	 * lines excluded) rather than raw lines: a genuine delegate is a guard
-	 * plus a single require, well under this ceiling.
+	 * A second rendering path is the failure mode this whole migration exists
+	 * to remove: any of these left in the theme would let WordPress fall back
+	 * to classic rendering for some request type, so the site the client edits
+	 * in the Site Editor and the site a visitor sees could silently diverge.
+	 *
+	 * @var string[]
 	 */
-	private const DELEGATE_MAX_SIGNIFICANT_LINES = 10;
+	private const CLASSIC_TEMPLATE_CALLS = array(
+		'get_header',
+		'get_footer',
+		'get_template_part',
+		'wp_nav_menu',
+		'register_nav_menus',
+	);
 
 	private function theme(): string {
 		return $this->repo_root() . '/web/app/themes/site-theme';
@@ -50,6 +68,8 @@ final class ThemeBootstrapTest extends TestCase {
 				'Move setup steps into \\SiteTheme\\Bootstrap\\ThemeBootstrap as named methods wired from boot().'
 			)
 		);
+
+		self::assertLessThanOrEqual( self::FUNCTIONS_MAX_LINES, $this->significant_line_count( $file ) );
 	}
 
 	public function test_functions_php_registers_no_hooks_and_has_no_closures(): void {
@@ -76,68 +96,66 @@ final class ThemeBootstrapTest extends TestCase {
 		);
 	}
 
-	public function test_each_template_has_a_thin_root_delegate(): void {
-		$theme = $this->theme();
+	public function test_the_theme_declares_itself_a_block_theme(): void {
+		self::assertFileExists(
+			$this->theme() . '/templates/index.html',
+			$this->architecture_failure(
+				'templates/index.html is missing',
+				'web/app/themes/site-theme/templates/index.html',
+				'WP_Theme::is_block_theme() keys off this exact file; without it WordPress falls back to the classic hierarchy and the Site Editor is unavailable.',
+				'Add templates/index.html with the posts-index block markup.'
+			)
+		);
+	}
 
-		foreach ( $this->template_names( $theme ) as $name ) {
-			$delegate = $theme . '/' . $name . '.php';
+	public function test_no_classic_root_template_files_remain(): void {
+		$root_php_files = array_map( 'basename', $this->root_php_files( $this->theme() ) );
 
-			self::assertFileExists(
-				$delegate,
+		foreach ( self::CLASSIC_ROOT_TEMPLATES as $name ) {
+			self::assertFileDoesNotExist(
+				$this->theme() . '/' . $name,
 				$this->architecture_failure(
-					'templates/' . $name . '.php has no root delegate',
-					$this->to_relative( $theme ) . '/' . $name . '.php',
-					'WordPress\'s template hierarchy loads root-level files; every templates/ file needs a matching root delegate or it is never used.',
-					'Add a thin root ' . $name . '.php that requires templates/' . $name . '.php.'
+					'Classic root template survives in a block theme',
+					'web/app/themes/site-theme/' . $name,
+					'WordPress still honours root-level hierarchy files for some request types, so leaving one creates a second rendering path the Site Editor cannot see.',
+					'Delete this file; its markup belongs in templates/*.html or parts/*.html.'
 				)
 			);
 
-			self::assertTrue(
-				$this->requires_template( $delegate, $name ),
-				$this->architecture_failure(
-					'Root ' . $name . '.php does not delegate to its template',
-					$this->to_relative( $delegate ),
-					'Root templates must hold no markup; they exist only to hand off to templates/, which owns the real layout.',
-					'Make this file require __DIR__ . \'/templates/' . $name . '.php\' and nothing else.'
-				)
-			);
-
-			$significant = $this->significant_line_count( $delegate );
-
-			self::assertLessThanOrEqual(
-				self::DELEGATE_MAX_SIGNIFICANT_LINES,
-				$significant,
-				$this->architecture_failure(
-					'Root ' . $name . '.php is not a thin delegate (' . $significant . ' significant lines)',
-					$this->to_relative( $delegate ),
-					'A delegate should be a guard plus a single require; extra logic means markup or behavior has leaked out of templates/.',
-					'Move the logic into templates/' . $name . '.php (markup) or ThemeBootstrap (behavior).'
-				)
-			);
+			self::assertNotContains( $name, $root_php_files );
 		}
 	}
 
-	public function test_every_root_delegate_maps_to_a_template(): void {
-		$theme         = $this->theme();
-		$non_delegates = array( 'functions.php', 'header.php', 'footer.php' );
+	public function test_the_theme_has_no_second_rendering_path(): void {
+		self::assertFileDoesNotExist(
+			$this->theme() . '/src/Support/Parts.php',
+			'SiteTheme\\Support\\Parts belonged to the classic part convention and must be deleted.'
+		);
 
-		foreach ( $this->root_php_files( $theme ) as $file ) {
-			$basename = basename( $file );
-
-			if ( in_array( $basename, $non_delegates, true ) ) {
-				continue;
+		foreach ( $this->all_theme_php_files() as $file ) {
+			foreach ( self::CLASSIC_TEMPLATE_CALLS as $call ) {
+				self::assertDoesNotMatchRegularExpression(
+					'/\\b' . preg_quote( $call, '/' ) . '\\s*\\(/',
+					$this->code_without_comments( $file ),
+					$this->architecture_failure(
+						'Classic template function called in a block theme',
+						$this->to_relative( $file ),
+						$call . '() belongs to the classic rendering path this theme no longer has; calling it reintroduces markup the Site Editor cannot edit.',
+						'Express this with a block: core/template-part for chrome, core/navigation for menus.'
+					)
+				);
 			}
+		}
+	}
 
-			$name = pathinfo( $basename, PATHINFO_FILENAME );
+	public function test_theme_bootstrap_owns_the_setup_hooks(): void {
+		$source = $this->read( $this->theme() . '/src/Bootstrap/ThemeBootstrap.php' );
 
-			self::assertFileExists(
-				$theme . '/templates/' . $name . '.php',
-				$this->architecture_failure(
-					'Root delegate ' . $basename . ' has no template',
-					$this->to_relative( $file ),
-					'A root delegate with no templates/ counterpart is an orphan: it would require a file that does not exist.',
-					'Add templates/' . $name . '.php with the real markup, or remove this delegate.'
-				)
+		foreach ( array( 'after_setup_theme', 'wp_enqueue_scripts', 'init' ) as $hook ) {
+			self::assertStringContainsString(
+				"'" . $hook . "'",
+				$source,
+				'ThemeBootstrap::boot() must own the ' . $hook . ' registration.'
 			);
 		}
 	}
@@ -192,13 +210,6 @@ final class ThemeBootstrapTest extends TestCase {
 		return false;
 	}
 
-	private function requires_template( string $file, string $name ): bool {
-		$pattern = '#\b(?:require|require_once|include|include_once)\b.*/templates/'
-			. preg_quote( $name, '#' ) . '\.php#';
-
-		return preg_match( $pattern, $this->code_without_comments( $file ) ) === 1;
-	}
-
 	private function significant_line_count( string $file ): int {
 		$insignificant = array(
 			\T_WHITESPACE,
@@ -238,18 +249,32 @@ final class ThemeBootstrapTest extends TestCase {
 	}
 
 	/**
+	 * Recursively lists PHP files under the theme, excluding dependency and
+	 * build output.
+	 *
 	 * @return list<string>
 	 */
-	private function template_names( string $theme ): array {
-		$names = array();
+	private function all_theme_php_files(): array {
+		$iterator = new \RecursiveIteratorIterator(
+			new \RecursiveCallbackFilterIterator(
+				new \RecursiveDirectoryIterator( $this->theme(), \FilesystemIterator::SKIP_DOTS ),
+				static function ( \SplFileInfo $current ): bool {
+					return ! ( $current->isDir() && in_array( $current->getFilename(), array( 'vendor', 'node_modules', 'build' ), true ) );
+				}
+			)
+		);
 
-		foreach ( $this->php_in_directory( $theme . '/templates' ) as $file ) {
-			$names[] = pathinfo( $file, PATHINFO_FILENAME );
+		$files = array();
+
+		foreach ( $iterator as $item ) {
+			if ( $item instanceof \SplFileInfo && $item->isFile() && 'php' === strtolower( $item->getExtension() ) ) {
+				$files[] = $item->getPathname();
+			}
 		}
 
-		sort( $names );
+		sort( $files );
 
-		return $names;
+		return $files;
 	}
 
 	/**

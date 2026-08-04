@@ -1,15 +1,13 @@
 import { expect, test } from '@playwright/test';
 
 /**
- * Baseline "does the site render at all" smoke checks, plus the mobile nav
- * toggle behavior (parts/site-header/site-header.php + .js + .css).
- *
- * Selectors used here come straight from the theme sources:
- *  - header.site-header, .site-header__site-title, .site-header__toggle,
- *    #site-header-nav — web/app/themes/site-theme/parts/site-header/site-header.php
- *  - footer.site-footer — web/app/themes/site-theme/parts/site-footer/site-footer.php
- *  - main#site-main — web/app/themes/site-theme/templates/index.php
- *  - the 782px breakpoint and `.is-open` toggle class — site-header.css / site-header.js
+ * Frontend smoke for the native block theme. Every selector below is produced
+ * by block markup this repository owns:
+ *  - header.site-header      -> parts/site-header.html
+ *  - footer.site-footer      -> parts/site-footer.html
+ *  - main#site-main          -> every templates/*.html main group's anchor
+ *  - nav.wp-block-navigation -> core/navigation in site-header.html
+ * The mobile overlay toggle class is core's own, not theme-authored.
  */
 
 test( 'home page renders the standard chrome', async ( { page } ) => {
@@ -17,7 +15,7 @@ test( 'home page renders the standard chrome', async ( { page } ) => {
 
 	expect( response?.status() ).toBe( 200 );
 	await expect( page.locator( 'header.site-header' ) ).toBeVisible();
-	await expect( page.locator( '.site-header__site-title' ) ).toBeVisible();
+	await expect( page.locator( '.site-header__branding .wp-block-site-title' ) ).toBeVisible();
 	await expect( page.locator( 'footer.site-footer' ) ).toBeVisible();
 	await expect( page.locator( 'main#site-main' ) ).toBeAttached();
 } );
@@ -28,13 +26,8 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 	const hrefs = await page.$$eval(
 		'a[href]',
 		( anchors, base ) => {
-			// Resolve each href against the page's base URL and compare
-			// ORIGINS rather than string-prefixing. Origin comparison
-			// correctly classifies protocol-relative hrefs (//host/path),
-			// rejects prefix-collision look-alikes (https://base.evil.com no
-			// longer counts as internal just because it starts with the base
-			// string), and treats opaque-origin schemes (mailto:, tel:,
-			// javascript:) as external.
+			// Compare URL origins. String-prefix matching would treat
+			// https://base.evil.com as internal to https://base.com.
 			let baseOrigin: string;
 			try {
 				baseOrigin = new URL( base ).origin;
@@ -62,39 +55,42 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 		baseURL ?? ''
 	);
 
-	const toCheck = hrefs.slice( 0, 20 );
-
-	for ( const href of toCheck ) {
+	for ( const href of hrefs.slice( 0, 20 ) ) {
 		const response = await page.request.get( href );
 		expect( response.status(), `expected ${ href } to respond < 400` ).toBeLessThan( 400 );
 	}
 } );
 
-test( 'desktop: primary nav is visible without opening the toggle', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-desktop', 'desktop-only layout behavior' );
+test( 'desktop: the site navigation is visible without opening an overlay', async ( { page }, testInfo ) => {
+	test.skip( testInfo.project.name !== 'chromium-desktop', 'desktop-only: core collapses the navigation into an overlay on narrow viewports' );
 
 	await page.goto( '/' );
 
-	await expect( page.locator( '#site-header-nav' ) ).toBeVisible();
-	await expect( page.locator( '.site-header__toggle' ) ).toBeHidden();
+	await expect( page.locator( 'header.site-header nav.wp-block-navigation' ) ).toBeVisible();
+	await expect( page.locator( '.wp-block-navigation__responsive-container-open' ) ).toBeHidden();
 } );
 
-test( 'mobile: the toggle opens the nav and Escape closes it', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-mobile', 'mobile-only toggle behavior' );
+test( 'mobile: the navigation overlay opens and Escape closes it', async ( { page }, testInfo ) => {
+	test.skip( testInfo.project.name !== 'chromium-mobile', 'mobile-only: the navigation overlay toggle only renders below core\'s breakpoint' );
 
 	await page.goto( '/' );
 
-	const toggle = page.locator( '.site-header__toggle' );
-	const nav = page.locator( '#site-header-nav' );
+	const toggle = page.locator( '.wp-block-navigation__responsive-container-open' );
+	const overlay = page.locator( '.wp-block-navigation__responsive-container' );
 
 	await expect( toggle ).toBeVisible();
-	await expect( nav ).toBeHidden();
-
 	await toggle.click();
-	await expect( nav ).toBeVisible();
-	await expect( toggle ).toHaveAttribute( 'aria-expanded', 'true' );
+	await expect( overlay ).toHaveClass( /is-menu-open/ );
 
 	await page.keyboard.press( 'Escape' );
-	await expect( nav ).toBeHidden();
-	await expect( toggle ).toHaveAttribute( 'aria-expanded', 'false' );
+	await expect( overlay ).not.toHaveClass( /is-menu-open/ );
+} );
+
+test( 'the demo page renders every section', async ( { page } ) => {
+	const response = await page.goto( '/demo/' );
+
+	expect( response?.status() ).toBe( 200 );
+	await expect( page.locator( 'main#site-main h1.wp-block-heading' ) ).toBeVisible();
+	await expect( page.locator( 'main#site-main .wp-block-image img' ) ).toBeVisible();
+	await expect( page.locator( 'main#site-main .reference-callout__heading' ) ).toBeVisible();
 } );

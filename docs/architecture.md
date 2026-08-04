@@ -48,56 +48,77 @@ allowed to reach past them into `SiteCore\Testimonials\*`,
 Everything not listed is forbidden. Run `ddev composer deptrac` to check; a
 violation names the offending class and the rule it broke.
 
-## Two-category UI model
+## Three-category UI model
 
-Everything a site visitor sees is either a **block** or a **part**, plus one
-special-cased third location for WooCommerce:
+The Site Editor exposes three categories of visual structure: blocks, template
+parts, and templates. Patterns provide sanctioned starting compositions.
 
-- **Blocks** (`site-theme/blocks/`) — customer-editable content. Registered
-  via `block.json`, insertable/editable in the block editor, subject to
-  `EditorRestrictions::ALLOWED_BLOCKS` for non-admin users.
-- **Parts** (`site-theme/parts/`) — non-editable site chrome (header, footer)
-  rendered through `SiteTheme\Support\Parts::render()`, outside the block
-  editor's reach entirely. Adding a part means editing
-  `Parts::MANIFEST`, not the block editor.
-- **`site-theme/woocommerce/`** — WooCommerce template overrides. Not a UI
-  category so much as an escape hatch: `wc_locate_template()` prefers a
-  theme file over WooCommerce's own, so this directory can silently
-  shadow core Woo markup. It is empty by design (see
-  `woocommerce/README.md`'s override log) — a `woocommerce_*` hook must be
-  ruled out first, and any override must be logged there.
+- **Blocks** (`site-theme/blocks/`) — insertable, editable UI registered via
+  `block.json`. Which blocks a client may insert is decided by
+  `AgencyPlatform\Editor\BlockPolicy` from the registered block types, not a
+  hand-maintained list.
+- **Template parts** (`site-theme/parts/*.html`) — site chrome (header, footer)
+  as block markup, declared in `theme.json.templateParts` and **editable by
+  clients in the Site Editor**. Adding a part means adding
+  `parts/<slug>.html` and a `templateParts` entry, not editing a PHP manifest.
+- **Templates** (`site-theme/templates/*.html`) — the per-request page shell,
+  also editable in the Site Editor.
+- **Patterns** (`site-theme/patterns/*.php`) — sanctioned starting
+  compositions, unlocked by default. `reference-landing-section.php` is the
+  documented locked example.
 
-Page shells (`templates/`) and block *compositions* (`patterns/`) are
-one level up from both: a template lays out where parts/content go for a
-given request type, a pattern is a canned arrangement of blocks (optionally
-`templateLock`-ed, as in `patterns/reference-landing-section.php`).
+Commerce markup overrides remain a separate profile boundary:
+`site-theme/woocommerce/` is an escape hatch where
+`wc_locate_template()` prefers a theme file over WooCommerce's own. It is
+empty by design (see `woocommerce/README.md`'s override log) — a
+`woocommerce_*` hook must be ruled out first, and any override must be logged
+there.
 
 ## Source of truth
 
-The contract in one line: **Git owns the shape, the database owns the
-content.** The design system, markup, templates, block and pattern
-definitions, the allowed compositions, and all behavior live in Git;
-customer copy, media choices, page compositions built *from* approved
-blocks, navigation-menu data, and product/order data live in the database.
-Database-resident *structural* overrides — a `wp_template`/`wp_template_part`
-row, or a `wp_global_styles` row carrying real custom CSS/customizations —
-are forbidden and detected by `wp agency check-overrides`.
+Git owns code and the promoted baseline. The database can contain intentional
+live overrides. Runtime truth is the active Git baseline plus current database
+state. Agents must export and inspect current state before changing or
+promoting structure and styles.
+
+Customer copy, media choices, page compositions, navigation data, and
+product/order data live in the database. Database structural overrides are
+**expected**: a client editing a template, a part or Global Styles writes a
+`wp_template`, `wp_template_part` or `wp_global_styles` row.
+`wp agency check-overrides` reports them and exits zero; `--fail-on-drift` is
+the opt-in gate.
 
 | Thing | Owned by | Notes |
 | --- | --- | --- |
-| Templates (`templates/*.php`) | Git | `ThemeBootstrapTest` requires a thin root delegate per template |
-| Parts (`parts/*/`) | Git | Rendered via `Parts::render()`; never editable in wp-admin |
+| Templates (`templates/*.html`) | Git baseline + DB overrides | `BlockThemeStructureTest` + `BlockTemplateIntegrityTest`; promotable through the state workflow |
+| Template parts (`parts/*.html`) | Git baseline + DB overrides | declared in `theme.json.templateParts`; editable in the Site Editor |
 | Blocks (`blocks/*/`) | Git (definition) + Database (`post_content` usage) | The block's code ships in Git; where/how it's placed on a page lives in post content |
-| Design tokens | Git (`theme.json`) | `AgencyPlatform\Health\DatabaseOverrideCheck` flags a DB `wp_global_styles` row with real CSS/customizations as an override of this file |
+| Design tokens (`theme.json`) | Git baseline + DB user origin | a `wp_global_styles` row is a client customisation, reported not rejected |
 | Content (pages, posts, testimonials) | Database | Authored by editors; not versioned |
-| Navigation menus | Database | Menu *data* is editor-authored; the menu location and the part that renders it are Git |
+| Navigation | Database | `core/navigation` resolves it at render time; Git-owned markup carries no `ref` |
 | Products (WooCommerce) | Database (behavior in Git) | Product data lives in `wp_posts`/`wp_postmeta`; the *rules* governing it live in `site-commerce/` |
 | Secrets (API keys, webhook URLs) | Environment variables / host secret store | Never Git, never the database — see `.env.example` and `AGENTS.md`'s environment-safety section |
 
-`wp agency check-overrides` (`scripts/check-database-overrides`) detects when
-a published `wp_template`/`wp_template_part` row or a customized
-`wp_global_styles` row exists in the database, shadowing the Git-owned
-files above.
+`wp agency check-overrides` (`scripts/check-database-overrides`) **reports drift**
+between the database and the Git baseline. It exits zero by default — a
+database template, part or Global Styles row is a legitimate client edit under
+this editing model — and exits 1 only with `--fail-on-drift`. Richer,
+machine-readable reporting arrives with `wp agency state-export` /
+`wp agency state-diff`; this command remains as a compatibility alias.
+
+## Editing surfaces and their guardrails
+
+- `AgencyPlatform\Editor\BlockPolicy` derives the insertable block set from
+  registered blocks, approved namespaces, and the project filters. Its
+  `ALWAYS_DENIED` list cannot be reopened by a filter.
+- `AgencyPlatform\Editor\SaveValidation` re-applies the block policy at the
+  REST save boundary and rejects forbidden blocks, raw HTML, registered
+  shortcodes, and per-block custom CSS.
+- `AgencyPlatform\Security\CapabilityPolicy` maps `edit_css` and `customize`
+  to `do_not_allow` for client roles.
+- `AgencyPlatform\Security\AdminScreenPolicy` blocks the legacy theme,
+  plugin, Customizer, widget, menu, and settings screens while leaving
+  `site-editor.php` and `font-library.php` open for the Site Editor.
 
 ## Profiles
 

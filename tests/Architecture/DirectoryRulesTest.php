@@ -1,6 +1,6 @@
 <?php
 /**
- * Enforces the theme's and plugins' top-level directory contract: a hybrid
+ * Enforces the theme's and plugins' top-level directory contract: a block
  * theme keeps a small, fixed set of top-level folders/files, and neither the
  * theme nor any plugin grows the catch-all "junk drawer" directories
  * (inc/, includes/, helpers/, misc/, ...) that erode an AI-legible layout.
@@ -35,14 +35,6 @@ final class DirectoryRulesTest extends TestCase {
 		'style.css',
 		'functions.php',
 		'theme.json',
-		'index.php',
-		'page.php',
-		'single.php',
-		'archive.php',
-		'search.php',
-		'404.php',
-		'header.php',
-		'footer.php',
 		'screenshot.png',
 		'README.md',
 	);
@@ -69,7 +61,7 @@ final class DirectoryRulesTest extends TestCase {
 				$this->architecture_failure(
 					'Unexpected top-level directory in the theme',
 					$this->to_relative( $theme ) . '/' . $name,
-					'The theme keeps a fixed, AI-legible set of top-level folders (assets, blocks, parts, patterns, src, templates, woocommerce).',
+					'A block theme keeps a small, fixed set of top-level folders.',
 					'Move this directory\'s contents under one of the allowed folders, or delete it if it is stray output.'
 				)
 			);
@@ -86,11 +78,60 @@ final class DirectoryRulesTest extends TestCase {
 				$this->architecture_failure(
 					'Unexpected top-level file in the theme',
 					$this->to_relative( $theme ) . '/' . $name,
-					'Root-level PHP is limited to the classic template-hierarchy delegates plus header.php/footer.php; any other *.php here (e.g. a stray WooCommerce override) hides real markup outside templates/.',
-					'Move WooCommerce template overrides under the theme\'s woocommerce/ folder and page markup under templates/; delete build/editor cruft.'
+					'A block theme has exactly one rendering path — templates/*.html and parts/*.html. Any root-level PHP other than functions.php is a classic-hierarchy file WordPress would silently start honouring again.',
+					'Move markup into templates/ or parts/ as block HTML, and behaviour into src/Bootstrap/ThemeBootstrap.php; delete build/editor cruft.'
 				)
 			);
 		}
+	}
+
+	public function test_no_php_files_live_under_theme_templates_or_parts(): void {
+		foreach ( array( 'templates', 'parts' ) as $directory ) {
+			$root = $this->repo_root() . '/web/app/themes/site-theme/' . $directory;
+
+			foreach ( $this->all_php_files( $root ) as $file ) {
+				self::fail(
+					$this->architecture_failure(
+						'PHP file under the block theme\'s ' . $directory . '/ directory',
+						$this->to_relative( $file ),
+						'templates/ and parts/ hold block markup only; a PHP file here is a leftover of the deleted classic rendering path.',
+						'Convert the markup to a .html block template or part, or delete the file.'
+					)
+				);
+			}
+		}
+
+		$this->addToAssertionCount( 1 );
+	}
+
+	public function test_template_parts_are_direct_html_files_under_parts(): void {
+		$parts = $this->repo_root() . '/web/app/themes/site-theme/parts';
+
+		foreach ( $this->top_level_directories( $parts ) as $name ) {
+			self::fail(
+				$this->architecture_failure(
+					'Nested directory under the theme\'s parts/',
+					$this->to_relative( $parts ) . '/' . $name,
+					'WordPress resolves template parts as flat parts/<slug>.html files; a nested directory is never loaded.',
+					'Move the markup into parts/' . $name . '.html and its styles into assets/global/shared.css.'
+				)
+			);
+		}
+
+		foreach ( $this->top_level_files( $parts ) as $name ) {
+			self::assertStringEndsWith(
+				'.html',
+				$name,
+				$this->architecture_failure(
+					'Non-HTML file directly under the theme\'s parts/',
+					$this->to_relative( $parts ) . '/' . $name,
+					'Template parts are HTML block markup; PHP, CSS or JS here belongs to the removed classic part convention.',
+					'Move styles into assets/global/shared.css and behaviour into a block\'s viewScript.'
+				)
+			);
+		}
+
+		$this->addToAssertionCount( 1 );
 	}
 
 	public function test_no_forbidden_directory_names_in_theme_or_plugins(): void {

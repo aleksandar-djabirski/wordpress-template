@@ -4,7 +4,9 @@
 # styles) that shadow the Git-owned theme/theme.json. Thin wrapper around the
 # `wp agency check-overrides` WP-CLI command (see the agency-platform
 # mu-plugin) so it is runnable the same way from a host or CI as from inside
-# the container. Exits non-zero when overrides are found.
+# the container. Informational by default — exits 0 whatever it finds. Pass
+# --fail-on-drift to make drift a hard failure; every argument is forwarded to
+# `wp agency check-overrides`.
 set -euo pipefail
 
 if command -v wp >/dev/null 2>&1; then
