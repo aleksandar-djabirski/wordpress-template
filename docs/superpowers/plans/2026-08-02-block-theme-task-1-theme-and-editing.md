@@ -3345,7 +3345,7 @@ git worktree add --detach $expectedRoot HEAD
 if ( (Resolve-Path -LiteralPath $expectedRoot).Path -ne $expectedRoot ) { throw 'The proof worktree path is not exact.' }
 ddev stop
 Push-Location $expectedRoot
-ddev config --project-name=bt-task-1-spike-proof --project-type=wordpress --docroot=web/wp --create-docroot=false
+ddev config --project-name=bt-task-1-spike-proof --project-type=wordpress --docroot=web --create-docroot=false
 ddev start
 ddev composer install --no-interaction --prefer-dist
 ddev wp core install --url=https://bt-task-1-spike-proof.ddev.site --title='Block theme spike proof' --admin_user=admin --admin_password=admin --admin_email=admin@example.invalid --skip-email
@@ -3357,6 +3357,10 @@ ddev wp post create --post_type=wp_navigation --post_status=publish --post_title
 ```
 
 This is a temporary bootstrap seed. It creates one ref-less `wp_navigation` record and pretty permalinks before the browser gate. Task 8 remains the owner of the tracked `scripts/setup` and CI bootstrap correction. Never run `ddev delete` in the task or main checkout. After recording the gate, run `ddev stop`, `Pop-Location`, remove the proof worktree with `git worktree remove $expectedRoot`, and confirm `git worktree list` no longer names it.
+
+**Docroot corrected 2026-08-04**, after the Unit 1 review found the same defect here that Task 8 already hit. This repository is Bedrock and its tracked `.ddev/config.yaml` declares `docroot: web`. `web/index.php` is Bedrock's front controller; `web/wp/` is only the Composer-installed core directory. Critically, `config/application.php:101-103` sets `CONTENT_DIR` to `/app`, `WP_CONTENT_DIR` to `$webroot_dir . '/app'` and `WP_CONTENT_URL` to `WP_HOME . '/app'`, so under `docroot: web/wp` every `/app/...` request resolves to `web/wp/app/...`, which does not exist. Theme CSS, block build output and uploaded media all 404 while pages still return 200 — a proof that looks green and demonstrates nothing about assets.
+
+**On this host** DDEV runs inside WSL2, so every `ddev` call above must be shelled through `wsl -d Ubuntu -e bash -lc "cd /mnt/c/... && ddev <cmd>"`, and `https://` may be unavailable without `mkcert`. Record whether the checks used HTTP or HTTPS. A reused proof path can also leave a stale drvfs entry that makes `ddev start` fail with `mkdir .ddev/db_snapshots: file exists` while both `ls` and Windows report the path absent; creating that directory from the Windows side clears it.
 
 Then use browser automation as `admin` / `admin` and confirm every item below. Save the result in the unit evidence. No separate human action is required when the orchestrator can control the browser.
 
