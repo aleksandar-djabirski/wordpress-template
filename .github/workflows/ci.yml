@@ -207,7 +207,21 @@ jobs:
           sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
 
       - name: Install PHP dependencies (inside DDEV)
-        run: ddev composer install --no-interaction --prefer-dist
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
 
       - name: Install WordPress core
         # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
@@ -400,7 +414,21 @@ jobs:
           sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
 
       - name: Install PHP dependencies (inside DDEV)
-        run: ddev composer install --no-interaction --prefer-dist
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
 
       - name: Install WordPress core
         # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
@@ -516,7 +544,21 @@ jobs:
           sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
 
       - name: Install PHP dependencies (inside DDEV)
-        run: ddev composer install --no-interaction --prefer-dist
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
 
       - name: Install WordPress core
         run: |
