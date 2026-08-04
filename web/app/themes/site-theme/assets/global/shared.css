@@ -116,3 +116,27 @@ h6 {
 	margin: 0;
 	font-size: var(--wp--preset--font-size--small);
 }
+
+/* Mobile-only geometry parity, declared last so it beats the base rules the
+   block theme ships (the core layout classes and the .site-footer padding).
+   The classic header laid its nav below the 782px collapse with no per-child
+   top margin and a full-size 40px toggle, so it measured 261px here rather
+   than the 270px the block theme emitted (its navigation inherited a 24px
+   layout margin and a smaller open button). The classic footer sat flush and
+   ended 20px taller than the block theme's single-line version. These restore
+   the classic positions without touching the desktop layout, which passes. */
+@media (width <= 781px) {
+	.site-header__inner .site-header__nav {
+		margin-block-start: 0;
+	}
+
+	.site-header__inner .wp-block-navigation__responsive-container-open {
+		width: 2.5rem;
+		height: 2.5rem;
+	}
+
+	.site-footer {
+		margin-block-start: 21px;
+		padding-block: 33.5px;
+	}
+}
