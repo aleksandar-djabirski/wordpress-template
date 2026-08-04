@@ -6,16 +6,18 @@ table. This expands each common task.
 
 ## Modify the header or footer (site chrome)
 
-- **Owns it**: `site-theme/parts/site-header/` or `parts/site-footer/`.
-- **May change**: `site-header.php` (+ `.css`/`.js` named exactly after the
-  part — `GlobalAssetRulesTest` enforces the naming convention).
-- **Must not change**: `header.php`/`footer.php` at the theme root beyond
-  the `Parts::render()` call already there — they are chrome delegates, not
-  a place for markup.
-- **Checks**: `ddev composer test:architecture` (`GlobalAssetRulesTest`,
-  `HookOwnershipTest` — parts register no hooks), `npm run lint:css`.
-- **Verify visually**: load any page; for a committed baseline, `npm run
-  test:visual` (needs a running site).
+- **Owns it**: `site-theme/parts/site-header.html` or
+  `site-theme/parts/site-footer.html`, plus `assets/global/shared.css` for
+  the visual rules.
+- **May change**: the block markup and the `.site-header` / `.site-footer`
+  rules in `shared.css`.
+- **Must not change**: nothing at the theme root — a block theme has no
+  `header.php`/`footer.php`. Do not add an inline `style` attribute to the
+  Git-owned markup.
+- **Checks**: `ddev composer test:architecture`
+  (`BlockThemeStructureTest`, `GlobalAssetRulesTest`),
+  `ddev composer test:integration` (`BlockTemplateIntegrityTest`),
+  `npm run lint:css`, `npm run test:parity`.
 
 ## Add a testimonial section to a page
 
@@ -59,8 +61,6 @@ table. This expands each common task.
   pattern (`site-theme/patterns/`) for the reusable composition of blocks.
   See `patterns/reference-landing-section.php` for a locked
   (`templateLock: contentOnly`) example.
-- **Must not change**: root delegate files beyond a single `require`
-  (`ThemeBootstrapTest`'s thin-delegate rule).
 
 ## Change typography or color
 
@@ -73,9 +73,10 @@ table. This expands each common task.
 
 ## Change mobile navigation behavior
 
-- **Owns it**: `site-theme/parts/site-header/site-header.js` — vanilla,
-  enqueued per-part JS (see `AGENTS.md`'s frontend behavior order). No new
-  global bundle.
+- **Owns it**: `core/navigation`'s `overlayMenu` attribute in
+  `site-theme/parts/site-header.html`. There is no theme-level navigation JS
+  any more. If genuinely custom interaction is needed, use a block with
+  `viewScript` or the Interactivity API.
 - **Checks**: `npm run lint:js`, `npm run test:accessibility` (nav toggle
   keyboard/ARIA behavior).
 
@@ -97,10 +98,8 @@ table. This expands each common task.
 
 ## Tighten how much customers can edit
 
-- **Owns it**: `agency-platform` — the editor allow-list
-  (`EditorRestrictions::ALLOWED_BLOCKS`) and `client_editor` capabilities
-  (`RolesProvider`) — plus a per-project `register_post_type_args` filter for
-  template locking.
+- **Owns it**: the three `agency_platform_*` filters,
+  `AdminScreenPolicy::DENIED_SCREENS`, and `RolesProvider`.
 - **See**: [`editing-strictness.md`](editing-strictness.md) for the default
-  content-only model and the three dials (trim the block allow-list, lock page
-  composition via `template_lock`, drop page caps).
+  editing model and the four dials (trim the block set, lock page composition
+  via `template_lock`, drop page caps, tighten the admin-screen boundary).
