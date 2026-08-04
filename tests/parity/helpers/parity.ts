@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import type { Frame, Page } from '@playwright/test';
+import { openSiteEditorCanvas } from '../../e2e/helpers/wp';
+import type { Frame, FrameLocator, Page } from '@playwright/test';
 import { PNG } from 'pngjs';
 import pixelmatch from 'pixelmatch';
 
@@ -65,14 +66,148 @@ export async function captureFrontend(
 	} );
 }
 
+/**
+ * Photographs the Site Editor canvas with the editor chrome cropped out. The
+ * screenshot is taken of the .editor-styles-wrapper element inside the editor
+ * canvas iframe, which is the region a visitor's viewport shows on the
+ * frontend.
+ */
+export async function captureEditorCanvas(
+	page: Page,
+	route: string,
+	maskSelectors: string[]
+): Promise< Buffer > {
+	const canvas = await openSiteEditorCanvas( page, route );
+	const root = canvas.locator( '.editor-styles-wrapper' );
+
+	await applyParityFonts( page );
+	await root.evaluate( ( element, css ) => {
+		const style = element.ownerDocument.createElement( 'style' );
+		style.textContent = css;
+		element.ownerDocument.head.appendChild( style );
+	}, PARITY_FONT_CSS );
+	await root.evaluate( ( element ) => element.ownerDocument.fonts.ready );
+
+	return root.screenshot( {
+		animations: 'disabled',
+		caret: 'hide',
+		mask: maskSelectors.map( ( selector ) => canvas.locator( selector ) ),
+	} );
+}
+
+export type Box = { x: number; y: number; width: number; height: number };
+
+/**
+ * Returns bounding boxes relative to the capture root's own origin. A missing
+ * or unlaid-out selector throws so an absent section cannot pass as a zero box.
+ */
+export async function boundingBoxes(
+	scope: Page | FrameLocator,
+	rootSelector: string,
+	selectors: string[]
+): Promise< Record< string, Box > > {
+	const root = await scope.locator( rootSelector ).first().boundingBox();
+
+	if ( ! root ) {
+		throw new Error( `boundingBoxes: capture root "${ rootSelector }" was not found or is not visible.` );
+	}
+
+	const result: Record< string, Box > = {};
+
+	for ( const selector of selectors ) {
+		const target = scope.locator( selector ).first();
+
+		if ( ( await target.count() ) === 0 ) {
+			throw new Error( `boundingBoxes: "${ selector }" is missing. Editing parity cannot pass when a section is absent from one side.` );
+		}
+
+		const box = await target.boundingBox();
+
+		if ( ! box ) {
+			throw new Error( `boundingBoxes: "${ selector }" exists but has no layout box (display:none?).` );
+		}
+
+		result[ selector ] = {
+			x: box.x - root.x,
+			y: box.y - root.y,
+			width: box.width,
+			height: box.height,
+		};
+	}
+
+	return result;
+}
+
+/**
+ * Measures the editor canvas content width. The iframe width can differ from
+ * the browser viewport when the Site Editor sidebars are open.
+ */
+export async function effectiveCanvasWidth( page: Page ): Promise< number > {
+	return page
+		.frameLocator( 'iframe[name="editor-canvas"]' )
+		.locator( '.editor-styles-wrapper' )
+		.first()
+		.evaluate( ( element ) => element.getBoundingClientRect().width );
+}
+
+export async function computedStyles(
+	scope: Page | FrameLocator,
+	selector: string,
+	properties: string[]
+): Promise< Record< string, string > > {
+	return scope.locator( selector ).first().evaluate( ( element, props ) => {
+		const styles = element.ownerDocument.defaultView!.getComputedStyle( element );
+		const out: Record< string, string > = {};
+
+		for ( const prop of props ) {
+			out[ prop ] = styles.getPropertyValue( prop );
+		}
+
+		return out;
+	}, properties );
+}
+
 export function compareToBaseline(
 	actual: Buffer,
 	baselinePath: string,
 	maxDiffRatio: number,
 	diffOutPath: string
 ): { diffRatio: number } {
-	const expectedPng = PNG.sync.read( readFileSync( baselinePath ) );
-	const actualPng = PNG.sync.read( actual );
+	return compareBuffers( readFileSync( baselinePath ), actual, maxDiffRatio, diffOutPath );
+}
+
+/**
+ * Captures a frontend region as an element screenshot so it uses the same
+ * capture geometry as the Site Editor canvas screenshot.
+ */
+export async function captureFrontendRegion(
+	page: Page,
+	path: string,
+	maskSelectors: string[],
+	rootSelector = 'body'
+): Promise< Buffer > {
+	await page.goto( path, { waitUntil: 'networkidle' } );
+	await applyParityFonts( page );
+	await page.evaluate( () => document.fonts.ready );
+
+	return page.locator( rootSelector ).first().screenshot( {
+		animations: 'disabled',
+		caret: 'hide',
+		mask: maskSelectors.map( ( selector ) => page.locator( selector ) ),
+	} );
+}
+
+/**
+ * Compares two PNG buffers and counts a capture-size mismatch as difference.
+ */
+export function compareBuffers(
+	expectedBuffer: Buffer,
+	actualBuffer: Buffer,
+	maxDiffRatio: number,
+	diffOutPath: string
+): { diffRatio: number } {
+	const expectedPng = PNG.sync.read( expectedBuffer );
+	const actualPng = PNG.sync.read( actualBuffer );
 
 	const width = Math.min( expectedPng.width, actualPng.width );
 	const height = Math.min( expectedPng.height, actualPng.height );
@@ -87,8 +222,6 @@ export function compareToBaseline(
 		{ threshold: 0.2 }
 	);
 
-	// A size mismatch counts as difference, so a taller or shorter page cannot
-	// pass by comparing only the overlapping region.
 	const maxArea = Math.max(
 		expectedPng.width * expectedPng.height,
 		actualPng.width * actualPng.height
@@ -101,6 +234,24 @@ export function compareToBaseline(
 	}
 
 	return { diffRatio };
+}
+
+/**
+ * Resolves a page id through the REST API so a missing setup fixture fails with
+ * a named error instead of an editor timeout.
+ */
+export async function resolvePageId( page: Page, path: string ): Promise< number > {
+	const slug = path.replace( /^\/|\/$/g, '' ) || 'home';
+	const response = await page.request.get( `/wp-json/wp/v2/pages?slug=${ encodeURIComponent( slug ) }` );
+	const results = ( await response.json() ) as Array< { id: number } >;
+
+	if ( ! Array.isArray( results ) || results.length === 0 ) {
+		throw new Error(
+			`resolvePageId: no page found for path "${ path }" (slug "${ slug }"). Run scripts/setup so the Demo page and Sample Page exist.`
+		);
+	}
+
+	return results[ 0 ].id;
 }
 
 function cropTo( source: PNG, width: number, height: number ): PNG {

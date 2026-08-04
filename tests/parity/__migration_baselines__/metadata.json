@@ -1,6 +1,7 @@
 {
   "capturedAtCommit": "40e4c2b84b9133b2c73a8706494fdcfcb7b38b9f",
   "capturedAtUtc": "2026-08-03T10:16:18Z",
+  "siteTitle": "Agency Starter Baseline Capture",
   "runnerImage": "ubuntu-24.04",
   "browser": "chromium",
   "browserVersion": "149.0.7827.55",

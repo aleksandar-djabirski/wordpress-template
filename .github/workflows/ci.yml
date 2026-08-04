@@ -346,6 +346,22 @@ jobs:
         run: |
           echo "::notice::No committed visual baselines at tests/visual/__screenshots__ yet — skipping npm run test:visual. Re-run this workflow manually (workflow_dispatch) with update_visual_snapshots=true to generate them, then download the visual-baselines artifact and commit it."
 
+      - name: Set migration parity site title
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+          || github.ref == 'refs/heads/ci-capture/migration-baselines'
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+        run: ddev wp option update blogname "Agency Starter Baseline Capture"
+
+      - name: Run migration and editing parity suites
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+          || github.ref == 'refs/heads/ci-capture/migration-baselines'
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:parity -- --workers=1
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7
