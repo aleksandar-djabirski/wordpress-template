@@ -221,7 +221,7 @@ Revert: remove the added line.
 
 ---
 
-## 8. Unexpected database template record
+## 8. Database template record drift
 
 **Requires DDEV/CI context** — needs a live database.
 
@@ -236,13 +236,24 @@ Check:
 ddev wp agency check-overrides
 ```
 
-Expected failure (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
+Expected report (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
 ```
 Template/template-part overrides: 1
   - front-page (wp_template) [publish]
 Expected core-generated global-styles records: <N>
 Synced patterns (informational only): <N>
-Error: Database overrides found — Git owns templates/template-parts. Reconcile or intentionally re-export them to disk.
+Success: 1 database override(s) reported. Overrides are expected under the Site Editor editing model; pass --fail-on-drift to make them a hard failure.
+```
+Exits **zero**. A database template row is a legitimate client edit under the block-theme editing model, not a guardrail breach.
+
+Gate check:
+```sh
+ddev wp agency check-overrides --fail-on-drift
+```
+
+Expected failure:
+```
+Error: 1 database override(s) found and --fail-on-drift was requested. Reconcile them through the promotion workflow, or re-run without the flag to report only.
 ```
 Exits non-zero (`WP_CLI::error()`).
 
