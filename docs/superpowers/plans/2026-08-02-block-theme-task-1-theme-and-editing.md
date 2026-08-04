@@ -55,7 +55,9 @@ No commit in this plan lands with a gate that the plan already knows is red. Eac
 7. **`reference-landing-section` stays `templateLock: contentOnly`.** It is the repository's documented example of a locked pattern and its purpose is to demonstrate locking. The five new patterns are unlocked. `tests/e2e/locked-pattern.spec.ts` therefore needs no change.
 8. **Parity determinism** comes from pinning the browser job to `ubuntu-24.04`, installing `fonts-dejavu-core`, and injecting a fixed `DejaVu Sans` / `DejaVu Serif` font stack into both sides of every parity comparison. No font binary is committed, so no licence review is required.
 9. **Migration baselines are compared with `pixelmatch`/`pngjs`, never `toHaveScreenshot()`**, so `--update-snapshots` can never regenerate them.
-10. **Only ONE layer emits each semantic element.** `render_block_core_template_part()` (`web/wp/wp-includes/blocks/template-part.php:170-181`) always wraps the part's content in a tag — `tagName` when set, otherwise the area's `area_tag`, which for the `header`/`footer` areas is `<header>`/`<footer>`. If the part FILE also opened a `core/group` with `tagName`, every page would ship nested `<header><header>`, which is invalid landmark structure and fails accessibility review. So: the **template** carries `{"tagName":"header","area":"header","className":"site-header"}` on the `core/template-part` block, and the **part file** opens a plain `core/group` with `className:"site-header__inner"`. Same for the footer. Selector consequence: `header.site-header` exists on the frontend and in a *page/template* canvas; when a client edits the part on its own (`site-editor.php?p=/wp_template_part/...`) only `.site-header__inner` is present, and the part-only tests target that.
+10. **Only ONE layer emits each semantic element.** `render_block_core_template_part()` (`web/wp/wp-includes/blocks/template-part.php:170-181`) always wraps the part's content in a tag — `tagName` when set, otherwise the area's `area_tag`, which for the `header`/`footer` areas is `<header>`/`<footer>`. If the part FILE also opened a `core/group` with `tagName`, every page would ship nested `<header><header>`, which is invalid landmark structure and fails accessibility review. So: the **template** carries `{"tagName":"header","area":"header","className":"site-header"}` on the `core/template-part` block, and the **part file** opens a plain `core/group` with `className:"site-header__inner"`. Same for the footer. Selector consequence: `header.site-header` exists on the frontend and in a *template* canvas (`site-editor.php?p=/wp_template/...`); when a client edits the part on its own (`site-editor.php?p=/wp_template_part/...`) only `.site-header__inner` is present, and the part-only tests target that.
+
+**Correction of 2026-08-04.** This decision originally said "*page/template* canvas", grouping the `/page/{id}` route with the template route. That is wrong in WordPress 7.0 and it made the editing-parity spec unwritable as specified. `wp-admin/site-editor.php:144-149` sets `$context_settings['post']` from `postId`, or from the `/page/(\d+)` route, which makes `/page/{id}` a POST editing context: it renders the page CONTENT only and emits no header, no footer and no `main`. Confirmed empirically — the Task 10 editing-parity run failed before any pixel comparison because `header.site-header` was absent from the `/page/{id}` canvas. Editing parity must therefore either drive the TEMPLATE route, which does render the chrome, or compare only the content region on both sides. It must not assert template chrome inside a `/page/{id}` canvas.
 11. **Header and footer flex layout lives in `assets/global/shared.css`, not in a block `layout` attribute.** A `core/group` with `layout:{type:flex}` makes WordPress generate a `.wp-container-core-group-is-layout-*` rule whose specificity fights our own stylesheet and whose exact class name is unstable. Because `shared.css` is loaded into the editor canvas as well as the frontend, plain CSS on `.site-header__inner` / `.site-footer__inner` renders identically in both and stays fully under our control. This is the same reasoning as Decision 5.
 12. **Global Styles writes need their own guard.** `WP_REST_Global_Styles_Controller` extends `WP_REST_Posts_Controller` but overrides `prepare_item_for_database()` (`class-wp-rest-global-styles-controller.php:238`) and applies **no** `rest_pre_insert_wp_global_styles` filter — verified, the file contains no `apply_filters()` call at all. So `SaveValidation` cannot see a Global Styles write. `GlobalStylesGuard` hooks `rest_pre_dispatch` (`class-wp-rest-server.php:1079`, returning non-null short-circuits the request) and rejects root `styles.css`, per-block `styles.blocks.*.css`, per-element `styles.elements.*.css`, and variation CSS for client roles.
 13. **The Phase 0 spike is a real, separate commit.** `locate_block_template()` (`web/wp/wp-includes/block-template.php:62-92`) keeps a PHP template found by `locate_template()` as a fallback and only considers block templates of **equal or higher** specificity, and `wp_enable_block_templates()` (`theme-templates.php:132-141`) has already added `block-templates` support to this theme because it ships a `theme.json`. So `templates/index.html` alone changes only the requests whose hierarchy bottoms out at `index` — every `page.php`/`single.php`/`archive.php`/`search.php`/`404.php` request still renders classically. The spike genuinely coexists, exactly as §8.2 says, and it ships as its own commit with its own §8.3 gate.
@@ -6461,7 +6463,36 @@ In `.github/workflows/ci.yml`'s `e2e` job (already pinned to `ubuntu-24.04` and 
 npm run test:parity
 ```
 
-Expected: PASS at `maxDiffRatio = 0.05` for all four combinations (two pages × two viewports) in each suite.
+**Parity is Linux-CI-authoritative and CANNOT be judged on Windows or macOS.**
+This mirrors Global Constraint 31 for visual baselines and follows directly from
+fixed Decision 8: parity determinism comes from pinning the job to
+`ubuntu-24.04`, installing `fonts-dejavu-core`, and injecting a fixed
+`DejaVu Sans` stack into both sides. `PARITY_FONT_CSS` sets
+`font-family: "DejaVu Sans", sans-serif !important`, but a host without DejaVu
+installed silently falls back to its own `sans-serif`. Different glyph metrics
+reflow every line, and every element below shifts, so the measured ratio has
+nothing to do with the migration.
+
+Measured on the Windows development host on 2026-08-04, with DejaVu absent:
+home desktop 7.26%, sample-page desktop 18.14%, home mobile 20.41%,
+sample-page mobile 35.69%. Setting `blogname` to the baseline capture value
+moved those numbers by less than 0.3 percentage points, which rules out site
+text as the cause and leaves font fallback as the explanation.
+
+So: run the suite locally for DIAGNOSIS only. The authoritative evaluation is
+the CI job wired up in Step 4. Expected in CI: PASS at `maxDiffRatio = 0.05`
+for all four combinations (two pages × two viewports) in each suite.
+
+**The three site titles must be reconciled before CI parity can pass.** The
+baseline capture job installs `Agency Starter Baseline Capture`
+(`.github/workflows/ci.yml:518`), the `e2e` job installs `Agency Starter CI`
+(line 218), and `scripts/setup` installs `Agency Starter (local)` (line 142).
+The site title is rendered text in the header of every captured page, so the
+comparing environment must install the SAME title the baseline capture used.
+`metadata.json` records the viewport, browser, font stack and font package but
+NOT the site title; that omission is what allowed the mismatch. The parity CI
+job must set `blogname` to the recorded capture value before capturing, and
+`metadata.json` should record it.
 
 If a page fails, close the gap **before** touching the threshold, in this order:
 
