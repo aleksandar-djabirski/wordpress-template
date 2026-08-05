@@ -173,9 +173,25 @@ final class ReferenceScanner {
 	 * @param list<array<string, mixed>> $found
 	 */
 	private static function match_block_level( string $name, array $attrs, string $record, string $provider, array &$consumed, array &$found ): void {
-		if ( 'core/navigation' === $name && isset( $attrs['ref'] ) && is_int( $attrs['ref'] ) ) {
-			$consumed[] = 'ref';
-			$found[]    = self::reference( $record, $provider, $name, 'ref', $attrs['ref'], self::KIND_NAVIGATION, self::RESOLUTION_ENVIRONMENT, self::policy_for( self::KIND_NAVIGATION, null ) );
+		// Every core/navigation block emits exactly one navigation
+		// reference. An explicit integer ref is the referenced post's ID; a
+		// ref-less block (or a non-integer ref) emits the reference with a
+		// null value and lets ReferenceResolver apply WordPress core's
+		// deterministic most-recently-published fallback during export.
+		// The ref attribute is always consumed so the catch-alls can never
+		// emit a second reference for the same block.
+		if ( 'core/navigation' === $name ) {
+			$value = null;
+
+			if ( isset( $attrs['ref'] ) ) {
+				$consumed[] = 'ref';
+
+				if ( is_int( $attrs['ref'] ) ) {
+					$value = $attrs['ref'];
+				}
+			}
+
+			$found[] = self::reference( $record, $provider, $name, 'ref', $value, self::KIND_NAVIGATION, self::RESOLUTION_ENVIRONMENT, self::policy_for( self::KIND_NAVIGATION, null ) );
 		}
 
 		if ( 'core/block' === $name && isset( $attrs['ref'] ) && is_int( $attrs['ref'] ) ) {

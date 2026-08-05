@@ -89,4 +89,63 @@ final class ReferenceResolverTest extends IntegrationTestCase {
 		self::assertCount( 1, $references );
 		self::assertSame( 'synced-patterns:loop', $references[0]['targetKey'] );
 	}
+
+	/**
+	 * One wp_navigation row with an explicit post_date, so the
+	 * most-recently-published fallback is exercised by real dates. The
+	 * dates must be in the past: WordPress stores a publish post whose date
+	 * is in the future as status 'future', which the fallback query then
+	 * ignores.
+	 */
+	private function create_navigation( string $name, string $date, string $status = 'publish' ): int {
+		return self::factory()->post->create(
+			array(
+				'post_type'    => 'wp_navigation',
+				'post_name'    => $name,
+				'post_status'  => $status,
+				'post_date'    => $date,
+				'post_content' => '<!-- wp:navigation-link {"label":"Home"} /-->',
+			)
+		);
+	}
+
+	public function test_a_ref_less_navigation_block_resolves_to_the_newest_published_navigation(): void {
+		$this->create_navigation( 'oldest', '2026-01-01 00:00:00' );
+		$this->create_navigation( 'middle', '2026-02-01 00:00:00' );
+		$this->create_navigation( 'newest', '2026-03-01 00:00:00' );
+		$this->make_template( 'home', '<!-- wp:navigation /-->' );
+
+		$reference = ( new TemplatesState() )->record( 'templates:home' )->references()[0];
+
+		self::assertSame( 'navigation:newest', $reference['targetKey'], 'A ref-less navigation block must resolve to the most recently published wp_navigation post.' );
+		self::assertSame(
+			( new NavigationState() )->record( 'navigation:newest' )->content_hash(),
+			$reference['targetHash'],
+			'The fallback hash must be byte-identical to the hash the navigation provider exports.'
+		);
+		self::assertSame( 'newest', $reference['targetIdentity']['slug'] );
+		self::assertSame( 'publish', $reference['targetIdentity']['status'] );
+		self::assertNotNull( $reference['targetKey'], 'The fallback fills the three target fields exactly as an explicit ref does.' );
+	}
+
+	public function test_a_ref_less_navigation_block_ignores_a_newer_draft(): void {
+		$this->create_navigation( 'primary', '2026-01-01 00:00:00' );
+		$this->create_navigation( 'draft-secondary', '2026-06-01 00:00:00', 'draft' );
+		$this->make_template( 'home', '<!-- wp:navigation /-->' );
+
+		$reference = ( new TemplatesState() )->record( 'templates:home' )->references()[0];
+
+		self::assertSame( 'navigation:primary', $reference['targetKey'], 'A draft never satisfies the most-recently-published fallback.' );
+		self::assertNotNull( $reference['targetKey'], 'The fallback fills the three target fields exactly as an explicit ref does.' );
+	}
+
+	public function test_a_ref_less_navigation_block_stays_unresolved_when_no_navigation_is_published(): void {
+		$this->make_template( 'home', '<!-- wp:navigation /-->' );
+
+		$reference = ( new TemplatesState() )->record( 'templates:home' )->references()[0];
+
+		self::assertNull( $reference['targetKey'] );
+		self::assertNull( $reference['targetHash'] );
+		self::assertTrue( ReferenceScanner::is_unresolved( $reference ), 'With no published navigation the reference must stay unresolved so the promotion policy refuses the record.' );
+	}
 }

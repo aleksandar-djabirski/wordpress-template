@@ -302,4 +302,67 @@ final class ReferenceScannerTest extends TestCase {
 		self::assertTrue( ReferenceScanner::is_unresolved( $unresolved[0] ) );
 		self::assertFalse( ReferenceScanner::is_unresolved( $resolved_only[0] ), 'The post-meta binding is resolved, so it must not count as unresolved.' );
 	}
+
+	/**
+	 * The reference every core/navigation block must emit: an explicit
+	 * integer ref carries that value, a ref-less (or non-integer ref) block
+	 * carries null. The policy string is verbatim from the scanner — the
+	 * refusal report surfaces it, so a wording drift is a contract change.
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function navigation_reference( int|string|null $value ): array {
+		return array(
+			'record'         => 'templates:page',
+			'provider'       => 'templates',
+			'blockName'      => 'core/navigation',
+			'attribute'      => 'ref',
+			'value'          => $value,
+			'kind'           => ReferenceScanner::KIND_NAVIGATION,
+			'resolution'     => ReferenceScanner::RESOLUTION_ENVIRONMENT,
+			'policy'         => 'Navigation stays database-owned in v1. Promote the template or part without the ref; finalisation must resolve exactly one navigation in the target environment whose normalised content hash matches the exported navigation, and must refuse otherwise (BLOCK_THEME_PROPOSAL.md §7.4).',
+			'targetKey'      => null,
+			'targetHash'     => null,
+			'targetIdentity' => null,
+		);
+	}
+
+	public function test_a_ref_less_navigation_block_emits_one_null_value_reference(): void {
+		$references = ReferenceScanner::scan_parsed(
+			array( $this->block( 'core/navigation' ) ),
+			'templates:page'
+		);
+
+		self::assertCount( 1, $references );
+		self::assertSame(
+			$this->navigation_reference( null ),
+			$references[0],
+			'The whole entry is the contract: a ref-less navigation block must emit one navigation reference with a null value.'
+		);
+	}
+
+	public function test_a_ref_less_and_an_explicit_ref_navigation_block_emit_two_references(): void {
+		$references = ReferenceScanner::scan_parsed(
+			array(
+				$this->block( 'core/navigation', array( 'ref' => 12 ) ),
+				$this->block( 'core/navigation' ),
+			),
+			'templates:page'
+		);
+
+		self::assertSame(
+			array( $this->navigation_reference( null ), $this->navigation_reference( 12 ) ),
+			$references,
+			'Two navigation blocks emit two references; the null-value fallback entry sorts before the explicit ref.'
+		);
+	}
+
+	public function test_a_navigation_ref_that_is_not_an_integer_emits_a_null_value_reference(): void {
+		$references = ReferenceScanner::scan_parsed(
+			array( $this->block( 'core/navigation', array( 'ref' => '12' ) ) ),
+			'templates:page'
+		);
+
+		self::assertSame( array( $this->navigation_reference( null ) ), $references );
+	}
 }
