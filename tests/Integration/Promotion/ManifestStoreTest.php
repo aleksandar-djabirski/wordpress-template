@@ -267,6 +267,141 @@ final class ManifestStoreTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * The promotion id is interpolated straight into a filesystem path, so a
+	 * slash or a `..` segment in it becomes extra path components. That is the
+	 * enabling half of the symlink escape below.
+	 *
+	 * @dataProvider hostile_promotion_ids
+	 */
+	public function test_canonical_path_refuses_a_promotion_id_that_is_not_a_uuid( string $promotion_id ): void {
+		$this->assert_exit_code( 1, fn() => $this->store->canonical_path( $promotion_id ) );
+	}
+
+	/** @return array<string, array{string}> */
+	public static function hostile_promotion_ids(): array {
+		return array(
+			'nested path'    => array( 'new-parent/leak' ),
+			'traversal'      => array( '../../web/leak' ),
+			'absolute'       => array( '/etc/passwd' ),
+			'backslash'      => array( 'a\\b' ),
+			'empty'          => array( '' ),
+			'plain word'     => array( 'promotion' ),
+			'uuid plus path' => array( 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/../leak' ),
+		);
+	}
+
+	/**
+	 * The HIGH finding of the Task 4 bounded review, reproduced as a test.
+	 *
+	 * write_canonical() used to call wp_mkdir_p() and chmod() on the UNRESOLVED
+	 * directory before write() ran the shared guard. With the promotions
+	 * directory symlinked into the web root, the manifest itself was correctly
+	 * refused while a directory had already been created under web/.
+	 *
+	 * The assertion is deliberately about the FILESYSTEM, not about the
+	 * exception: refusing the write while still creating something inside the
+	 * web root is exactly the failure this test exists to catch.
+	 */
+	public function test_write_canonical_creates_nothing_in_the_web_root_through_a_symlinked_state_dir(): void {
+		$web_target = rtrim( ABSPATH, '/' ) . '/../probe-canonical-target';
+		$promotions = $this->gateway->state_dir() . '/promotions';
+		$manifest   = $this->manifest_with_promotion_id( 'new-parent/leak' );
+
+		if ( is_dir( $promotions ) && ! is_link( $promotions ) ) {
+			$this->remove_tree( $promotions );
+		}
+
+		if ( ! is_dir( $web_target ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- creating an integration fixture directory; the WP_Filesystem credentials context does not exist here.
+			mkdir( $web_target, 0755, true );
+		}
+
+		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- symlink() is EXPECTED to fail on filesystems that forbid links, and its return value is checked on the next line; the notice would otherwise be the test's only output on such a host.
+		if ( ! @symlink( $web_target, $promotions ) ) {
+			self::markTestSkipped( 'This filesystem does not allow the test to create a symlink.' );
+		}
+
+		try {
+			$this->assert_exit_code( 1, fn() => $this->store->write_canonical( $manifest ) );
+
+			clearstatcache( true, $web_target );
+
+			self::assertSame(
+				array(),
+				array_values( array_diff( scandir( $web_target ), array( '.', '..' ) ) ),
+				'write_canonical() must create nothing inside the web root, not even a directory.'
+			);
+		} finally {
+			if ( is_link( $promotions ) ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- removing the fixture symlink; the WP_Filesystem credentials context does not exist here.
+				unlink( $promotions );
+			}
+
+			$this->remove_tree( $web_target );
+		}
+	}
+
+	/**
+	 * A failed rename() used to be ignored: write() returned success while the
+	 * manifest was never created and the temporary file survived. A trailing
+	 * slash on the target is the cheapest way to make rename() fail.
+	 */
+	public function test_a_failed_rename_throws_and_leaves_no_temporary_file(): void {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- creating an integration fixture directory; the WP_Filesystem credentials context does not exist here.
+		mkdir( $this->tmp_dir . '/existing-directory', 0755, true );
+
+		$this->assert_exit_code(
+			1,
+			// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- rename() onto an existing directory raises a PHP warning by design; the test asserts that write() DETECTS that failure, and the warning itself is the expected condition rather than a defect.
+			fn() => @$this->store->write( $this->manifest, $this->tmp_dir . '/existing-directory/' )
+		);
+
+		$leftovers = array_values(
+			array_filter(
+				scandir( $this->tmp_dir ),
+				static fn( string $entry ): bool => str_ends_with( $entry, '.tmp' )
+			)
+		);
+
+		self::assertSame( array(), $leftovers, 'A failed write must leave no temporary file behind.' );
+	}
+
+	/**
+	 * The bounded review showed the invalid-shape test could not actually pin
+	 * the verification order: it deletes baseCommit, and from_array() only
+	 * inspects schemaVersion, so moving from_array() ahead of the HMAC check
+	 * would still have produced exit 4. This document breaks the ONE field
+	 * from_array() does inspect AND breaks the signature, so it reports 4 only
+	 * when verification really runs first.
+	 */
+	public function test_a_document_that_breaks_both_the_signature_and_from_array_reports_tamper(): void {
+		$path = $this->write_signed_manifest();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the signed fixture; the WP_Filesystem credentials context does not exist here.
+		$document = json_decode( file_get_contents( $path ), true );
+
+		$document['schemaVersion'] = 99;
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- rewriting the signed fixture; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $path, wp_json_encode( $document ) );
+
+		$this->assert_exit_code( 4, fn() => $this->store->load( $path ) );
+	}
+
+	/**
+	 * render() must return canonical bytes with exactly one trailing newline.
+	 * Asserting only that the output contains "hmac" would pass for almost any
+	 * serialisation, including one that broke the signature's byte stability.
+	 */
+	public function test_render_returns_canonical_bytes_with_exactly_one_trailing_newline(): void {
+		$document = $this->store->render( $this->manifest );
+
+		self::assertStringEndsWith( "\n", $document );
+		self::assertStringEndsNotWith( "\n\n", $document );
+		self::assertSame( $document, $this->store->render( $this->manifest ), 'render() must be byte-stable.' );
+		self::assertIsArray( json_decode( $document, true ) );
+	}
+
+	/**
 	 * Writes a manifest signed by the environment keyring to a fixture file
 	 * and returns its path.
 	 */
@@ -306,6 +441,32 @@ final class ManifestStoreTest extends IntegrationTestCase {
 	 * prepare step keys one, with every field the promotion-manifest schema
 	 * requires on the record shape present.
 	 */
+	/**
+	 * The same fixture with an attacker-chosen promotion id, so a test can
+	 * drive the exact input the bounded review used to escape into the web
+	 * root.
+	 */
+	private function manifest_with_promotion_id( string $promotion_id ): PromotionManifest {
+		return PromotionManifest::create(
+			$promotion_id,
+			'2026-08-01T10:00:00Z',
+			array(
+				'exportId'      => '11111111-2222-4333-8444-555555555555',
+				'exportedAtUtc' => '2026-08-01T09:00:00Z',
+				'siteUrl'       => 'https://client.example.com',
+				'environment'   => 'production',
+				'activeTheme'   => array(
+					'stylesheet' => 'site-theme',
+					'version'    => '1.0.0',
+					'gitCommit'  => str_repeat( 'a', 40 ),
+				),
+			),
+			'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+			str_repeat( 'b', 40 ),
+			array( 'npm run test:e2e' )
+		)->with_record( 'templates:page', $this->record() );
+	}
+
 	private function signed_manifest(): PromotionManifest {
 		return PromotionManifest::create(
 			wp_generate_uuid4(),
@@ -390,10 +551,11 @@ final class ManifestStoreTest extends IntegrationTestCase {
 
 			$path = $directory . '/' . $entry;
 
-			if ( is_dir( $path ) ) {
+			// remove_tree() removes $path itself, so the caller must NOT rmdir it
+			// again. It did, and the second call failed with "No such file or
+			// directory" as soon as a fixture directory contained a subdirectory.
+			if ( is_dir( $path ) && ! is_link( $path ) ) {
 				$this->remove_tree( $path );
-				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- deleting an integration fixture directory; the WP_Filesystem credentials context does not exist here.
-				rmdir( $path );
 
 				continue;
 			}

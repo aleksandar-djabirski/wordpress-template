@@ -103,6 +103,10 @@ final class ManifestStore {
 
 		$temporary = $resolved . '.' . wp_generate_uuid4() . '.tmp';
 
+		// Rendered ONCE: render() signs the document, and the byte count below
+		// must be compared against the exact bytes that were written.
+		$document = $this->render( $manifest );
+
 		try {
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
 			$handle = fopen( $temporary, 'wb' );
@@ -112,7 +116,7 @@ final class ManifestStore {
 			}
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-			$written = fwrite( $handle, $this->render( $manifest ) );
+			$written = fwrite( $handle, $document );
 
 			if ( false === $written ) {
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
@@ -121,16 +125,38 @@ final class ManifestStore {
 				throw PromotionException::hard( sprintf( 'Could not write the manifest to "%s".', $temporary ) );
 			}
 
-			fflush( $handle );
+			if ( strlen( $document ) !== $written ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
+				fclose( $handle );
+
+				throw PromotionException::hard(
+					sprintf( 'The manifest was only partially written to "%s": %d of %d bytes.', $temporary, $written, strlen( $document ) )
+				);
+			}
+
+			if ( ! fflush( $handle ) ) {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
+				fclose( $handle );
+
+				throw PromotionException::hard( sprintf( 'The manifest could not be flushed to "%s".', $temporary ) );
+			}
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-			fclose( $handle );
+			if ( ! fclose( $handle ) ) {
+				throw PromotionException::hard( sprintf( 'The manifest file "%s" could not be closed.', $temporary ) );
+			}
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-			chmod( $temporary, 0600 );
+			if ( ! chmod( $temporary, 0600 ) ) {
+				throw PromotionException::hard( sprintf( 'The manifest file "%s" could not be made private.', $temporary ) );
+			}
 
+			// A failed rename() used to be ignored, so write() reported success
+			// while the manifest was never created and the temp file survived.
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.rename_rename -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-			rename( $temporary, $resolved );
+			if ( ! rename( $temporary, $resolved ) ) {
+				throw PromotionException::hard( sprintf( 'The manifest could not be moved into place at "%s".', $resolved ) );
+			}
 		} catch ( \Throwable $failure ) {
 			if ( is_file( $temporary ) ) {
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
@@ -157,24 +183,50 @@ final class ManifestStore {
 	 * <state dir>/promotions/<promotionId>.json.
 	 */
 	public function canonical_path( string $promotion_id ): string {
-		return $this->gateway->state_dir() . '/promotions/' . $promotion_id . '.json';
+		return $this->gateway->state_dir() . '/promotions/' . self::assert_promotion_id( $promotion_id ) . '.json';
 	}
 
 	/**
-	 * Routes through write() so there is still only one write path.
+	 * A promotion id is interpolated straight into a filesystem path, so it must
+	 * be a bare UUID and nothing else. Without this, an id containing a slash or
+	 * a `..` segment reaches the filesystem as extra path components, which is
+	 * what let a symlinked promotions directory create a directory inside the
+	 * web root before the write guard ever ran.
+	 */
+	private static function assert_promotion_id( string $promotion_id ): string {
+		if ( 1 !== preg_match( '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/', $promotion_id ) ) {
+			throw PromotionException::hard(
+				sprintf( 'The promotion id "%s" is not a UUID; it must never be used to build a filesystem path.', $promotion_id )
+			);
+		}
+
+		return $promotion_id;
+	}
+
+	/**
+	 * Routes through write() so there is still only one write path, and creates
+	 * NOTHING before write() has resolved the path through the shared guard.
+	 *
+	 * An earlier version called wp_mkdir_p() and chmod() on the unresolved
+	 * directory first. With a symlinked promotions directory that created a
+	 * directory inside the web root even though the manifest itself was then
+	 * correctly refused. Directory creation now happens only inside write(),
+	 * against the canonical path the guard returned, and the private-mode chmod
+	 * is applied to that resolved directory afterwards.
 	 */
 	public function write_canonical( PromotionManifest $manifest ): void {
-		$path      = $this->canonical_path( $manifest->promotion_id() );
-		$directory = dirname( $path );
+		$path = $this->canonical_path( $manifest->promotion_id() );
 
-		if ( ! is_dir( $directory ) && ! wp_mkdir_p( $directory ) ) {
-			throw PromotionException::hard( sprintf( 'Could not create the promotions directory "%s".', $directory ) );
+		$this->write( $manifest, $path );
+
+		try {
+			$directory = dirname( StateDirectory::resolve_output( $path, '--manifest' ) );
+		} catch ( StateException $exception ) {
+			throw PromotionException::from_state_exception( $exception );
 		}
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_chmod -- the promotions directory must be host-private; WP_Filesystem exposes no permission primitive equivalent to this chmod.
 		chmod( $directory, 0700 );
-
-		$this->write( $manifest, $path );
 	}
 
 	/**
