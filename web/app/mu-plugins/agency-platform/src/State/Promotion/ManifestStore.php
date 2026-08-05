@@ -32,7 +32,6 @@ final class ManifestStore {
 	 * @throws PromotionException Exit 1 for malformed/invalid documents, exit 4 for tamper.
 	 */
 	public function load( string $path_or_dash ): PromotionManifest {
-		// phpcs:ignore WordPress.WP.AlternativeFunctions.json_decode_json_decode -- the manifest reader must not depend on WordPress being loaded; the integration suite covers this method with a real WordPress present, and JSON decoding is the point of the call.
 		$document = json_decode( $this->read( $path_or_dash ), true );
 
 		if ( ! is_array( $document ) ) {

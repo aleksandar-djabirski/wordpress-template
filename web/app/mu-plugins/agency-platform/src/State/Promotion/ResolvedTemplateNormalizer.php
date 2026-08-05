@@ -63,7 +63,6 @@ final class ResolvedTemplateNormalizer {
 					return $matches[0];
 				}
 
-				// phpcs:ignore WordPress.WP.AlternativeFunctions.json_decode_json_decode -- block-attribute JSON must decode without WordPress; this class is unit-tested with no WordPress present.
 				$attributes = json_decode( $matches[2], true );
 
 				if ( ! is_array( $attributes ) ) {
