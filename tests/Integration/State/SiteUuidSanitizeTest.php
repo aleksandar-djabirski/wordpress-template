@@ -54,6 +54,12 @@ final class SiteUuidSanitizeTest extends IntegrationTestCase {
 		self::assertArrayHasKey( 'site_uuid', SanitizeSteps::steps(), 'The site-UUID step must reach `wp agency sanitize` through the agency_platform_sanitize_steps filter, not by editing AgencyCommands.' );
 	}
 
+	public function test_the_subsystem_registers_the_sanitize_step(): void {
+		( new \AgencyPlatform\State\StateSubsystem() )->register();
+
+		self::assertArrayHasKey( 'site_uuid', SanitizeSteps::steps() );
+	}
+
 	public function test_the_site_uuid_option_is_not_autoloaded(): void {
 		SiteIdentity::uuid();
 
