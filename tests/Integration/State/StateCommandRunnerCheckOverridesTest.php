@@ -50,10 +50,23 @@ final class StateCommandRunnerCheckOverridesTest extends IntegrationTestCase {
 		self::assertStringContainsString( 'deprecated', $result->stderr );
 	}
 
+	/**
+	 * Exit 1 alone is satisfied by ANY hard failure, so the drift failure is
+	 * pinned by its content: the report entry and its classification on
+	 * STDOUT, the exact --fail-on-drift reason on STDERR, and nothing that
+	 * looks like an unrelated error or a leaked report line on STDERR.
+	 */
 	public function test_fail_on_drift_turns_the_same_run_into_exit_one(): void {
 		$this->make_template( 'page', '<!-- wp:paragraph --><p>Client edit</p><!-- /wp:paragraph -->' );
 
-		self::assertSame( 1, $this->runner()->check_overrides( array( 'fail-on-drift' => true ) )->exit_code );
+		$result = $this->runner()->check_overrides( array( 'fail-on-drift' => true ) );
+
+		self::assertSame( 1, $result->exit_code );
+		self::assertStringContainsString( 'templates:page (changed, promotable)', $result->stdout, 'The drift report must name the drifted record key and its classification on STDOUT.' );
+		self::assertStringContainsString( '1 record(s) differ from the Git baseline (--fail-on-drift).', $result->stderr, 'The failure must name the --fail-on-drift reason on STDERR; an unrelated hard error would not.' );
+		self::assertStringNotContainsString( 'templates:page', $result->stderr, 'The report belongs on STDOUT; no report line may leak to STDERR.' );
+		self::assertStringNotContainsString( 'Error', $result->stderr, 'STDERR must carry no unexpected error text beyond the deprecation notice and the drift reason.' );
+		self::assertStringContainsString( 'check-overrides is deprecated', $result->stderr, 'The deprecation notice must still reach STDERR on a failed run.' );
 	}
 
 	public function test_a_clean_site_exits_zero_with_and_without_the_flag(): void {

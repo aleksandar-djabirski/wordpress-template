@@ -46,7 +46,13 @@ final class StateCommandRunner {
 	 * STDERR first, then every provider validation warning; the bundle is
 	 * either written atomically (canonical bytes to a same-directory temp
 	 * file, then rename) with the result envelope on STDOUT, or the bundle
-	 * document itself goes to STDOUT for --output=-. Exit 0 on success.
+	 * document itself goes to STDOUT for --output=-. Every real --output
+	 * path is resolved and validated through StateDirectory's shared
+	 * web-root guard BEFORE the bundle is built or written: a path that
+	 * would land inside <repo root>/web — directly, through `..`, or
+	 * through a symlink — is a hard error, because everything under web/ is
+	 * served over HTTP and the bundle carries customer content. Exit 0 on
+	 * success.
 	 *
 	 * @param array<string, mixed> $assoc_args
 	 */
@@ -114,6 +120,11 @@ final class StateCommandRunner {
 			throw StateException::hard_error( 'The --output option is required: pass a bundle file path, or "-" to write the bundle JSON to STDOUT.' );
 		}
 
+		// The web-root guard runs BEFORE the bundle is built: a refused path
+		// must never spend the export work, and nothing of a refused run
+		// reaches the filesystem. '-' streams to STDOUT and skips the guard.
+		$path = '-' === $output ? null : StateDirectory::resolve_output( $output, '--output' );
+
 		$stderr = StateExporter::sensitivity_warning() . "\n";
 
 		$exporter = new StateExporter( $this->signer, null, $this->git );
@@ -123,13 +134,13 @@ final class StateCommandRunner {
 			$stderr .= $warning . "\n";
 		}
 
-		if ( '-' === $output ) {
+		if ( null === $path ) {
 			return new StateCommandResult( 0, Normalizer::canonical_json_document( $bundle ), $stderr );
 		}
 
-		$this->write_bundle_atomically( $output, $bundle );
+		$this->write_bundle_atomically( $path, $bundle );
 
-		return new StateCommandResult( 0, Normalizer::canonical_json_document( $this->envelope( $output, $bundle ) ), $stderr );
+		return new StateCommandResult( 0, Normalizer::canonical_json_document( $this->envelope( $path, $bundle ) ), $stderr );
 	}
 
 	/**

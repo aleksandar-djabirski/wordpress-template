@@ -70,7 +70,7 @@ final class TemplatePartsState extends BaseStateProvider {
 				continue;
 			}
 
-			$records[] = $this->record_from_post( $post );
+			$records[] = $this->record_from_post( $post, true );
 		}
 
 		usort( $records, array( $this, 'compare_by_key' ) );
@@ -110,7 +110,8 @@ final class TemplatePartsState extends BaseStateProvider {
 	 * Live single-record re-read by key, so --select=template-parts:header
 	 * can be served without exporting the whole provider. The key is split,
 	 * the query re-run filtered to that post_name; null when no such row
-	 * exists in the active theme.
+	 * exists in the active theme. $with_references = false suppresses
+	 * reference detection — the recursion guard ReferenceResolver relies on.
 	 */
 	public function record( string $key, bool $with_references = true ): ?StateRecord {
 		$parts = explode( ':', $key, 2 );
@@ -120,7 +121,7 @@ final class TemplatePartsState extends BaseStateProvider {
 		}
 
 		foreach ( $this->posts_for_name( $parts[1] ) as $post ) {
-			return $this->record_from_post( $post );
+			return $this->record_from_post( $post, $with_references );
 		}
 
 		return null;
@@ -178,9 +179,11 @@ final class TemplatePartsState extends BaseStateProvider {
 
 	/**
 	 * One database row as a record: slug from post_name, content the
-	 * normalised block markup only, references from the shared scanner.
+	 * normalised block markup only, references from the shared scanner
+	 * unless $with_references suppresses them — the recursion guard
+	 * ReferenceResolver relies on.
 	 */
-	private function record_from_post( \WP_Post $post ): StateRecord {
+	private function record_from_post( \WP_Post $post, bool $with_references ): StateRecord {
 		$key = $this->record_key( $post->post_name );
 
 		return StateRecord::create(
@@ -190,7 +193,7 @@ final class TemplatePartsState extends BaseStateProvider {
 			$post->post_status,
 			$post->post_modified_gmt,
 			Normalizer::normalize_content( array( 'markup' => Normalizer::normalize_block_markup( $post->post_content ) ) ),
-			ReferenceScanner::scan( $post->post_content, $key ),
+			$with_references ? ReferenceScanner::scan( $post->post_content, $key ) : array(),
 			$this->ownership(),
 			$this->promotion()
 		);

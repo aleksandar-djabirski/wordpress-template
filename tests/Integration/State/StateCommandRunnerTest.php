@@ -16,6 +16,7 @@ declare(strict_types=1);
 namespace Tests\Integration\State;
 
 use AgencyPlatform\State\BaseStateProvider;
+use AgencyPlatform\State\GitBaseline;
 use AgencyPlatform\State\HmacSigner;
 use AgencyPlatform\State\Normalizer;
 use AgencyPlatform\State\Ownership;
@@ -139,6 +140,67 @@ final class StateCommandRunnerTest extends IntegrationTestCase {
 		self::assertSame( 1, $result->exit_code );
 		self::assertStringContainsString( '--output', $result->stderr );
 		self::assertSame( '', $result->stdout );
+	}
+
+	public function test_a_web_root_relative_output_path_is_refused_and_nothing_is_written(): void {
+		$result = $this->runner()->state_export(
+			array(
+				'output'    => 'web/unit2-review-leak.json',
+				'providers' => 'templates',
+			)
+		);
+
+		self::assertSame( 1, $result->exit_code );
+		self::assertStringContainsString( '--output', $result->stderr, 'The refusal must name the setting whose path is refused.' );
+		self::assertStringContainsString( 'web root', $result->stderr );
+		self::assertSame( '', $result->stdout, 'A refused export must not emit a partial payload.' );
+		self::assertFileDoesNotExist( ( new GitBaseline() )->repo_root() . '/web/unit2-review-leak.json' );
+	}
+
+	public function test_an_absolute_web_root_output_path_is_refused_and_nothing_is_written(): void {
+		$path = ( new GitBaseline() )->repo_root() . '/web/unit2-review-leak.json';
+
+		$result = $this->runner()->state_export(
+			array(
+				'output'    => $path,
+				'providers' => 'templates',
+			)
+		);
+
+		self::assertSame( 1, $result->exit_code );
+		self::assertStringContainsString( $path, $result->stderr, 'The refusal must name the offending path.' );
+		self::assertStringContainsString( 'web root', $result->stderr );
+		self::assertSame( '', $result->stdout, 'A refused export must not emit a partial payload.' );
+		self::assertFileDoesNotExist( $path );
+	}
+
+	public function test_an_output_path_reaching_the_web_root_through_a_symlink_is_refused(): void {
+		$repo_root = ( new GitBaseline() )->repo_root();
+		$link      = $repo_root . '/var/unit2-review-leak-link';
+
+		// phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- test-only symlink fixture; a failure here is handled by the skip below, and the raw PHP warning would break the failOnWarning gate.
+		if ( ! @symlink( $repo_root . '/web', $link ) ) {
+			self::markTestSkipped( 'The test environment cannot create symlinks; the symlink refusal path stays unexercised.' );
+		}
+
+		try {
+			$path = $link . '/unit2-review-leak.json';
+
+			$result = $this->runner()->state_export(
+				array(
+					'output'    => $path,
+					'providers' => 'templates',
+				)
+			);
+
+			self::assertSame( 1, $result->exit_code );
+			self::assertStringContainsString( $path, $result->stderr, 'The refusal must name the offending path.' );
+			self::assertStringContainsString( 'web root', $result->stderr );
+			self::assertSame( '', $result->stdout );
+			self::assertFileDoesNotExist( $path );
+		} finally {
+			@unlink( $link ); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged, WordPress.WP.AlternativeFunctions.unlink_unlink -- deleting the test-only symlink fixture; the link is already gone when the skip path ran, and WP_Filesystem cannot remove symlinks.
+		}
 	}
 
 	public function test_diff_exits_zero_with_no_drift_and_two_with_drift(): void {

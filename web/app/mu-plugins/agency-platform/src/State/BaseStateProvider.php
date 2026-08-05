@@ -102,16 +102,39 @@ abstract class BaseStateProvider implements StateProvider {
 	/**
 	 * §7.1 "Export behaviour", single-record form: a linear lookup over
 	 * records(). $with_references is part of the contract so ReferenceResolver
-	 * can re-read a live record without re-running reference detection.
+	 * can re-read a live record without re-running reference detection —
+	 * the flag is honoured: false returns the record with an EMPTY reference
+	 * list, which is what stops the scan -> resolve -> scan cycle.
 	 */
 	public function record( string $key, bool $with_references = true ): ?StateRecord {
 		foreach ( $this->records() as $record ) {
 			if ( $key === $record->key() ) {
-				return $record;
+				return $with_references ? $record : self::without_references( $record );
 			}
 		}
 
 		return null;
+	}
+
+	/**
+	 * The $with_references = false path: a copy of the record with an empty
+	 * reference list. Rebuilding through StateRecord::create() keeps the
+	 * content and therefore the content hash identical — only the references
+	 * change — and never re-runs reference detection, which is the point of
+	 * the recursion guard ReferenceResolver relies on.
+	 */
+	private static function without_references( StateRecord $record ): StateRecord {
+		return StateRecord::create(
+			$record->provider_slug(),
+			$record->slug(),
+			$record->object_id(),
+			$record->status(),
+			$record->modified_gmt(),
+			$record->content(),
+			array(),
+			$record->ownership(),
+			$record->promotion()
+		);
 	}
 
 	/**

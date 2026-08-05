@@ -93,6 +93,30 @@ final class ProviderRecordsTest extends IntegrationTestCase {
 		self::assertSame( 17, $references[0]['value'] );
 	}
 
+	public function test_template_record_with_references_false_returns_an_empty_reference_list(): void {
+		$this->make_template( 'home', '<!-- wp:navigation {"ref":31} /-->' );
+
+		$provider = new TemplatesState();
+		$with     = $provider->record( 'templates:home' );
+		$without  = $provider->record( 'templates:home', false );
+
+		self::assertCount( 1, $with->references(), 'record( $key ) must still detect the navigation reference.' );
+		self::assertSame( array(), $without->references(), 'record( $key, false ) must return the record with an EMPTY reference list — the recursion guard ReferenceResolver relies on.' );
+		self::assertSame( $with->content_hash(), $without->content_hash(), 'Dropping references must never change the content hash.' );
+	}
+
+	public function test_template_part_record_with_references_false_returns_an_empty_reference_list(): void {
+		$this->make_part( 'footer', '<!-- wp:navigation {"ref":17} /-->' );
+
+		$provider = new TemplatePartsState();
+		$with     = $provider->record( 'template-parts:footer' );
+		$without  = $provider->record( 'template-parts:footer', false );
+
+		self::assertCount( 1, $with->references(), 'record( $key ) must still detect the navigation reference.' );
+		self::assertSame( array(), $without->references(), 'record( $key, false ) must return the record with an EMPTY reference list — the recursion guard ReferenceResolver relies on.' );
+		self::assertSame( $with->content_hash(), $without->content_hash(), 'Dropping references must never change the content hash.' );
+	}
+
 	public function test_an_uncustomised_global_styles_row_matches_its_empty_baseline(): void {
 		$this->make_global_styles( '{"version":3,"isGlobalStylesUserThemeJSON":true}' );
 
