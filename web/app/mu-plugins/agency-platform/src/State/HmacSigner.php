@@ -171,7 +171,8 @@ final class HmacSigner {
 
 		foreach ( $keyring as $key_id => $key ) {
 			if ( ! is_string( $key_id ) || '' === $key_id ) {
-				throw StateException::hard_error( self::SETTING_KEYS . ' contains a key id that is not a non-empty string.' );
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- the id representation must not depend on WordPress being loaded; the unit suite covers this method with no WordPress present.
+				throw StateException::hard_error( self::SETTING_KEYS . ' contains a key id that is not a non-empty string: ' . json_encode( $key_id ) . '.' );
 			}
 
 			if ( ! is_string( $key ) || '' === $key || self::MINIMUM_KEY_LENGTH > strlen( $key ) ) {

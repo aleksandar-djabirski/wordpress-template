@@ -104,7 +104,12 @@ final class HmacSignerTest extends TestCase {
 
 		$this->expectException( StateException::class );
 
-		$signer->verify( $document, HmacSigner::PURPOSE_MANIFEST );
+		try {
+			$signer->verify( $document, HmacSigner::PURPOSE_MANIFEST );
+		} catch ( StateException $exception ) {
+			self::assertSame( StateException::EXIT_TAMPER, $exception->exit_code() );
+			throw $exception;
+		}
 	}
 
 	public function test_a_manifest_signature_cannot_be_replayed_as_a_bundle_signature(): void {
@@ -113,7 +118,12 @@ final class HmacSignerTest extends TestCase {
 
 		$this->expectException( StateException::class );
 
-		$signer->verify( $document, HmacSigner::PURPOSE_BUNDLE );
+		try {
+			$signer->verify( $document, HmacSigner::PURPOSE_BUNDLE );
+		} catch ( StateException $exception ) {
+			self::assertSame( StateException::EXIT_TAMPER, $exception->exit_code() );
+			throw $exception;
+		}
 	}
 
 	public function test_rotation_still_verifies_a_document_signed_by_the_older_key(): void {
@@ -145,7 +155,12 @@ final class HmacSignerTest extends TestCase {
 	public function test_verify_rejects_a_document_with_no_signature_at_all(): void {
 		$this->expectException( StateException::class );
 
-		$this->signer()->verify( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		try {
+			$this->signer()->verify( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		} catch ( StateException $exception ) {
+			self::assertSame( StateException::EXIT_TAMPER, $exception->exit_code() );
+			throw $exception;
+		}
 	}
 
 	public function test_an_empty_keyring_is_a_hard_failure_not_a_salt_fallback(): void {
@@ -163,13 +178,23 @@ final class HmacSignerTest extends TestCase {
 	public function test_a_signing_key_id_missing_from_the_keyring_is_a_hard_failure(): void {
 		$this->expectException( StateException::class );
 
-		$this->signer( '2027-01' )->sign( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		try {
+			$this->signer( '2027-01' )->sign( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		} catch ( StateException $exception ) {
+			self::assertSame( StateException::EXIT_HARD_ERROR, $exception->exit_code() );
+			throw $exception;
+		}
 	}
 
 	public function test_a_short_key_is_rejected(): void {
 		$this->expectException( StateException::class );
 
-		( new HmacSigner( array( '2026-06' => 'too-short' ), '2026-06' ) )->sign( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		try {
+			( new HmacSigner( array( '2026-06' => 'too-short' ), '2026-06' ) )->sign( $this->payload(), HmacSigner::PURPOSE_BUNDLE );
+		} catch ( StateException $exception ) {
+			self::assertSame( StateException::EXIT_HARD_ERROR, $exception->exit_code() );
+			throw $exception;
+		}
 	}
 
 	public function test_canonicalize_excludes_the_signature_fields(): void {
