@@ -177,12 +177,27 @@ final class GitRepositoryTest extends IntegrationTestCase {
 		}
 	}
 
+	/**
+	 * Asserts the value discover() ACTUALLY uses, through the named seam, not an
+	 * equivalent expression recomputed here.
+	 *
+	 * The first version of this test computed
+	 * `dirname( ( new ReflectionClass( GitRepository::class ) )->getFileName(), 8 )`
+	 * and compared it to the repository root. That passed while the production
+	 * code used `dirname( __DIR__, 8 )`, which resolves to the PARENT of the
+	 * repository root — a class file path is one level deeper than `__DIR__`, so
+	 * the two counts legitimately differ and the test could not see the defect.
+	 * Asserting the seam is what makes this able to fail.
+	 */
 	public function test_discover_fallback_runs_from_the_repository_root(): void {
 		$expected = realpath( dirname( __DIR__, 3 ) );
-		$source   = dirname( ( new \ReflectionClass( GitRepository::class ) )->getFileName(), 8 );
 
 		self::assertIsString( $expected );
-		self::assertSame( $expected, $source, 'discover() must start git from the repository root, not from a directory above or below it.' );
+		self::assertSame(
+			$expected,
+			realpath( GitRepository::default_root() ),
+			'discover() must start git from the repository root, not from a directory above or below it.'
+		);
 	}
 
 	/**

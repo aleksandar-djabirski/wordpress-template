@@ -146,7 +146,16 @@ calls per task before it was written down.
   green phpcs run could never have revealed.
 - `python3` does not exist in Git Bash on this host. Use `node`, `php`, or the
   editing tools for scripted text edits. `perl -0pi -e` needs heavy escaping and
-  fails silently on a bad pattern — check that the edit landed.
+  fails silently on a bad pattern — check that the edit landed. For a
+  break-and-restore edit, the editing tools are the reliable choice; two
+  scripted attempts silently did nothing and produced a false "the test still
+  passes" reading.
+- **`chmod()` is a NO-OP on the DDEV mount.** It returns `true` and changes
+  nothing, and directories are created 0777 whatever mode you pass. So any
+  assertion about file or directory permissions is VACUOUS on this host and must
+  not be written. Verified with a probe. Permission-hardening code is still
+  correct to ship — it matters on a real production filesystem — but it cannot
+  be proven here, and a test that appears to prove it is worse than no test.
 
 ---
 
@@ -219,7 +228,21 @@ unit review for 21 tasks. That ratio is right. Guidance:
   test would catch if it were false?"**
 - Add, for anything security- or determinism-critical: **"prove it by executing
   the shipped code, not by reading it."** Unit 3A's paired-block bug was found by
-  a five-line probe script and was invisible to review.
+  a five-line probe script and was invisible to review. The Task 4 review found
+  all three of its findings the same way, including a HIGH one the orchestrator's
+  own attack tests had missed.
+- **Name the specific attack surfaces in the question.** The Task 4 review brief
+  listed "absolute paths, relative paths, `..` segments, symlinks, a trailing
+  slash, a path whose PARENT is created before the guard runs, the temporary
+  file, and the rename target". Two of the three findings came from the last
+  three items on that list — the ones a reviewer would be least likely to invent
+  unprompted.
+- **A review is worth it even when the orchestrator has already attacked the
+  code.** Unit 3A wrote five attack tests against `write()` and they all passed,
+  because `write()` was correctly guarded. The escape was in
+  `write_canonical()`, which had been reasoned safe "by construction" and was
+  therefore never attacked. Reasoning about which paths need attacking is what
+  fails; attack all of them.
 
 ---
 

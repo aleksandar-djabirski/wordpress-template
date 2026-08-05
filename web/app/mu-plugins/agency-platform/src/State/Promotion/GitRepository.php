@@ -39,7 +39,7 @@ final class GitRepository {
 			return new self( self::normalise( $configured ) );
 		}
 
-		$result = ( new self( dirname( __DIR__, 8 ) ) )->run( array( 'rev-parse', '--show-toplevel' ) );
+		$result = ( new self( self::default_root() ) )->run( array( 'rev-parse', '--show-toplevel' ) );
 
 		if ( 0 !== $result['exit'] ) {
 			throw PromotionException::hard(
@@ -48,6 +48,25 @@ final class GitRepository {
 		}
 
 		return new self( self::normalise( trim( $result['stdout'] ) ) );
+	}
+
+	/**
+	 * The directory `discover()` runs git from when AGENCY_REPO_ROOT is unset.
+	 *
+	 * This is a named seam rather than an inline expression for one reason: a
+	 * test asserting `dirname( ( new ReflectionClass( self::class ) )->getFileName(), N )`
+	 * cannot detect a wrong N in the production code, because a class file path
+	 * is one level deeper than `__DIR__` and the two counts legitimately differ.
+	 * That is not hypothetical — this method shipped with `dirname( __DIR__, 8 )`,
+	 * which resolves to the PARENT of the repository root, while the reflection
+	 * test kept passing. The seam lets the test assert the value production
+	 * actually uses. `SchemaValidator::default_schema_dir()` is the same pattern.
+	 *
+	 * From `src/State/Promotion`, SEVEN parents reach the repository root:
+	 * State, src, agency-platform, mu-plugins, app, web, repository.
+	 */
+	public static function default_root(): string {
+		return dirname( __DIR__, 7 );
 	}
 
 	public function root(): string {
