@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 #
-# Reports database records (templates, template parts, customized global
-# styles) that shadow the Git-owned theme/theme.json. Thin wrapper around the
+# Reports database state that differs from the Git baseline (templates,
+# template parts, Global Styles, navigation, synced patterns, fonts, media
+# references, and Additional CSS). Thin wrapper around the deprecated
 # `wp agency check-overrides` WP-CLI command (see the agency-platform
 # mu-plugin) so it is runnable the same way from a host or CI as from inside
-# the container. Informational by default — exits 0 whatever it finds. Pass
-# --fail-on-drift to make drift a hard failure; every argument is forwarded to
-# `wp agency check-overrides`.
+# the container.
+#
+# Database overrides are EXPECTED under the block-theme editing model: this
+# reports drift and exits 0 by default. Pass --fail-on-drift to make drift a
+# non-zero exit for a CI gate. For a machine-readable report, prefer
+# `wp agency state-diff --format=json`.
 set -euo pipefail
 
 if command -v wp >/dev/null 2>&1; then

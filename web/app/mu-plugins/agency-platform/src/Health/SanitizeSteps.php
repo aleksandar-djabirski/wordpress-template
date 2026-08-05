@@ -21,7 +21,9 @@ namespace AgencyPlatform\Health;
  *
  * Pure helpers (the synthetic address builders and the user-query shape) are
  * split out from the WordPress-coupled step bodies so they can be unit-tested
- * without a database, mirroring DatabaseOverrideCheck's classify()/run() split.
+ * without a database, mirroring the pure/WordPress-coupled split the state
+ * subsystem uses (AgencyPlatform\State\StateDiffer::compare() and its
+ * database-reading callers).
  */
 final class SanitizeSteps {
 

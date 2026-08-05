@@ -41,6 +41,7 @@ final class Plugin {
 			new FileModGuard(),
 			new MailGuard(),
 			new AgencyCommands(),
+			new \AgencyPlatform\State\StateSubsystem(),
 		);
 
 		foreach ( $providers as $provider ) {

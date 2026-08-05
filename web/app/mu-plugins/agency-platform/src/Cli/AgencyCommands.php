@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace AgencyPlatform\Cli;
 
-use AgencyPlatform\Health\DatabaseOverrideCheck;
 use AgencyPlatform\Health\SanitizeSteps;
+use AgencyPlatform\State\CliOutput;
+use AgencyPlatform\State\StateCommandRunner;
 
 /**
  * Registers the `wp agency ...` WP-CLI command family. Guarded so it never
@@ -26,7 +27,7 @@ final class AgencyCommands {
 	}
 
 	/**
-	 * Reports database records that differ from the Git-owned theme baseline.
+	 * Reports database state that differs from the Git-owned theme baseline.
 	 *
 	 * INFORMATIONAL BY DEFAULT. Under the block-theme editing model, database
 	 * template/template-part/Global Styles rows are EXPECTED: they are what a
@@ -34,11 +35,15 @@ final class AgencyCommands {
 	 * they get reconciled back into Git. A deployment must not fail simply
 	 * because a client edited their own site.
 	 *
-	 * Pass --fail-on-drift when you deliberately want a CI or deploy gate to
-	 * stop on drift.
-	 *
-	 * This command is kept as a compatibility alias for the state subsystem's
-	 * richer drift reporting.
+	 * This command is a DEPRECATED alias for `wp agency state-diff`, and its
+	 * detection runs through AgencyPlatform\State\StateDiffer. The report
+	 * includes content by default — content is database-owned and can never
+	 * be Git drift, so including it costs only report lines; large sites
+	 * should use `wp agency state-diff --providers=...` for a narrower run.
+	 * The report is human-facing and is deliberately NOT part of the
+	 * machine-readable STDOUT contract: every deprecation notice and
+	 * diagnostic goes to STDERR, and only --fail-on-drift may turn the run
+	 * into a non-zero exit.
 	 *
 	 * ## OPTIONS
 	 *
@@ -50,63 +55,7 @@ final class AgencyCommands {
 	 */
 	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed -- $args is required by the WP-CLI command signature; this command takes no positional arguments.
 	public static function check_overrides( array $args, array $assoc_args = array() ): void {
-		$report = ( new DatabaseOverrideCheck() )->run();
-
-		foreach ( self::drift_summary_lines( $report ) as $line ) {
-			\WP_CLI::log( $line );
-		}
-
-		if ( self::drift_is_failure( $report, ! empty( $assoc_args['fail-on-drift'] ) ) ) {
-			// WP_CLI::error() halts execution (exit code 1); no explicit
-			// `return` after it — PHPStan knows this call never returns.
-			\WP_CLI::error(
-				sprintf(
-					'%d database override(s) found and --fail-on-drift was requested. Reconcile them through the promotion workflow, or re-run without the flag to report only.',
-					count( $report['overrides'] )
-				)
-			);
-		}
-
-		if ( array() === $report['overrides'] ) {
-			\WP_CLI::success( 'No database overrides found.' );
-			return;
-		}
-
-		\WP_CLI::success(
-			sprintf(
-				'%d database override(s) reported. Overrides are expected under the Site Editor editing model; pass --fail-on-drift to make them a hard failure.',
-				count( $report['overrides'] )
-			)
-		);
-	}
-
-	/**
-	 * @param array{overrides: array<int, array<string, mixed>>, expected: array<int, array<string, mixed>>, synced_patterns: array<int, array<string, mixed>>} $report
-	 */
-	public static function drift_is_failure( array $report, bool $fail_on_drift ): bool {
-		return $fail_on_drift && array() !== $report['overrides'];
-	}
-
-	/**
-	 * @param array{overrides: array<int, array<string, mixed>>, expected: array<int, array<string, mixed>>, synced_patterns: array<int, array<string, mixed>>} $report
-	 * @return list<string>
-	 */
-	public static function drift_summary_lines( array $report ): array {
-		$lines = array( sprintf( 'Template/template-part overrides: %d', count( $report['overrides'] ) ) );
-
-		foreach ( $report['overrides'] as $record ) {
-			$lines[] = sprintf(
-				'  - %s (%s) [%s]',
-				(string) ( $record['post_name'] ?? '' ),
-				(string) ( $record['post_type'] ?? '' ),
-				(string) ( $record['post_status'] ?? '' )
-			);
-		}
-
-		$lines[] = sprintf( 'Expected core-generated global-styles records: %d', count( $report['expected'] ) );
-		$lines[] = sprintf( 'Synced patterns (informational only): %d', count( $report['synced_patterns'] ) );
-
-		return $lines;
+		CliOutput::emit( ( new StateCommandRunner() )->check_overrides( $assoc_args ) );
 	}
 
 	/**

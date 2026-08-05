@@ -98,8 +98,8 @@ final class GlobalStylesState extends BaseStateProvider {
 	 * The Git side of the global-styles story is the empty user origin: one
 	 * synthetic record, slug `active`, content array(). This is why an
 	 * uncustomised row matches its baseline exactly while a customised row
-	 * reads as changed -> drift -> promotable, reproducing today's
-	 * DatabaseOverrideCheck semantics through the generic differ.
+	 * reads as changed -> drift -> promotable, reproducing the superseded
+	 * override check's semantics through the generic differ.
 	 *
 	 * @return list<StateRecord>
 	 */
