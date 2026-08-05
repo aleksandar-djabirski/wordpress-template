@@ -175,6 +175,10 @@ final class StateDifferCompareTest extends TestCase {
 			$this->meta()
 		);
 
+		self::assertSame( 'navigation:primary', $entries[0]['key'], 'The bundle-mode entry must be the navigation row being compared.' );
+		self::assertSame( 'changed', $entries[0]['status'], 'A post-export edit to an existing row must compare as changed, not added.' );
+		self::assertSame( DriftClassification::DB_OWNED, $entries[0]['classification'], 'The mode changes the drift rule, never the classification: a database-owned record stays db-owned.' );
+		self::assertNotSame( $entries[0]['currentHash'], $entries[0]['targetHash'], 'The row counts as changed only when its current and target content hashes differ.' );
 		self::assertTrue( $entries[0]['countsAsDrift'], 'A navigation change made after export must be caught as post-export drift.' );
 	}
 

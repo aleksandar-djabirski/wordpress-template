@@ -17,6 +17,7 @@ namespace Tests\Integration\State;
 
 use AgencyPlatform\State\DriftClassification;
 use AgencyPlatform\State\GitBaseline;
+use AgencyPlatform\State\Providers\TemplatePartsState;
 use AgencyPlatform\State\Providers\TemplatesState;
 use AgencyPlatform\State\StateDiffer;
 use AgencyPlatform\State\StateRegistry;
@@ -60,17 +61,31 @@ final class StateDiffGitModeTest extends IntegrationTestCase {
 
 		self::assertNotSame( array(), $baseline->template_markup(), 'Sanity: the block theme must ship template files.' );
 		self::assertSame( array(), ( new TemplatesState() )->records(), 'Sanity: a fresh install has no wp_template rows.' );
+		self::assertSame( array(), ( new TemplatePartsState() )->records(), 'Sanity: a fresh install has no wp_template_part rows.' );
 
 		$report = ( new StateDiffer() )->diff_against_git( array( 'templates', 'template-parts' ) );
 
-		self::assertFalse(
-			StateDiffer::has_drift( $report ),
-			'Every Git template with no database override must read `unchanged`, not `removed`. Without the overlay this exits 2 on a healthy site.'
+		$expected_keys = $this->shipped_theme_keys();
+
+		self::assertContains( 'templates:404', $expected_keys, 'The shipped theme includes 404.html, so the expected key set must contain templates:404 as a STRING slug.' );
+		self::assertSame(
+			$expected_keys,
+			array_column( $report['entries'], 'key' ),
+			'EVERY shipped Git template and part must be compared: the report must carry exactly the shipped key set and nothing less — a differ that compares nothing must fail here.'
 		);
 		self::assertSame(
-			array(),
-			array_values( array_filter( $report['entries'], static fn ( array $entry ): bool => 'removed' === $entry['status'] ) ),
-			'`removed` is a bundle-mode status; it can never appear in Git mode.'
+			array_fill( 0, count( $expected_keys ), 'unchanged' ),
+			array_column( $report['entries'], 'status' ),
+			'Every Git template or part with no database override must read `unchanged`, never `removed`. Without the overlay this exits 2 on a healthy site.'
+		);
+		self::assertSame(
+			'unchanged',
+			$this->find_entry( $report, 'templates:404' )['status'],
+			'The numeric-slug template must be compared too, under its STRING key templates:404.'
+		);
+		self::assertFalse(
+			StateDiffer::has_drift( $report ),
+			'A site with no overrides and no custom CSS must exit 0.'
 		);
 	}
 
@@ -163,6 +178,40 @@ final class StateDiffGitModeTest extends IntegrationTestCase {
 
 		self::assertSame( DriftClassification::PROMOTABLE, $this->find_entry( $report, 'global-styles:active' )['classification'] );
 		self::assertTrue( StateDiffer::has_drift( $report ) );
+	}
+
+	/**
+	 * The COMPLETE expected Git-mode key set, derived directly from the
+	 * shipped theme's files on disk — never through GitBaseline or the
+	 * differ — so a differ that stops comparing files cannot hide here.
+	 * A numeric basename ("404.html") arrives as the STRING key
+	 * "templates:404", the same strict comparison the report must pass.
+	 *
+	 * @return list<string> Keys like templates:page and template-parts:site-header, sorted ascending.
+	 */
+	private function shipped_theme_keys(): array {
+		$keys = array();
+
+		foreach (
+			array(
+				'templates' => 'templates',
+				'parts'     => 'template-parts',
+			) as $directory => $prefix
+		) {
+			$files = glob( get_stylesheet_directory() . '/' . $directory . '/*.html' );
+
+			if ( false === $files ) {
+				continue;
+			}
+
+			foreach ( $files as $file ) {
+				$keys[] = $prefix . ':' . basename( $file, '.html' );
+			}
+		}
+
+		sort( $keys, SORT_STRING );
+
+		return $keys;
 	}
 
 	/**

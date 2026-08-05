@@ -74,10 +74,10 @@ final class StateDiffBundleModeTest extends IntegrationTestCase {
 	}
 
 	/**
-	 * The post-export navigation edit. The navigation row is created when
-	 * it does not exist yet: a bundle that exported no navigation rows and
-	 * a navigation that only appeared afterwards is the same post-export
-	 * drift as a changed one, and the gate must catch both.
+	 * The post-export navigation edit, used for both drift shapes: when the
+	 * row exists it is UPDATED in place (the changed-row case), when it does
+	 * not exist yet it is created (the added-row case). Both are post-export
+	 * drift and the gate must catch both.
 	 */
 	private function update_navigation( string $slug, string $markup ): void {
 		$post = get_page_by_path( $slug, OBJECT, 'wp_navigation' );
@@ -106,11 +106,32 @@ final class StateDiffBundleModeTest extends IntegrationTestCase {
 	}
 
 	public function test_a_navigation_change_after_export_counts_as_drift(): void {
+		$this->make_navigation( 'primary', '<!-- wp:navigation-link {"label":"Home"} /-->' );
+
 		$bundle = $this->exported_bundle();
+
 		$this->update_navigation( 'primary', '<!-- wp:navigation-link {"label":"Changed"} /-->' );
 
 		$report = ( new StateDiffer() )->diff_against_bundle( StateRegistry::resolve( null, false ), $bundle );
 
+		$entry = $this->find_entry( $report, 'navigation:primary' );
+
+		self::assertSame( 'changed', $entry['status'], 'The navigation row existed at export time, so the post-export edit must compare as a changed row — a broken existing-row comparison must not pass.' );
+		self::assertTrue( $entry['countsAsDrift'], 'A navigation change made after export must be caught as post-export drift.' );
+		self::assertTrue( StateDiffer::has_drift( $report ) );
+	}
+
+	public function test_a_navigation_added_after_export_counts_as_drift(): void {
+		$bundle = $this->exported_bundle();
+
+		$this->update_navigation( 'primary', '<!-- wp:navigation-link {"label":"Home"} /-->' );
+
+		$report = ( new StateDiffer() )->diff_against_bundle( StateRegistry::resolve( null, false ), $bundle );
+
+		$entry = $this->find_entry( $report, 'navigation:primary' );
+
+		self::assertSame( 'added', $entry['status'], 'A navigation row created only after export has no bundle counterpart and must compare as added.' );
+		self::assertTrue( $entry['countsAsDrift'], 'A navigation row that appeared after export must be caught as post-export drift.' );
 		self::assertTrue( StateDiffer::has_drift( $report ) );
 	}
 
