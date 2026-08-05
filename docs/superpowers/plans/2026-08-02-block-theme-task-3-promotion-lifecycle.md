@@ -138,7 +138,9 @@ src/State/Promotion/
 ├── GitRepository.php                # root/branch/HEAD/dirty paths/commit blobs
 ├── PrepareLock.php                  # local filesystem lock for `--prepare`
 ├── ThemeDeclaredSlugs.php           # theme.json customTemplates/templateParts
+├── StagedPromotionEntry.php         # one staged file, two-phase commit/discard
 ├── PreparedFileWriter.php           # normalise + staged atomic write
+├── CanonicalJsonFileWriter.php      # staged canonical-JSON write (no block normalisation)
 ├── PreparablePromotionStrategy.php  # Task 3's extension of Task 2's interface
 ├── AbstractBlockTemplateStrategy.php# shared template/part strategy behaviour
 ├── TemplatePromotionStrategy.php    # provider slug `templates`
@@ -193,7 +195,7 @@ use AgencyPlatform\State\StateRecord;         // key(), provider_slug(), slug(),
 use AgencyPlatform\State\StateProvider;       // record_key(string):string; record(string $key, bool $with_references = true):?StateRecord; records():array; promotion_strategy():?PromotionStrategy
 use AgencyPlatform\State\StateRegistry;       // STATIC provider(string):?StateProvider; providers():array
 use AgencyPlatform\State\StateBundle;         // STATIC load(string $path, ?HmacSigner, ?SchemaValidator):self  <-- THE call to use
-use AgencyPlatform\State\PromotionStrategy;   // provider_slug(); prepare(StateRecord,string):StagedPromotionEntry; reset(StateRecord):void; restore(StateRecord,array):void; expected_post_reset_hash(StateRecord):string
+use AgencyPlatform\State\PromotionStrategy;   // provider_slug(); prepare(StateRecord,string):array{preparedPath:string,preparedHash:string,originalHash:string|null}; reset(StateRecord):void; restore(StateRecord,array):void; expected_post_reset_hash(StateRecord):string
 use AgencyPlatform\State\PromotionStrategies; // const FILTER; STATIC all():array; for_provider(string):?PromotionStrategy; reset():void
 use AgencyPlatform\State\ReferenceScanner;    // STATIC scan(string $markup, string $record_key):list<array>; KIND_*; RESOLUTION_*; is_unresolved(array):bool
 use AgencyPlatform\State\StateDirectory;      // STATIC ensure():string
@@ -905,7 +907,65 @@ One private method `run( array $argv ): array{stdout:string, exit:int}` using `p
 
 - [ ] **Step 3: Write and run the tests**
 
-`GitRepositoryTest` runs against the real repository. Its first assertion runs `git --version` and fails the test with `Git is required for the promotion release gate.` when Git is unavailable. It never skips. It asserts `head_commit()` is 40 hex characters, `root()` contains `composer.json`, `commit_exists( head_commit() )` is true, `commit_exists( str_repeat( '0', 40 ) )` is false, and `file_at_commit( head_commit(), 'composer.json' )` contains `"agency/agency-starter"`. Add a discovery assertion with `AGENCY_REPO_ROOT` unset: `GitRepository::discover()->root()` equals `realpath( dirname( __DIR__, 7 ) )`; this prevents another wrong parent count.
+**CORRECTION (orchestrator, Unit 3A pre-Task-1 audit) — this test may NOT use the ambient repository.**
+
+The original text said "`GitRepositoryTest` runs against the real repository". That gate is red by
+construction in this engagement's own environment and was proven so before Task 1 started. Unit 3A
+works in a git worktree at `C:\Users\Aleksandar\Projects\wt\bt-task-3`, whose `.git` is a FILE
+reading `gitdir: C:/Users/Aleksandar/Projects/wordpress-template/.git/worktrees/bt-task-3`. That
+Windows path is outside the DDEV mount, so inside the container — where the integration suite runs
+— every git command fails:
+
+```text
+$ ddev exec git status --porcelain
+fatal: not a git repository: /var/www/html/C:/Users/Aleksandar/Projects/wordpress-template/.git/worktrees/bt-task-3
+```
+
+`git` itself is present at `/usr/bin/git`; only the repository is unreachable. An ambient-repository
+test would also be non-deterministic even where it did run, because it would assert over whatever
+branch, HEAD and dirty state the developer happens to have.
+
+`GitRepositoryTest` therefore builds a **throwaway fixture repository** and runs `GitRepository`
+against it. This is the same pattern Task 10's `PromotionPreparerTest` already uses (`git init`,
+one commit), so the plan becomes self-consistent rather than acquiring a new convention.
+
+- `set_up()` creates a temp directory, runs `git init`, `git config user.email`, `git config
+  user.name`, and `git -c commit.gpgsign=false commit` of a small fixture tree containing a
+  `composer.json` whose `name` is `agency/agency-starter` and a `templates/page.html`. Set
+  `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_SYSTEM=/dev/null` for every fixture git call so a
+  host `~/.gitconfig` (hooks, `init.defaultBranch`, signing) cannot change the result.
+- `tear_down()` removes the temp directory.
+- The first assertion runs `git --version` and FAILS the test with `Git is required for the
+  promotion release gate.` when Git is unavailable. It never skips, and a missing environment
+  stays a failed gate.
+- Assertions against the fixture: `head_commit()` is 40 hex characters; `root()` contains
+  `composer.json`; `commit_exists( head_commit() )` is true; `commit_exists( str_repeat( '0', 40 ) )`
+  is false; `file_at_commit( head_commit(), 'composer.json' )` contains `"agency/agency-starter"`;
+  `file_at_commit( head_commit(), 'no/such/file' )` is `null`.
+- `current_branch()` returns the fixture's branch name, and after `git checkout --detach` it
+  returns `null`. Assert BOTH — a `current_branch()` that always returned `null` would otherwise
+  pass.
+- `dirty_paths()` is empty on the fresh fixture; after writing an untracked file it contains that
+  path; after modifying a tracked file it contains that path. Assert all three — an implementation
+  that always returned an empty array would otherwise pass, and the run-level dirty-tree refusal in
+  Task 10 depends entirely on this method.
+- `relative_path()` / `absolute_path()` round-trip inside the fixture, and `relative_path()` throws
+  for a path outside the root.
+
+**The discovery assertion is kept but corrected.** The original required
+`GitRepository::discover()->root()` to equal `realpath( dirname( __DIR__, 7 ) )`. `__DIR__` in
+`tests/Integration/Promotion/` is three levels below the repository root, not seven, so that
+assertion was wrong by five levels; seven is the correct count only from the SOURCE file
+`src/State/Promotion/GitRepository.php`. Assert the parent count where it is actually used, without
+depending on the ambient repository being a git repository:
+
+- Set `AGENCY_REPO_ROOT` to the fixture path and assert `GitRepository::discover()->root()` is the
+  fixture path. This proves the override branch.
+- Assert the fallback branch's parent count by reflection over the constant rather than by running
+  git: compute `dirname( ( new \ReflectionClass( GitRepository::class ) )->getFileName(), 7 )` and
+  assert it equals `realpath( dirname( __DIR__, 3 ) )` — the repository root as seen from the test
+  file. This is what stops another wrong parent count, and it holds in the container, in a git
+  worktree, and in CI alike.
 
 `PrepareLockTest` asserts a second `acquire()` from a second instance on the same file throws with exit code 3, and succeeds after `release()`.
 
@@ -966,9 +1026,10 @@ git commit -m "feat: add promotion git context and prepare lock"
       public function __construct( private StateGateway $gateway, private string $theme_dir ) {}
       /** Normalised, promotion-safe body for the exported markup. */
       public function render( string $exported_markup ): string;
-      /** @return array{themeRelativePath:string, absolutePath:string, tempPath:string,
-       *                preparedFileHash:string, originalFileHash:string|null,
-       *                expectedPostResetHash:string, previousBytes:string|null} */
+      /** The returned entry's manifest_fields() carries:
+       *  array{themeRelativePath:string, absolutePath:string, tempPath:string,
+       *        preparedFileHash:string, originalFileHash:string|null,
+       *        expectedPostResetHash:string, previousBytes:string|null} */
       public function stage( string $theme_relative_path, string $exported_markup, string $promotion_id ): StagedPromotionEntry;
       /** @param list<StagedPromotionEntry> $staged */
       public function commit_all( array $staged ): void;
@@ -1093,8 +1154,16 @@ This task is the Release 3/Release 4 boundary. `PromotionStrategies::all()` ship
    * strategy that only implements the base one.
    */
   interface PreparablePromotionStrategy extends PromotionStrategy {
-      /** Task 2's corrected prepare contract. The strategy owns how it stages its output. */
-      public function prepare( StateRecord $record, string $theme_root ): StagedPromotionEntry;
+      /**
+       * The two-phase staging entry point this task actually uses.
+       *
+       * It does NOT redeclare Task 2's inherited `prepare( StateRecord, string ): array`.
+       * PHP return types are invariant for non-class types, so narrowing that
+       * `array` to `StagedPromotionEntry` is a fatal declaration-compatibility
+       * error, and Task 2's interface is merged and out of this task's grant.
+       * See the CORRECTION note under Step 1 for how `prepare()` is implemented.
+       */
+      public function stage( StateRecord $record, string $theme_root ): StagedPromotionEntry;
       public function theme_relative_path( string $record_slug ): string;
       public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool;
       /** 'absent' when finalisation deletes the row; 'present' when it resets one in place. */
@@ -1124,6 +1193,39 @@ This task is the Release 3/Release 4 boundary. `PromotionStrategies::all()` ship
       public function register(): void;                 // registrar always; CLI only under WP_CLI
   }
   ```
+
+**CORRECTION (orchestrator, Unit 3A pre-Task-1 audit) — the inherited `prepare()`.**
+
+The merged Task 2 interface declares `prepare( StateRecord $record, string $target_path ): array`
+returning `array{preparedPath: string, preparedHash: string, originalHash: string|null}`.
+Verified in `web/app/mu-plugins/agency-platform/src/State/PromotionStrategy.php`. The plan
+previously narrowed that return type to `StagedPromotionEntry` in the sub-interface, which PHP
+rejects at class-load time with a fatal declaration-compatibility error, so Task 7's gate was red
+by construction. `StagedPromotionEntry` is a Task 6 type and Task 2's file is out of this task's
+ownership grant, so the sub-interface adds `stage()` instead and leaves `prepare()` alone.
+
+`AbstractBlockTemplateStrategy::prepare()` therefore exists only to satisfy the inherited
+signature and MUST refuse:
+
+```php
+public function prepare( StateRecord $record, string $target_path ): array {
+	throw PromotionException::hard(
+		'PromotionStrategy::prepare() is not the promotion entry point; the lifecycle stages '
+		. 'every record with stage() and commits the run through PreparedFileWriter::commit_all(). '
+		. 'Called for ' . $record->key() . '.'
+	);
+}
+```
+
+The reason it refuses rather than delegating to `stage()` + `commit()` is the Unit 2 lesson
+recorded in the tracking file: a second write path that reaches the filesystem outside the
+run-level transaction is how the `--output` web-root leak happened. A single-record commit would
+silently break the all-or-nothing guarantee `commit_all()` exists to provide. Refusing is
+fail-closed and testable.
+
+`BlockTemplateStrategyTest` must carry a test proving the refusal — assert the thrown
+`PromotionException`, assert `exit_code()` is `PromotionExitCode::HARD_ERROR`, and assert the
+message names `stage()`. A test that only asserts "an exception was thrown" is not acceptable.
 
 - [ ] **Step 1: Write the failing registrar test**
 
