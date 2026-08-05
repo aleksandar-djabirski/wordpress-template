@@ -34,6 +34,7 @@ Seven plan defects were found and corrected before Task 1 started. Six came from
 | 9 | Task 2 Step 5 (found during execution) | The plan's own verbatim `Normalizer` code cannot pass this repo's `lint:php`. `WordPress.Security.EscapeOutput.ExceptionNotEscaped` fires on every variable in an exception message, and this subsystem's diagnostics name the offending key by design. Resolved by a scoped `phpcs.xml` exclusion; see the ruling below. |
 | 10 | Task 4 Interfaces block (found during execution) | Required "message lists every violation"; the pinned library is fail-fast and cannot. Amended to first-violation-with-pointer-path; see the amendment below. |
 | 11 | Task 5 line 1700 → Task 9 (found during execution) | `BaseStateProvider::detect_references()` was specified to scan markup, but `ReferenceScanner` does not exist in Task 5, so it shipped as `return array();`. **Nothing forced a later task to restore it.** Task 9 Step 3c now does, non-optionally, with a required break-and-restore proof. This is the second consequence of the same Task 6/8 circularity — see defect 2. |
+| 12 | Task 6 determinism test (found during execution) | The fixture used `customRef`, which matches no matcher, so both orderings emitted ONE reference and the assertion was **vacuous** — it passed against a completely unsorted implementation. Measured: count=1. Reference order feeds the bundle and therefore `stateHash`, so an unsorted scanner would make the hash vary with PHP attribute traversal and produce random phantom drift. Fixture corrected to `mediaId` + `someId` — both unknown-ref catch-alls emitted from the attribute loop — plus an explicit count assertion so the test can never go vacuous again. **The orchestrator's first correction (`id` + `mediaId`) was itself vacuous** and the worker caught it: `core/cover` is in `MEDIA_BLOCKS`, so `match_block_level()` consumes `id` before the attribute loop and its position never varies. Proven by neutering `sort_references()` and observing the test still pass. |
 
 **Sniff codes are version-specific.** Defect 8 is a reminder for every later task in this plan: a `phpcs:ignore` whose code does not match what the installed sniff actually emits is silently inert. If a suppression does not take effect, re-read the real phpcs output for the exact code rather than assuming the plan's code is current. Never replace a failing suppression with a broader one, and never add `@phpstan-ignore` to production code.
 
@@ -2108,16 +2109,37 @@ Create `tests/Unit/AgencyPlatform/State/ReferenceScannerTest.php` covering, one 
 		);
 	}
 
+	// CORRECTED TWICE, 2026-08-05. Read this before changing the fixture.
+	//
+	// The ORIGINAL fixture used `customRef`, which matches no matcher at all
+	// (the unknown-ref suffixes are Id / Ids / _id), so both orderings emitted
+	// ONE identical reference and the assertion was vacuous — it passed
+	// against a completely unsorted implementation. Measured: count=1.
+	//
+	// The FIRST correction proposed `id` + `mediaId` and was ALSO vacuous.
+	// `core/cover` is in MEDIA_BLOCKS, so match_block_level() consumes `id`
+	// BEFORE the attribute loop runs; `id` is therefore always emitted first
+	// no matter how the attribute map is ordered. Proven by neutering
+	// sort_references(): that fixture still produced ["id","mediaId"] both
+	// ways and the test still passed.
+	//
+	// BOTH attributes must be emitted from INSIDE the attribute loop for
+	// traversal order to matter. `mediaId` and `someId` are both unknown-ref
+	// catch-alls, so neither is consumed at block level. Proven with sorting
+	// disabled: ["mediaId","someId"] vs ["someId","mediaId"] — genuinely
+	// different, so the test now fails when sorting is removed.
 	public function test_reference_order_is_independent_of_attribute_map_order(): void {
 		$forward = ReferenceScanner::scan_parsed(
-			array( $this->block( 'core/cover', array( 'id' => 3, 'customRef' => 9 ) ) ),
+			array( $this->block( 'core/cover', array( 'mediaId' => 9, 'someId' => 3 ) ) ),
 			'templates:page'
 		);
 		$reverse = ReferenceScanner::scan_parsed(
-			array( $this->block( 'core/cover', array( 'customRef' => 9, 'id' => 3 ) ) ),
+			array( $this->block( 'core/cover', array( 'someId' => 3, 'mediaId' => 9 ) ) ),
 			'templates:page'
 		);
 
+		self::assertCount( 2, $forward, 'A one-reference fixture makes this assertion vacuous.' );
+		self::assertSame( array( 'mediaId', 'someId' ), array_column( $forward, 'attribute' ) );
 		self::assertSame( $forward, $reverse, 'Attribute traversal order must not change a hashed field.' );
 	}
 
