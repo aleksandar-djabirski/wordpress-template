@@ -29,6 +29,9 @@ Seven plan defects were found and corrected before Task 1 started. Six came from
 | 5 | Task 13 Step 4 | Claimed `check_overrides()` "takes no arguments at all". False since Unit 1's `d0da3f3`. |
 | 6 | Task 13 Step 3 | A test claimed to drive "the real alias logic" never called the alias. Renamed to a runner test; a real WP-CLI test added as Step 3c. |
 | 7 | Task 13 Step 5 | Deleting the two drift helpers orphans `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php`, which tests nothing else. Now deleted with them under a recorded ownership transfer. |
+| 8 | Task 1 Step 8 (found during execution) | The `phpcs:ignore` sniff code was `Generic.CodeAnalysis.UnusedFunctionParameter.Found`. The installed PHPCS reports the warning as `…UnusedFunctionParameter.FoundAfterLastUsed`, so the suppression never matched and `lint:php` failed inside `verify:fast`. Proven by restoring the wrong code and re-running phpcs. Corrected to `FoundAfterLastUsed`. |
+
+**Sniff codes are version-specific.** Defect 8 is a reminder for every later task in this plan: a `phpcs:ignore` whose code does not match what the installed sniff actually emits is silently inert. If a suppression does not take effect, re-read the real phpcs output for the exact code rather than assuming the plan's code is current. Never replace a failing suppression with a broader one, and never add `@phpstan-ignore` to production code.
 
 ---
 
@@ -453,7 +456,7 @@ final class EnvironmentConfig {
 	 *
 	 * @param array<string, string> $source Keys 'constant' and/or 'environment'.
 	 */
-	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- $name is part of the documented signature so callers and failure messages can name the setting; the precedence rule itself does not depend on it.
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- $name is part of the documented signature so callers and failure messages can name the setting; the precedence rule itself does not depend on it.
 	public static function resolve( array $source, string $name ): ?string {
 		foreach ( array( 'constant', 'environment' ) as $key ) {
 			$value = $source[ $key ] ?? '';
