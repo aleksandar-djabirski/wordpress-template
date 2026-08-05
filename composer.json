@@ -107,6 +107,10 @@
             "@putenv WP_COMMERCE_INTEGRATION=1",
             "phpunit --testsuite commerce-integration"
         ],
+        "test:integration:cli": [
+            "@putenv WP_INTEGRATION=1",
+            "phpunit --testsuite cli-integration"
+        ],
         "verify:fast": [
             "composer validate --strict",
             "@audit",

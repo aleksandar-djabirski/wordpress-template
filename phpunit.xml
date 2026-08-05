@@ -29,6 +29,18 @@
         <testsuite name="commerce-integration">
             <directory>tests/commerce/Integration</directory>
         </testsuite>
+        <!--
+            WP-CLI alias tests only. Never part of `verify`/`verify:fast` —
+            they need a real `wp` binary plus an installed site (the DDEV dev
+            database), so they are run explicitly by the
+            `test:integration:cli` Composer script (which sets WP_INTEGRATION=1
+            so tests/bootstrap.php loads tests/Integration/bootstrap.php for
+            the WP_UnitTestCase base class). The wp-phpunit-only CI job has
+            no WP-CLI and must never see this suite.
+        -->
+        <testsuite name="cli-integration">
+            <directory>tests/Cli</directory>
+        </testsuite>
     </testsuites>
     <php>
         <!--
