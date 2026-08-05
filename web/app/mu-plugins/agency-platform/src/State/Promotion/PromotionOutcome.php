@@ -13,6 +13,20 @@ namespace AgencyPlatform\State\Promotion;
  */
 final class PromotionOutcome {
 
+	public const OUTCOME_PREPARED = 'prepared';
+	public const OUTCOME_PROMOTED = 'promoted';
+	public const OUTCOME_RESTORED = 'restored';
+	public const OUTCOME_SKIPPED  = 'skipped';
+	public const OUTCOME_REFUSED  = 'refused';
+
+	/** @var list<string> */
+	private const SUCCESS_OUTCOMES = array(
+		self::OUTCOME_PREPARED,
+		self::OUTCOME_PROMOTED,
+		self::OUTCOME_RESTORED,
+		self::OUTCOME_SKIPPED,
+	);
+
 	/** @var array<string, string> */
 	private array $outcomes;
 
@@ -24,8 +38,76 @@ final class PromotionOutcome {
 	 * @param list<RecordRefusal>   $refusals
 	 */
 	public function __construct( array $outcomes, array $refusals ) {
+		self::assert_known_outcomes( $outcomes );
+		self::assert_refusals_agree( $outcomes, $refusals );
+
 		$this->outcomes = $outcomes;
 		$this->refusals = $refusals;
+	}
+
+	/**
+	 * An unrecognised status is a hard error rather than a silent success.
+	 * successes() counted every value that was not 'refused', so a typo or a
+	 * status this class does not know about became a success and the run
+	 * exited 0.
+	 *
+	 * @param array<string, string> $outcomes
+	 */
+	private static function assert_known_outcomes( array $outcomes ): void {
+		$known = array_merge( self::SUCCESS_OUTCOMES, array( self::OUTCOME_REFUSED ) );
+
+		foreach ( $outcomes as $record_key => $outcome ) {
+			if ( ! in_array( $outcome, $known, true ) ) {
+				throw PromotionException::hard(
+					'Unknown promotion outcome "' . $outcome . '" for record ' . $record_key
+					. '; expected one of ' . implode( ', ', $known ) . '.'
+				);
+			}
+		}
+	}
+
+	/**
+	 * The outcome map and the refusal report are two views of one fact and must
+	 * not disagree. A record refused in the report but not marked 'refused' in
+	 * the map would exit 0 while the manifest carried refusals; a record marked
+	 * 'refused' with no report entry would give the operator an exit code with
+	 * nothing to act on. One record may carry SEVERAL refusals — several
+	 * unresolved references in one template — so this compares the SETS of
+	 * record keys, never the counts.
+	 *
+	 * @param array<string, string> $outcomes
+	 * @param list<RecordRefusal>   $refusals
+	 */
+	private static function assert_refusals_agree( array $outcomes, array $refusals ): void {
+		$marked = array();
+
+		foreach ( $outcomes as $record_key => $outcome ) {
+			if ( self::OUTCOME_REFUSED === $outcome ) {
+				$marked[ $record_key ] = true;
+			}
+		}
+
+		$reported = array();
+
+		foreach ( $refusals as $refusal ) {
+			$reported[ $refusal->record_key ] = true;
+		}
+
+		$missing_report = array_keys( array_diff_key( $marked, $reported ) );
+
+		if ( array() !== $missing_report ) {
+			throw PromotionException::hard(
+				'Record(s) marked refused with no refusal report entry: ' . implode( ', ', $missing_report ) . '.'
+			);
+		}
+
+		$missing_mark = array_keys( array_diff_key( $reported, $marked ) );
+
+		if ( array() !== $missing_mark ) {
+			throw PromotionException::hard(
+				'Refusal report names record(s) that are not marked refused: ' . implode( ', ', $missing_mark ) . '.'
+			);
+		}
 	}
 
 	public function exit_code(): int {
@@ -80,7 +162,7 @@ final class PromotionOutcome {
 		$successes = 0;
 
 		foreach ( $this->outcomes as $outcome ) {
-			if ( 'refused' !== $outcome ) {
+			if ( in_array( $outcome, self::SUCCESS_OUTCOMES, true ) ) {
 				++$successes;
 			}
 		}
@@ -92,7 +174,7 @@ final class PromotionOutcome {
 		$refused = 0;
 
 		foreach ( $this->outcomes as $outcome ) {
-			if ( 'refused' === $outcome ) {
+			if ( self::OUTCOME_REFUSED === $outcome ) {
 				++$refused;
 			}
 		}
