@@ -15,8 +15,12 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Promotion;
 
+use AgencyPlatform\State\Promotion\NavigationBlockScanner;
+use AgencyPlatform\State\Promotion\NavigationPolicy;
 use AgencyPlatform\State\Promotion\PromotionFinalizer;
 use AgencyPlatform\State\Promotion\StateGateway;
+use AgencyPlatform\State\ReferenceResolver;
+use AgencyPlatform\State\ReferenceScanner;
 use Tests\Integration\IntegrationTestCase;
 
 /**
@@ -74,6 +78,57 @@ final class NavigationResolutionTest extends IntegrationTestCase {
 		self::assertSame(
 			$this->navigation_record_content_hash( $id ),
 			$this->finalizer_navigation_fallback_hash()
+		);
+	}
+
+	/**
+	 * THE regression test for the cross-unit gap a bounded review confirmed on
+	 * 2026-08-06, and the one test here that drives the REAL pipeline end to
+	 * end rather than a fixture.
+	 *
+	 * The plan's Task 2 navigation contract says a reference is emitted for
+	 * EVERY core/navigation block, with core's deterministic fallback resolved
+	 * at export for a ref-less one. The second half was never implemented, so a
+	 * ref-less block produced no reference at all, the navigation policy
+	 * correctly refused the record, and the shipped theme's own site-header —
+	 * whose navigation IS ref-less — became unpromotable. Nothing before the
+	 * Task 16 vertical slice would have noticed.
+	 *
+	 * It stayed invisible because the policy's ref-less acceptance test feeds a
+	 * SYNTHETIC reference the real scanner never produced. This test therefore
+	 * reads the SHIPPED theme file and runs the REAL scanner, the REAL resolver
+	 * and the REAL policy. Do not replace any of them with a fixture.
+	 */
+	public function test_the_shipped_ref_less_site_header_is_promotable_through_the_real_pipeline(): void {
+		$markup = (string) file_get_contents( get_stylesheet_directory() . '/parts/site-header.html' );
+
+		self::assertStringContainsString( 'wp:navigation', $markup, 'The shipped header must still contain a navigation block.' );
+		self::assertStringNotContainsString( '"ref"', $markup, 'The shipped header navigation must still be ref-less; this test exists for that case.' );
+
+		$this->create_navigation( 'probe-menu', '2026-01-01 00:00:00' );
+
+		$references = ReferenceResolver::resolve( ReferenceScanner::scan( $markup, 'template-parts:site-header' ) );
+
+		$navigation = array_values(
+			array_filter( $references, static fn( array $reference ): bool => 'navigation' === $reference['kind'] )
+		);
+
+		self::assertCount( 1, $navigation, 'A ref-less navigation block must still produce exactly one navigation reference.' );
+		self::assertNull( $navigation[0]['value'], 'A ref-less block records a null value.' );
+		self::assertNotEmpty( $navigation[0]['targetHash'] ?? null, 'The export must record the fallback target hash; without it the record is refused.' );
+
+		$outcome = NavigationPolicy::evaluate(
+			'template-parts:site-header',
+			'template-parts',
+			'site-header',
+			NavigationBlockScanner::scan( $markup ),
+			$references
+		);
+
+		self::assertSame(
+			array(),
+			$outcome['refusals'],
+			'The shipped ref-less site-header must be promotable; a refusal here blocks the Task 16 vertical slice.'
 		);
 	}
 

@@ -2289,7 +2289,7 @@ git commit -m "feat: add chunked promotion backups with retention"
 ### Task 14: `PromotionFinalizer` (§7.8)
 
 **Files:**
-- Create: `src/State/Promotion/PromotionFinalizer.php`
+- Modify: `src/State/Promotion/PromotionFinalizer.php` — **the file already exists.** Task 9's Steps 5 and 6 require `resolve_navigation_fallback()` to be implemented and driven by `NavigationResolutionTest`, while Task 9's Files list omitted the class. Task 9 therefore created it holding ONLY the gateway constructor and that one method, and reported the deviation. Add the finalize loop here; do not rewrite or re-derive `resolve_navigation_fallback()`, which is already proven by execution against three published navigations, an ignored draft and an ignored future-dated post.
 - Test: `tests/Integration/Promotion/PromotionFinalizerTest.php`
 
 **Interfaces:**
