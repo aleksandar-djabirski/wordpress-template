@@ -261,13 +261,25 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 		$content    = isset( $bundle_record['content'] ) && is_array( $bundle_record['content'] ) ? $bundle_record['content'] : array();
 		$markup     = isset( $content['markup'] ) && is_string( $content['markup'] ) ? $content['markup'] : '';
 
-		if ( $this->gateway->normalize_block_markup( $markup ) !== $markup ) {
+		// Normalisation is a TRANSFORM, not an identity: it strips the injected
+		// theme attribute and ksorts the remaining ones. Comparing its output
+		// to the RAW input therefore refuses any record whose attributes are
+		// not already in sorted order — which is every template the shipped
+		// theme contains, including templates/page.html, templates/index.html
+		// and parts/site-header.html. That made the whole theme unpromotable.
+		//
+		// The property actually worth checking is that normalisation is STABLE:
+		// markup the parser cannot represent losslessly keeps changing on a
+		// second pass, and that is what "does not round-trip" means here.
+		$normalized = $this->gateway->normalize_block_markup( $markup );
+
+		if ( $this->gateway->normalize_block_markup( $normalized ) !== $normalized ) {
 			$refusals[] = new RecordRefusal(
 				$record_key,
 				$provider,
 				$slug,
 				'unparseable-markup',
-				'The block markup does not round-trip through the WordPress parser.'
+				'The block markup does not round-trip through the WordPress parser: normalising it a second time produces different markup.'
 			);
 		}
 

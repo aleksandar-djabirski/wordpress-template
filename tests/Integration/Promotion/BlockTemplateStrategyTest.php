@@ -14,12 +14,16 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Promotion;
 
+use AgencyPlatform\State\HmacSigner;
 use AgencyPlatform\State\Ownership;
+use AgencyPlatform\State\Promotion\BundleView;
 use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionExitCode;
 use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
 use AgencyPlatform\State\Promotion\TemplatePromotionStrategy;
 use AgencyPlatform\State\PromotionPolicy;
+use AgencyPlatform\State\StateBundle;
+use AgencyPlatform\State\StateExporter;
 use AgencyPlatform\State\StateRecord;
 use Tests\Integration\IntegrationTestCase;
 
@@ -101,6 +105,79 @@ final class BlockTemplateStrategyTest extends IntegrationTestCase {
 		self::assertIsString( $hash );
 		self::assertSame( 64, strlen( $hash ) );
 		self::assertMatchesRegularExpression( '/^[0-9a-f]{64}$/', $hash );
+	}
+
+	/**
+	 * The shipped theme's own templates must pass validate_for_promotion().
+	 *
+	 * The parse check originally compared `normalize_block_markup( $markup )`
+	 * to the RAW markup. Normalisation is a TRANSFORM — it strips the injected
+	 * theme attribute and ksorts the rest — so that comparison refused every
+	 * record whose attributes were not already sorted. That is all three
+	 * shipped files: templates/page.html and templates/index.html carry
+	 * four-attribute template-part blocks, and parts/site-header.html carries a
+	 * multi-attribute navigation block. The entire theme was unpromotable and
+	 * nothing before the Task 16 vertical slice would have noticed.
+	 *
+	 * This drives the REAL shipped files rather than a fixture, for the same
+	 * reason the navigation regression test does: a fixture written to suit the
+	 * validator cannot detect that the validator rejects the real thing.
+	 *
+	 * @dataProvider shipped_theme_records
+	 */
+	public function test_the_shipped_theme_templates_pass_the_promotion_validator( string $provider, string $slug, string $relative_path ): void {
+		$markup = (string) file_get_contents( get_stylesheet_directory() . '/' . $relative_path );
+
+		self::assertNotSame( '', $markup, 'The shipped theme file must exist and be readable.' );
+
+		$strategy = 'templates' === $provider ? $this->templates : $this->template_parts;
+
+		$refusals = $strategy->validate_for_promotion(
+			array(
+				'key'      => $provider . ':' . $slug,
+				'provider' => $provider,
+				'slug'     => $slug,
+				'content'  => array( 'markup' => $markup ),
+			),
+			$this->verified_bundle_view(),
+			// Every template part the shipped templates reference is selected,
+			// so the missing-template-part rule is satisfied and this test is
+			// about the PARSE check only.
+			array( 'templates:page', 'templates:index', 'template-parts:site-header', 'template-parts:site-footer' )
+		);
+
+		self::assertSame(
+			array(),
+			array_map( static fn( $refusal ): string => $refusal->reason_code, $refusals ),
+			sprintf( 'The shipped %s must be promotable; a refusal here blocks the Task 16 vertical slice.', $relative_path )
+		);
+	}
+
+	/**
+	 * A real, signature-verified BundleView. The validator consults the bundle
+	 * before it consults the selected keys, and an unverified bundle throws, so
+	 * this cannot be faked.
+	 */
+	private function verified_bundle_view(): BundleView {
+		$key_id = 'test-key';
+		$signer = new HmacSigner( array( $key_id => str_repeat( 'k', 40 ) ), $key_id );
+
+		$bundle = StateBundle::from_array(
+			( new StateExporter( $signer ) )->export( array( 'templates', 'template-parts' ) )
+		);
+
+		$bundle->verify_signature( $signer );
+
+		return new BundleView( $bundle );
+	}
+
+	/** @return array<string, array{string, string, string}> */
+	public static function shipped_theme_records(): array {
+		return array(
+			'page template'  => array( 'templates', 'page', 'templates/page.html' ),
+			'index template' => array( 'templates', 'index', 'templates/index.html' ),
+			'site header'    => array( 'template-parts', 'site-header', 'parts/site-header.html' ),
+		);
 	}
 
 	/**
