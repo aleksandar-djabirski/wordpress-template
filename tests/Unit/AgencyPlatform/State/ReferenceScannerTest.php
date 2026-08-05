@@ -76,14 +76,23 @@ final class ReferenceScannerTest extends TestCase {
 		);
 	}
 
+	/**
+	 * The fixture needs at least two attributes the unknown-ref catch-all
+	 * matches, and none a block-level matcher consumes: core/cover is a media
+	 * block, so match_block_level() eats id before the attribute loop, and a
+	 * customRef-style attribute matches nothing — a fixture of those would
+	 * emit one reference and make this assertion vacuous. mediaId + someId
+	 * are both emitted from inside the attribute loop, so traversal order
+	 * genuinely changes emission unless sort_references() runs.
+	 */
 	public function test_reference_order_is_independent_of_attribute_map_order(): void {
 		$forward = ReferenceScanner::scan_parsed(
 			array(
 				$this->block(
 					'core/cover',
 					array(
-						'id'        => 3,
-						'customRef' => 9,
+						'mediaId' => 9,
+						'someId'  => 3,
 					)
 				),
 			),
@@ -94,14 +103,16 @@ final class ReferenceScannerTest extends TestCase {
 				$this->block(
 					'core/cover',
 					array(
-						'customRef' => 9,
-						'id'        => 3,
+						'someId'  => 3,
+						'mediaId' => 9,
 					)
 				),
 			),
 			'templates:page'
 		);
 
+		self::assertCount( 2, $forward, 'A one-reference fixture makes this assertion vacuous.' );
+		self::assertSame( array( 'mediaId', 'someId' ), array_column( $forward, 'attribute' ) );
 		self::assertSame( $forward, $reverse, 'Attribute traversal order must not change a hashed field.' );
 	}
 
