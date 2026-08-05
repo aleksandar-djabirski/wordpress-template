@@ -41,10 +41,15 @@ final class ResolvedTemplateNormalizer {
 
 	/**
 	 * Rewrites every matching block-comment delimiter: strips $target_key
-	 * from the attribute object and re-emits the delimiter canonically. The
-	 * self-closing marker of the ORIGINAL comment is preserved, so a paired
-	 * block stays paired; only a comment left with no attributes collapses
-	 * to the bare `<!-- wp:name /-->` form.
+	 * from the attribute object and re-emits the delimiter canonically.
+	 *
+	 * The self-closing marker of the ORIGINAL comment is preserved in EVERY
+	 * branch, including the one where no attribute is left. Collapsing a paired
+	 * OPENER to `<!-- wp:name /-->` because its attributes ran out would orphan
+	 * the matching `<!-- /wp:name -->` and strand every inner block outside its
+	 * parent. That is the COMMON case here, not an edge case: most
+	 * core/navigation blocks carry `ref` and nothing else, and `ref` is exactly
+	 * what the v1 navigation policy removes.
 	 */
 	private static function rewrite( string $markup, string $block_name, string $target_key ): string {
 		return (string) preg_replace_callback(
@@ -67,8 +72,10 @@ final class ResolvedTemplateNormalizer {
 
 				unset( $attributes[ $target_key ] );
 
+				$closing = isset( $matches[3] ) && '/' === $matches[3] ? ' /-->' : ' -->';
+
 				if ( array() === $attributes ) {
-					return '<!-- wp:' . $matches[1] . ' /-->';
+					return '<!-- wp:' . $matches[1] . $closing;
 				}
 
 				ksort( $attributes, SORT_STRING );
@@ -79,8 +86,6 @@ final class ResolvedTemplateNormalizer {
 				if ( false === $encoded ) {
 					return $matches[0];
 				}
-
-				$closing = isset( $matches[3] ) && '/' === $matches[3] ? ' /-->' : ' -->';
 
 				return '<!-- wp:' . $matches[1] . ' ' . $encoded . $closing;
 			},

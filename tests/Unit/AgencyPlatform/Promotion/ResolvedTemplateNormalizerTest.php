@@ -61,6 +61,42 @@ final class ResolvedTemplateNormalizerTest extends TestCase {
 		);
 	}
 
+	/**
+	 * The common shape in a real template: a paired navigation block whose ONLY
+	 * attribute is the ref the v1 policy removes. The opener must stay paired.
+	 * Collapsing it to `<!-- wp:navigation /-->` orphans the closer and strands
+	 * every child outside the navigation block, which silently corrupts the
+	 * promoted file for the most frequent markup this code will ever see.
+	 */
+	public function test_a_paired_navigation_block_whose_only_attribute_is_ref_stays_paired(): void {
+		$markup = '<!-- wp:navigation {"ref":12} -->'
+			. '<!-- wp:navigation-link {"label":"Home"} /-->'
+			. '<!-- /wp:navigation -->';
+
+		self::assertSame(
+			'<!-- wp:navigation -->'
+			. '<!-- wp:navigation-link {"label":"Home"} /-->'
+			. '<!-- /wp:navigation -->',
+			ResolvedTemplateNormalizer::strip_navigation_refs( $markup )
+		);
+	}
+
+	public function test_a_paired_template_part_whose_only_attribute_is_theme_stays_paired(): void {
+		$markup = '<!-- wp:template-part {"theme":"site-theme"} --><!-- /wp:template-part -->';
+
+		self::assertSame(
+			'<!-- wp:template-part --><!-- /wp:template-part -->',
+			ResolvedTemplateNormalizer::strip_theme_attribute( $markup )
+		);
+	}
+
+	public function test_a_self_closing_navigation_block_stays_self_closing_when_nothing_remains(): void {
+		self::assertSame(
+			'<!-- wp:navigation /-->',
+			ResolvedTemplateNormalizer::strip_navigation_refs( '<!-- wp:navigation {"ref":12} /-->' )
+		);
+	}
+
 	public function test_it_leaves_markup_unchanged_when_the_attributes_do_not_decode_as_json(): void {
 		$markup = '<!-- wp:navigation {"ref":oops} /-->';
 
