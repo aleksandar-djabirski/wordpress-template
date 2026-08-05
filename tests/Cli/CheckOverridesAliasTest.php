@@ -18,12 +18,17 @@
  * test is a required Release 2 condition (BLOCK_THEME_PROPOSAL.md §13), so
  * an unreachable `wp` binary must fail loudly with direct assertions.
  *
- * @package Tests\Integration
+ * This suite is a separate opt-in gate (`test:integration:cli`) run only
+ * where a real WP-CLI binary and an installed site exist (inside DDEV /
+ * the DDEV-backed CI job) — the wp-phpunit-only CI job has neither and
+ * must never see this file.
+ *
+ * @package Tests\Cli
  */
 
 declare(strict_types=1);
 
-namespace Tests\Integration\State;
+namespace Tests\Cli;
 
 use Tests\Integration\IntegrationTestCase;
 
@@ -51,7 +56,7 @@ final class CheckOverridesAliasTest extends IntegrationTestCase {
 				2 => array( 'pipe', 'w' ),
 			),
 			$pipes,
-			dirname( __DIR__, 3 )
+			dirname( __DIR__, 2 )
 		);
 
 		if ( ! is_resource( $process ) ) {

@@ -46,6 +46,15 @@ parameters:
         # after `scripts/enable-commerce`), for the same reason spelled out above.
         - tests/commerce/Integration/*
 
+        # The `cli-integration` suite (tests/Cli/*) is the WP-CLI counterpart of
+        # the suites excluded above: its one test extends
+        # Tests\Integration\IntegrationTestCase (WP_UnitTestCase), a runtime-only
+        # symbol that phpstan cannot see for the same reasons, and it is verified
+        # by running it for real inside DDEV/CI (`composer test:integration:cli`),
+        # where a live WordPress install, WP-CLI and PHPUnit catch what phpstan
+        # can't see here.
+        - tests/Cli/*
+
     # szepeviktor/phpstan-wordpress's extension.neon already bootstraps
     # WordPress core stubs/constants via its own `bootstrapFiles` (NEON
     # merges this list across included configs rather than replacing it, so

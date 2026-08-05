@@ -240,6 +240,14 @@ jobs:
           ddev wp theme activate site-theme
           ddev wp plugin activate site-core site-integrations
 
+      - name: WP-CLI alias integration suite (real `wp` + installed site)
+        # The `wp agency check-overrides` alias test shells out to the real
+        # WP-CLI binary against the DDEV dev database, so it can only run in
+        # this job — the wp-phpunit-only `integration` CI job has no WP-CLI
+        # and no installed site. Runs before the Playwright steps so a CLI
+        # registration regression fails fast.
+        run: ddev composer test:integration:cli
+
       - name: Create client-editor test user
         # LOCAL/CI-ONLY throwaway credential — mirrors scripts/setup step 8;
         # tests/e2e/helpers/auth.ts logs in with this exact user/pass.
