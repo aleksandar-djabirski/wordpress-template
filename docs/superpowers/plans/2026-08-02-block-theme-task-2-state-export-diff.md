@@ -31,7 +31,30 @@ Seven plan defects were found and corrected before Task 1 started. Six came from
 | 7 | Task 13 Step 5 | Deleting the two drift helpers orphans `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php`, which tests nothing else. Now deleted with them under a recorded ownership transfer. |
 | 8 | Task 1 Step 8 (found during execution) | The `phpcs:ignore` sniff code was `Generic.CodeAnalysis.UnusedFunctionParameter.Found`. The installed PHPCS reports the warning as `…UnusedFunctionParameter.FoundAfterLastUsed`, so the suppression never matched and `lint:php` failed inside `verify:fast`. Proven by restoring the wrong code and re-running phpcs. Corrected to `FoundAfterLastUsed`. |
 
+| 9 | Task 2 Step 5 (found during execution) | The plan's own verbatim `Normalizer` code cannot pass this repo's `lint:php`. `WordPress.Security.EscapeOutput.ExceptionNotEscaped` fires on every variable in an exception message, and this subsystem's diagnostics name the offending key by design. Resolved by a scoped `phpcs.xml` exclusion; see the ruling below. |
+
 **Sniff codes are version-specific.** Defect 8 is a reminder for every later task in this plan: a `phpcs:ignore` whose code does not match what the installed sniff actually emits is silently inert. If a suppression does not take effect, re-read the real phpcs output for the exact code rather than assuming the plan's code is current. Never replace a failing suppression with a broader one, and never add `@phpstan-ignore` to production code.
+
+### Ruling on exception messages and `phpcs.xml` — orchestrator, 2026-08-05
+
+**This applies to EVERY task in this plan, not only Task 2.** Task 2 was simply the first task to throw a `StateException`; there is no other `throw new` anywhere in `agency-platform` or the `site-*` plugins, so the whole subsystem hit this at once.
+
+`WordPress.Security.EscapeOutput.ExceptionNotEscaped` flags any variable interpolated into an exception message. This plan REQUIRES such messages throughout — Task 3 alone demands a message "naming `AGENCY_PROMOTION_HMAC_KEYS` and the offending key id". The measured failure on the plan's own verbatim Task 2 code was 4 errors across `Normalizer.php:91,198,205`.
+
+**Two fixes were considered and rejected, with reasons:**
+
+- **`esc_html()` on the message — rejected as actively harmful.** It would make `Normalizer` and every other state class depend on WordPress, which breaks the Global Constraint that unit-tested methods stay WordPress-free so `tests/support/wp-stubs.php` never grows into a shadow WordPress. It would also mangle CLI diagnostics for no security benefit, since these messages never reach a browser.
+- **A `phpcs:ignore` at every throw site — rejected as unbounded.** The suppression count would grow across all 13 tasks, and each one is a place a genuine escaping bug could later hide. Unit 1 already established that suppressions added to shipping code to satisfy tooling are the wrong fix.
+
+**Accepted fix: a scoped `phpcs.xml` exclusion.** `StateException` is a WP-CLI-only failure type; the command surface catches it and converts it to an exit code, so the sniff's premise — that the message may reach a browser — is false for this subsystem. The exclusion is limited to `web/app/mu-plugins/agency-platform/src/State/*` and the sniff stays fully active everywhere else.
+
+**Proven scoped, not merely applied.** A probe class containing `throw new \RuntimeException( 'probe ' . $why )` was placed OUTSIDE `src/State/` at `agency-platform/src/Health/`, and phpcs still reported `FOUND 1 ERROR … (WordPress.Security.EscapeOutput.ExceptionNotEscaped)`. The probe was then removed. Without that check the exclusion could have blinded the sniff repo-wide and nothing would have failed.
+
+**`WordPress.PHP.IniSet.Risky` is handled differently and deliberately so.** It is BOUNDED — `canonical_json()` is the single place that pins `serialize_precision`, and its test pins it once more to prove independence. Four sites total, and the code genuinely is unusual enough to deserve a note to the next reader. Those keep a per-site `phpcs:ignore` with a real reason, matching the house style already used in `AgencyCommands.php` and `EnvironmentConfig.php`. Do not add this to `phpcs.xml`.
+
+**Ownership grant:** `phpcs.xml` is edited by the ORCHESTRATOR for this ruling only, in its own commit. No worker task may edit `phpcs.xml`. If a later task hits a sniff it believes is wrong, it must STOP and report rather than change the ruleset or broaden a suppression.
+
+**Formatting violations are fixed, never suppressed.** The plan's verbatim test block also tripped `ArrayDeclarationSpacing.AssociativeArrayFound` and `MultipleStatementAlignment.DoubleArrowNotAligned`. Those are real style violations and phpcbf fixes them automatically. Suppressing a formatting sniff is not acceptable in any task.
 
 ---
 
