@@ -33,7 +33,9 @@ Seven plan defects were found and corrected before Task 1 started. Six came from
 
 | 9 | Task 2 Step 5 (found during execution) | The plan's own verbatim `Normalizer` code cannot pass this repo's `lint:php`. `WordPress.Security.EscapeOutput.ExceptionNotEscaped` fires on every variable in an exception message, and this subsystem's diagnostics name the offending key by design. Resolved by a scoped `phpcs.xml` exclusion; see the ruling below. |
 | 10 | Task 4 Interfaces block (found during execution) | Required "message lists every violation"; the pinned library is fail-fast and cannot. Amended to first-violation-with-pointer-path; see the amendment below. |
-| 11 | Task 5 line 1700 → Task 9 (found during execution) | `BaseStateProvider::detect_references()` was specified to scan markup, but `ReferenceScanner` does not exist in Task 5, so it shipped as `return array();`. **Nothing forced a later task to restore it.** Task 9 Step 3c now does, non-optionally, with a required break-and-restore proof. This is the second consequence of the same Task 6/8 circularity — see defect 2. |
+| 11 | Task 5 line 1700 → Task 9 (found during execution) | `BaseStateProvider::detect_references()` was specified to scan markup, but `ReferenceScanner` does not exist in Task 5, so it shipped as `return array();`, and nothing forced a later task to restore it. Task 9 Step 3c now does, non-optionally. **The orchestrator's first framing of this was OVERSTATED and is corrected in Step 3c:** it claimed every inheriting provider reports zero references. Task 8's providers scan inline and never call the method, and grep confirms it has NO call sites — so it is dead code, not live data loss. The real defect is a designed seam no provider uses, which is why Step 3c now also requires providers to route through it. |
+| 14 | Task 8 providers → Task 9 (found during execution) | `TemplatesState` and `TemplatePartsState` call `scan_parsed()`, which resolves nothing, so their references carry `targetKey`/`targetHash`/`targetIdentity` as `null` forever. §7.4's navigation policy needs that hash to travel inside the reference for a templates-only bundle. Another consequence of the Task 6↔8 circularity fix: Task 8's text still names `scan()`, which did not exist then. Task 9 Step 3d now grants a one-call change in each file. The worker STOPPED at the boundary and reported rather than editing files outside its list. |
+| 15 | Task 9 Step 3b (found during execution) | The third test calls `exported_document()`, a helper built on `StateExporter` — a Task 10 class. It cannot exist in Task 9. Deferred to Task 10. |
 | 13 | Task 7 `StateDirectory` (found by the orchestrator, by probe) | **SECURITY.** The web-root guard is defeatable and the guards had NO test at all. `assert_no_traversal()` runs only in the RELATIVE branch, while `assert_outside_web_root()` is a naive string-prefix compare — so an ABSOLUTE override containing `..` skips traversal checking and defeats the prefix test. Measured: `AGENCY_STATE_DIR=<root>/var/../web/leak` was ACCEPTED and resolves inside the web root, where customer state is served over HTTP. `<root>/../../etc/leak` was also accepted. Fix: canonicalise `.`/`..` lexically BEFORE the containment check, and add `StateDirectoryTest.php`, which the plan never included. |
 | 12 | Task 6 determinism test (found during execution) | The fixture used `customRef`, which matches no matcher, so both orderings emitted ONE reference and the assertion was **vacuous** — it passed against a completely unsorted implementation. Measured: count=1. Reference order feeds the bundle and therefore `stateHash`, so an unsorted scanner would make the hash vary with PHP attribute traversal and produce random phantom drift. Fixture corrected to `mediaId` + `someId` — both unknown-ref catch-alls emitted from the attribute loop — plus an explicit count assertion so the test can never go vacuous again. **The orchestrator's first correction (`id` + `mediaId`) was itself vacuous** and the worker caught it: `core/cover` is in `MEDIA_BLOCKS`, so `match_block_level()` consumes `id` before the attribute loop and its position never varies. Proven by neutering `sort_references()` and observing the test still pass. |
 
@@ -2932,6 +2934,8 @@ git commit -m "feat(state): add the provider registry and the git-backed provide
 - Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php` (moved here from Task 6 — see Step 3a)
 - Modify: `web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php` (add `scan()` only)
 - **Modify: `web/app/mu-plugins/agency-platform/src/State/BaseStateProvider.php` (restore `detect_references()` — see Step 3c. NON-OPTIONAL.)**
+- **Modify: `web/app/mu-plugins/agency-platform/src/State/Providers/TemplatesState.php` — `scan_parsed()` → `scan()` ONLY. Ownership granted 2026-08-05, see Step 3d.**
+- **Modify: `web/app/mu-plugins/agency-platform/src/State/Providers/TemplatePartsState.php` — `scan_parsed()` → `scan()` ONLY. Same grant.**
 - Modify: `web/app/mu-plugins/agency-platform/src/State/StateRegistry.php` (register the six)
 - Modify: `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php` (Task 8 Step 3's temporary assertion, plus the two `content` cases)
 - Modify: `tests/Integration/State/ProviderRecordsTest.php`
@@ -3106,11 +3110,40 @@ Task 5's `Interfaces` block specified `detect_references()` as "scans `$content[
 	}
 ```
 
-**Why this is dangerous rather than merely incomplete.** Left as `return array();`, every provider that inherits `BaseStateProvider` reports ZERO references. References are what carry §7.4's v1 navigation policy — the exported navigation's content hash has to travel inside the reference so a templates-only bundle can still be judged at finalisation. A bundle whose references are all empty is structurally valid, passes the schema, hashes deterministically, signs correctly, and is WRONG. Nothing in the current suite fails.
+**CORRECTED 2026-08-05, after Task 8 shipped — the orchestrator's original claim here was overstated.** It said "every provider that inherits `BaseStateProvider` reports ZERO references". That is FALSE as built. Task 8's `TemplatesState` and `TemplatePartsState` call `ReferenceScanner::scan_parsed( parse_blocks( … ) )` INLINE and never route through `detect_references()`. Verified by grep: the only occurrences of `detect_references` in the entire tree are its declaration in `StateProvider.php:60` and its `return array();` body in `BaseStateProvider.php:54`. **Nothing calls it.** So the base default is currently dead code and no reference is being lost today.
+
+**What the real defect is.** `detect_references()` is a designed provider seam that no provider uses, so the contract and the implementation have diverged. That matters for two reasons: a Task 9 provider that reasonably relies on the inherited default would silently get zero references, and a dead method in a cross-unit contract invites a later unit to implement against a seam that does nothing.
+
+**Therefore this step has two obligations, not one.** Restore the implementation AS BELOW, and make the providers you create actually ROUTE THROUGH `$this->detect_references( $content, $key )` rather than calling the scanner inline. If you conclude the seam should instead be removed from the contract, STOP and report rather than deciding it yourself — that is a cross-unit contract change and the orchestrator owns it.
+
+References carry §7.4's v1 navigation policy — the exported navigation's content hash has to travel inside the reference so a templates-only bundle can still be judged at finalisation — so a provider that silently returns none is a real hazard even though it is not a live bug today.
 
 **Prove the restore is real.** Add an integration assertion that a markup-bearing record with a `core/navigation` reference returns a NON-EMPTY reference list through `BaseStateProvider`'s default path — not only through a provider that overrides it. Then temporarily restore `return array();`, confirm that assertion FAILS, record the exact failure text in your report, and put the scan back. An assertion that cannot be shown to fail for the right reason is not coverage.
 
+- [ ] **Step 3d: Switch the two Git-backed providers from `scan_parsed()` to `scan()` — narrow ownership grant**
+
+Added by the orchestrator on 2026-08-05. **Fourteenth plan defect, and a direct consequence of the orchestrator's own Task 6↔8 circularity correction.**
+
+Task 8's section still says references come from `ReferenceScanner::scan( $post->post_content, $key )`. When Task 8 ran, `scan()` did not exist — the circularity fix had moved it here — so its providers correctly used `scan_parsed( parse_blocks( … ) )` instead. But `scan_parsed()` performs NO resolution: it emits `targetKey`, `targetHash` and `targetIdentity` as `null` by design, and only `scan()` runs them through `ReferenceResolver`.
+
+The consequence is that `TemplatesState` and `TemplatePartsState` emit permanently unresolved references, and Step 3b's own tests fail against them. Measured: `Failed asserting that null is identical to 'navigation:primary'.` and `Failed asserting that null is identical to 66.`
+
+This is not cosmetic. §7.4's v1 navigation policy needs the exported navigation's content hash to travel INSIDE the reference, so that a bundle exported with `--providers=templates` can still be judged at finalisation. Templates are exactly the provider that case is about.
+
+**Grant:** Task 9 owns a one-call change in each of `TemplatesState.php` and `TemplatePartsState.php` — `ReferenceScanner::scan_parsed( parse_blocks( $post->post_content ), $key )` becomes `ReferenceScanner::scan( $post->post_content, $key )`. Nothing else in those two files may change. `MediaReferencesState` keeps `scan_parsed()` deliberately: it scans a synthetic markup source rather than a record, and its targets are the attachments themselves.
+
+Confirm afterwards that Step 3b's two target-resolution assertions pass, and report the before/after of both.
+
 - [ ] **Step 3b: Write the reference-resolver integration test**
+
+> **Orchestrator correction, 2026-08-05.** The THIRD test in this step —
+> the one calling `$this->exported_document( array( 'templates' ) )` — **does
+> not belong to Task 9 and must not be written here.** `exported_document()` is
+> a private helper of a later task's test built on `StateExporter`, which Task
+> 10 creates. Measured in Task 9: `Error: Call to undefined method
+> Tests\Integration\State\ReferenceResolverTest::exported_document()`.
+> Write only the tests whose dependencies exist in this task; Task 10 adds the
+> bundle-level one when the exporter exists.
 
 Create `tests/Integration/State/ReferenceResolverTest.php`. This is the test that proves Task 3 can enforce the §7.4 v1 navigation policy from a templates-only bundle:
 
