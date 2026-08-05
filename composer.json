@@ -28,6 +28,7 @@
         "roots/bedrock-disallow-indexing": "^2.0",
         "roots/wordpress": "^7.0",
         "roots/wp-config": "^1.0",
+        "swaggest/json-schema": "^0.12",
         "vlucas/phpdotenv": "^5.0"
     },
     "require-dev": {
