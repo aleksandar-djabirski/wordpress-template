@@ -150,6 +150,12 @@ calls per task before it was written down.
   break-and-restore edit, the editing tools are the reliable choice; two
   scripted attempts silently did nothing and produced a false "the test still
   passes" reading.
+- **PHPUnit's result cache can replay a stale OK and make a break look inert.**
+  `phpunit.xml` sets `cacheResultFile`, so a break-and-restore run can report
+  green from cache and produce a FALSE "this test cannot fail" reading — which,
+  under the rule in §8a, would wrongly condemn a perfectly good test. Delete
+  `.phpunit.cache` before every break run and before the final green run. It is
+  gitignored, so removing it changes nothing tracked.
 - **`chmod()` is a NO-OP on the DDEV mount.** It returns `true` and changes
   nothing, and directories are created 0777 whatever mode you pass. So any
   assertion about file or directory permissions is VACUOUS on this host and must
@@ -265,6 +271,33 @@ The pre-dispatch audit that pays for itself, per task, in a few minutes:
    critical defects across two units were unguarded write paths.
 4. **Ask which assertion would still pass if the code did nothing.** That is the
    dominant defect family of this engagement.
+
+## 8a. Two worker behaviours to correct in the brief
+
+Both cost a full review cycle in Unit 3A and both are cheap to prevent.
+
+- **A worker that reports "the test cannot detect this" and ships the change
+  anyway.** The Task 5 worker changed a path parent count, ran a break, observed
+  that the suite stayed green, wrote in its report that the test "cannot detect a
+  production-side count change", and committed. Tell workers explicitly: if your
+  own break leaves the suite green, the TEST is the defect. Fix the test, or stop
+  and report — never ship the change on the strength of a test you have just
+  proven blind.
+- **A worker "correcting" the plan on arithmetic it has not executed.** The same
+  count was correct in the plan. Tell workers to PROVE an off-by-one with a
+  three-line probe before changing it, and to paste the probe output. The probe
+  here would have been
+  `echo dirname('/…/src/State/Promotion', 7), dirname('/…/src/State/Promotion', 8);`
+  and it settles the question in seconds.
+
+**Assert the value production uses, never an equivalent expression.** The Task 5
+test recomputed `dirname( ReflectionClass::getFileName(), 8 )` while production
+used `dirname( __DIR__, 8 )`. A class file path is one level deeper than
+`__DIR__`, so the two counts legitimately differ, and the test agreed with itself
+while disagreeing with production. The fix was a named seam —
+`GitRepository::default_root()` — following `SchemaValidator::default_schema_dir()`,
+which already existed in this codebase. When a test cannot reach the value, add
+the seam rather than recomputing it.
 
 ---
 

@@ -1292,8 +1292,8 @@ Shared behaviour in `AbstractBlockTemplateStrategy`:
 
 - `post_finalize_record_state()` returns `'absent'`; `defers_expected_hash()` returns `false`.
 - `theme_relative_path()` rejects a slug that does not match `/^[a-z0-9][a-z0-9_-]*$/`, so nothing can escape the theme directory.
-- `prepare( StateRecord $record, string $theme_root ): StagedPromotionEntry` creates a `PreparedFileWriter` for `$theme_root`, calls `stage()` with `theme_relative_path( $record->slug() )` and `$record->content()['markup']`, and returns that entry. It must not publish files itself. `PromotionPreparer`, not the template strategy, owns the all-record commit/discard decision.
-- `expected_post_reset_hash( StateRecord $record ): string` is read from the staged entry's `manifest_fields()['expectedPostResetHash']`, cached by canonical record key for the current prepare attempt. Calling it before `prepare()` is a hard error.
+- `stage( StateRecord $record, string $theme_root ): StagedPromotionEntry` creates a `PreparedFileWriter` for `$theme_root`, calls the writer's `stage()` with `theme_relative_path( $record->slug() )` and `$record->content()['markup']`, and returns that entry. It must not publish files itself. `PromotionPreparer`, not the template strategy, owns the all-record commit/discard decision. **This bullet said `prepare(…)` before the CORRECTION above; the inherited `prepare()` refuses.**
+- `expected_post_reset_hash( StateRecord $record ): string` is read from the staged entry's `manifest_fields()['expectedPostResetHash']`, cached by canonical record key for the current prepare attempt. Calling it before `stage()` is a hard error.
 - `resolve_current_hash( string $record_slug ): ?string` calls `get_block_template( get_stylesheet() . '//' . $record_slug, $this->post_type() )`, returns `null` when that is `null`, and otherwise `$gateway->hash_markup( $gateway->normalize_block_markup( (string) $template->content ) )`. The gateway strips the injected `theme` attribute on this side too, so it is comparable with `expected_post_reset_hash()`.
 - `capture_backup( StateRecord $record ): array` returns
   ```php
@@ -2733,6 +2733,8 @@ git commit -m "test: prove the template and part promotion workflow end to end"
 ---
 
 ### Task 17: The CLI surface — one result, one STDOUT writer
+
+**CARRIED FORWARD FROM TASK 7 — close this here.** `PromotionSubsystem::register()` currently reaches `Cli\PromotionCommands` through a STRING class name plus `class_exists()`, because the class did not exist when Task 7 shipped and the plan's literal text (`new PromotionCommands()`) fails PHPStan with `class.notFound`. The `defined( 'WP_CLI' ) && WP_CLI` guard does NOT protect it: PHPStan does not fold `defined()` to false. That workaround is correct for the intermediate commits and WRONG to keep — a string reference is invisible to static analysis, so a later rename would break the CLI silently. Once `src/Cli/PromotionCommands.php` exists in this task, **replace the string and the `class_exists()` check with a direct `use` and `new PromotionCommands()`**, keeping only the `WP_CLI` guard, and confirm PHPStan is clean. Also add `src/State/Promotion/PromotionSubsystem.php` to this task's owned-file list for that one edit.
 
 **Files:**
 - Create: `src/State/Promotion/PromotionCommandRunner.php`
