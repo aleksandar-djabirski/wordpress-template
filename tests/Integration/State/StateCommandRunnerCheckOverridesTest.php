@@ -93,6 +93,12 @@ final class StateCommandRunnerCheckOverridesTest extends IntegrationTestCase {
 
 	public function test_synced_patterns_and_navigation_stay_informational(): void {
 		$this->make_navigation( 'primary', '<!-- wp:navigation-link {"label":"Home"} /-->' );
+		$this->make_synced_pattern( 'callout', '<!-- wp:paragraph --><p>Pattern</p><!-- /wp:paragraph -->' );
+
+		$result = $this->runner()->check_overrides( array() );
+
+		self::assertStringContainsString( 'synced-patterns:callout (added, db-owned)', $result->stdout, 'Section 11.10 requires the synced-patterns report entry; a missing or broken wp_block provider must not pass.' );
+		self::assertSame( 0, $result->exit_code, 'Database-owned providers alone must never make check-overrides fail.' );
 
 		$report = ( new StateDiffer() )->diff_against_git( StateRegistry::resolve( null, false ) );
 

@@ -128,8 +128,9 @@ final class CheckOverridesAliasTest extends IntegrationTestCase {
 			$result = $this->wp_cli( 'agency', 'check-overrides' );
 
 			self::assertSame( 0, $result['exit_code'], 'The default run must never fail because a client edited a template. stderr: ' . $result['stderr'] );
-			self::assertStringContainsString( 'templates:page', $result['stdout'] );
-			self::assertStringContainsString( 'deprecated', $result['stderr'] );
+			self::assertStringContainsString( 'templates:page (changed, promotable)', $result['stdout'] );
+			self::assertStringContainsString( '1 record(s) differ from the Git baseline. Database overrides are expected under the block-theme editing model; this report is informational.', $result['stdout'] );
+			self::assertStringContainsString( 'check-overrides is deprecated. Use `wp agency state-diff` for the machine-readable report.', $result['stderr'] );
 		} finally {
 			$this->remove_template_override( $id );
 		}
@@ -139,7 +140,12 @@ final class CheckOverridesAliasTest extends IntegrationTestCase {
 		$id = $this->seed_template_override();
 
 		try {
-			self::assertSame( 1, $this->wp_cli( 'agency', 'check-overrides', '--fail-on-drift' )['exit_code'] );
+			$result = $this->wp_cli( 'agency', 'check-overrides', '--fail-on-drift' );
+
+			self::assertSame( 1, $result['exit_code'], '--fail-on-drift must turn drift into exit 1. stderr: ' . $result['stderr'] );
+			self::assertStringContainsString( '1 record(s) differ from the Git baseline (--fail-on-drift).', $result['stderr'], 'The drift failure must name its reason on STDERR; an unregistered command also exits 1, so the exit code alone cannot prove the flag works.' );
+			self::assertStringNotContainsString( 'templates:page', $result['stderr'], 'The report belongs on STDOUT; the drift failure must not leak report lines onto STDERR.' );
+			self::assertStringNotContainsString( 'check-overrides is deprecated', $result['stdout'], 'The deprecation notice belongs on STDERR; STDOUT must carry the report only.' );
 		} finally {
 			$this->remove_template_override( $id );
 		}
