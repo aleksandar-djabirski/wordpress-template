@@ -10,6 +10,28 @@
 
 ---
 
+## Execution order — corrected 2026-08-05
+
+```
+1 → 2 → 3 → 4 → 5 → 6 (scanner only) → 7 → 8 → 9 (resolver + the six providers) → 10 → 11 → 12 → 13
+```
+
+The task numbers run in sequence, but **Task 6's scope moved**. The unmodified plan had no valid order at all: Task 6 shipped `ReferenceResolver`, which reads `StateRegistry` from Task 8, while Task 8 consumes `ReferenceScanner` from Task 6. Task 6 now ships the pure scanner only and Task 9 ships `ReferenceResolver` plus `ReferenceScanner::scan()`. See the correction block at the head of Task 6.
+
+Seven plan defects were found and corrected before Task 1 started. Six came from a read-only `gpt-5.6-terra` high audit; the seventh (`CheckOverridesReportTest.php`) came from the orchestrator while verifying the sixth. Each correction is recorded inline at the place it applies, with the evidence that proves the original text was wrong:
+
+| # | Where | Defect |
+|---|---|---|
+| 1 | Task 8 test block | Two `content` assertions could not pass — `ContentState` first exists in Task 9. Moved to Task 9 Step 4. |
+| 2 | Task 6 ↔ Task 8 | Circular dependency; no valid task order existed. `ReferenceResolver` and `scan()` moved to Task 9. |
+| 3 | Global Constraints, file ownership | Claimed Task 3 appends its own `.env.example` entries. Task 3 lists and stages no such file; Task 1 already adds both HMAC settings. Task 1 is now the sole owner. |
+| 4 | Task 3 Step 3 | `Logger::redact()` needed an explicit, recorded exception to the "WordPress core and PHP only" rule. It is intra-layer and deptrac-clean. |
+| 5 | Task 13 Step 4 | Claimed `check_overrides()` "takes no arguments at all". False since Unit 1's `d0da3f3`. |
+| 6 | Task 13 Step 3 | A test claimed to drive "the real alias logic" never called the alias. Renamed to a runner test; a real WP-CLI test added as Step 3c. |
+| 7 | Task 13 Step 5 | Deleting the two drift helpers orphans `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php`, which tests nothing else. Now deleted with them under a recorded ownership transfer. |
+
+---
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
@@ -39,7 +61,7 @@ Every task's requirements implicitly include this section.
 
 - You own `web/app/mu-plugins/agency-platform/src/State/**` (export/diff half only), `src/Cli/StateCommands.php`, `resources/schemas/state-bundle-v1.json`, `composer.json`'s `require` block, `.gitignore`, `scripts/check-database-overrides`, and your own test files under `tests/Unit/AgencyPlatform/State/` and `tests/Integration/State/`.
 - **Coordinator ownership transfers (granted for this task):**
-  - `.env.example` — you own the entries for the environment variables *this* task introduces. Task 3 appends its own entries later, sequentially.
+  - `.env.example` — **Task 1 of this plan is the sole owner of every `AGENCY_*` state entry, including the two HMAC settings.** Task 1 Step 4 already adds `AGENCY_PROMOTION_HMAC_KEYS` and `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID`, and no later task in this plan lists or stages `.env.example`. (Orchestrator correction, 2026-08-05: this line previously said Task 3 appends its own entries later. Task 3's file list is `HmacSigner.php` plus its unit test, and its Step 5 `git add` stages neither `.env.example` nor anything else. Two owners for one file is exactly the §15 violation this section exists to prevent.)
   - `web/app/mu-plugins/agency-platform/src/Health/SanitizeSteps.php` — you own the docblock line that names `DatabaseOverrideCheck`.
   - `tests/Integration/Environment/EnvironmentSafetyTest.php` — you own the `DatabaseOverrideCheck` import, `@covers` tag, docblock sentence, and the `test_database_override_check_reports_a_clean_baseline_on_a_fresh_install()` method.
   Both of the last two are edited in the **same rebase-gated commit** as the class removal (Task 13). No compatibility adapter is kept.
@@ -1011,6 +1033,8 @@ Create `web/app/mu-plugins/agency-platform/src/State/HmacSigner.php` implementin
 - `canonicalize()` = `Normalizer::canonical_json( $this->strip_signature( $payload ) )`.
 - Never log or echo a key. If you add a diagnostic, pass it through `AgencyPlatform\Logging\Logger::redact()` first.
 
+  **Recorded deptrac exception (orchestrator, 2026-08-05).** `AgencyPlatform\Logging\Logger` is the ONLY class outside `src/State/` this plan permits any state file to reference, and it is permitted because it is intra-layer. `deptrac.yaml:56` declares `AgencyPlatform: []`, which forbids a dependency on another LAYER; a reference from `agency-platform/src/State/` to `agency-platform/src/Logging/` stays inside the `AgencyPlatform` layer and is not a violation. Verified against the file: `src/Logging/Logger.php:60` declares `public static function redact( array $context ): array`. This is the single stated exception to Global Constraints' "WordPress core and PHP only" rule for `src/State/`. Any other cross-directory reference is out of scope and must be reported before it is written.
+
 - [ ] **Step 4: Run the test to green**
 
 ```bash
@@ -1840,14 +1864,26 @@ git commit -m "feat(state): add the full state provider contract and promotion d
 
 ### Task 6: Reference scanner
 
+> **Scope correction (orchestrator, 2026-08-05).** This task ships the PURE
+> scanner only. `ReferenceResolver` and `ReferenceScanner::scan()` move to
+> Task 9. The reason is a real circular dependency in the unmodified plan:
+> `ReferenceResolver::resolve()` reads `StateRegistry::provider( … )`, and
+> `StateRegistry` is Task 8, which in turn consumes `ReferenceScanner` from
+> this task. Shipping `ReferenceResolver` here would reference a class that
+> does not exist yet, and PHPStan level 6 fails that at this task's own
+> `verify:fast` gate. Task 9 is where the resolver's integration test already
+> lives, and it is the first task where every referenced provider exists.
+>
+> The `ReferenceResolver` contract, the eleven reference keys, and the
+> resolution table stay documented BELOW because `scan_parsed()` must emit
+> those keys with `null` targets. Read them; do not create the class here.
+
 **Files:**
-- Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php`
-- Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php`
+- Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php` (without `scan()`)
 - Test: `tests/Unit/AgencyPlatform/State/ReferenceScannerTest.php`
-- Test (added in Task 9, once the navigation provider exists): `tests/Integration/State/ReferenceResolverTest.php`
 
 **Interfaces:**
-- Consumes: nothing beyond PHP.
+- Consumes: nothing beyond PHP. Every method this task ships is pure.
 - Produces:
 
 ```php
@@ -1866,8 +1902,12 @@ final class ReferenceScanner {
 	public const RESOLUTION_ENVIRONMENT  = 'environment-specific';
 	public const RESOLUTION_UNKNOWN      = 'unknown';
 
-	/** WordPress-coupled: parse_blocks(), scan_parsed(), then ReferenceResolver::resolve(). @return list<array<string, mixed>> */
-	public static function scan( string $markup, string $record_key ): array;
+	// NOT IN THIS TASK — Task 9 adds this method together with
+	// ReferenceResolver. Declaring it here would call a class that does not
+	// exist yet and PHPStan would fail this task's own verify:fast gate.
+	//
+	// /** WordPress-coupled: parse_blocks(), scan_parsed(), then ReferenceResolver::resolve(). @return list<array<string, mixed>> */
+	// public static function scan( string $markup, string $record_key ): array;
 
 	/** Pure. Emits unresolved-target references; the resolver fills the target fields. @param list<array<string, mixed>> $blocks @return list<array<string, mixed>> */
 	public static function scan_parsed( array $blocks, string $record_key ): array;
@@ -1883,6 +1923,10 @@ final class ReferenceScanner {
 }
 
 /**
+ * TASK 9 CREATES THIS CLASS, not Task 6. It is documented here because
+ * scan_parsed() must emit the three target keys below as null for the
+ * resolver to fill in later.
+ *
  * WordPress-coupled companion that turns a raw reference into a resolvable
  * one: it looks up the referenced record and records its canonical key, its
  * normalised content hash, and just enough identifying metadata for a human
@@ -2084,26 +2128,13 @@ ddev exec vendor/bin/phpunit --testsuite unit --filter ReferenceScannerTest
 
 Expected: FAIL — `Class "AgencyPlatform\State\ReferenceScanner" not found`.
 
-- [ ] **Step 3: Write `ReferenceScanner` and `ReferenceResolver`**
+- [ ] **Step 3: Write `ReferenceScanner`**
 
-Implement the Interfaces block, the matcher table, and the resolution table. `scan()` is three lines:
+Implement the Interfaces block and the matcher table. **Every method in this task is pure** — no WordPress function call, no `parse_blocks()`, no `get_post()`. Derive `provider` by splitting `$record_key` on the first `:`. `scan_parsed()` emits all eleven reference keys in the documented order and always sets `targetKey`, `targetHash`, and `targetIdentity` to `null`; Task 9's resolver fills them.
 
-```php
-	public static function scan( string $markup, string $record_key ): array {
-		return ReferenceResolver::resolve( self::scan_parsed( parse_blocks( $markup ), $record_key ) );
-	}
-```
+Do **not** create `ReferenceResolver.php` and do **not** add `scan()`. Both are Task 9. Task 9's Step 3a carries their full specification, including the recursion guard.
 
-Everything in `ReferenceScanner` except `scan()` is pure. Derive `provider` by splitting `$record_key` on the first `:`.
-
-`ReferenceResolver` is the only WordPress-coupled part. It must resolve `targetHash` through the owning provider (`StateRegistry::provider( 'navigation' )->record( $target_key )`), never by re-hashing raw `post_content`, so the hash matches the bundle byte for byte. Guard against recursion: `ReferenceResolver` must not itself trigger a reference scan — the provider's `record()` builds references for the target too, which would recurse. Break the cycle by giving providers a `record( string $key, bool $with_references = true )` parameter and passing `false` from the resolver. Record that parameter in `StateProvider::record()`'s signature:
-
-```php
-	/** Live single-record re-read; null when the record no longer exists.
-	 *  $with_references = false suppresses reference detection, which
-	 *  ReferenceResolver uses to break the scan -> resolve -> scan cycle. */
-	public function record( string $key, bool $with_references = true ): ?StateRecord;
-```
+`StateProvider::record()` already declares the `bool $with_references = true` parameter that breaks the resolver's cycle — Task 5 Step 1 puts it in the contract and Task 8's providers implement it. Nothing in this task changes that signature.
 
 - [ ] **Step 4: Run the test to green**
 
@@ -2118,9 +2149,8 @@ Expected: PASS.
 ```bash
 ddev composer verify:fast
 git add web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php \
-  web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php \
   tests/Unit/AgencyPlatform/State/ReferenceScannerTest.php
-git commit -m "feat(state): add the block-markup reference scanner and resolver"
+git commit -m "feat(state): add the pure block-markup reference scanner"
 ```
 
 ---
@@ -2649,11 +2679,12 @@ Create `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php`. It must n
 		// Task 8 ships only these three providers. Task 9 restores the full
 		// STRUCTURAL_SLUGS assertion after it registers the other five
 		// structural providers.
+		//
+		// Every `content` assertion also lives in Task 9, not here. The
+		// `content` provider is ContentState, which Task 9 creates, and
+		// resolve() validates a named slug against the REGISTERED providers,
+		// so `resolve( 'content', … )` is a hard error in Task 8 by design.
 		self::assertSame( array( 'global-styles', 'template-parts', 'templates' ), StateRegistry::resolve( null, false ) );
-	}
-
-	public function test_include_content_adds_the_content_provider(): void {
-		self::assertContains( 'content', StateRegistry::resolve( null, true ) );
 	}
 
 	public function test_the_default_set_never_contains_content(): void {
@@ -2662,10 +2693,6 @@ Create `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php`. It must n
 
 	public function test_an_explicit_list_narrows_the_export(): void {
 		self::assertSame( array( 'global-styles', 'templates' ), StateRegistry::resolve( 'templates, global-styles', false ) );
-	}
-
-	public function test_an_explicitly_named_content_provider_is_honoured_without_the_flag(): void {
-		self::assertSame( array( 'content' ), StateRegistry::resolve( 'content', false ) );
 	}
 
 	public function test_an_unknown_slug_is_a_hard_error_listing_the_valid_slugs(): void {
@@ -2832,14 +2859,16 @@ git commit -m "feat(state): add the provider registry and the git-backed provide
 - Create: `web/app/mu-plugins/agency-platform/src/State/Providers/FontLibraryState.php`
 - Create: `web/app/mu-plugins/agency-platform/src/State/Providers/MediaReferencesState.php`
 - Create: `web/app/mu-plugins/agency-platform/src/State/Providers/CustomCssState.php`
+- Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php` (moved here from Task 6 — see Step 3a)
+- Modify: `web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php` (add `scan()` only)
 - Modify: `web/app/mu-plugins/agency-platform/src/State/StateRegistry.php` (register the six)
-- Modify: `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php` (Task 8 Step 3's temporary assertion)
+- Modify: `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php` (Task 8 Step 3's temporary assertion, plus the two `content` cases)
 - Modify: `tests/Integration/State/ProviderRecordsTest.php`
 - Test: `tests/Integration/State/ReferenceResolverTest.php` (new — the navigation provider now exists, so targets are resolvable)
 
 **Interfaces:**
-- Consumes: everything from Task 8.
-- Produces: six more `StateProvider` implementations; no new public API.
+- Consumes: everything from Task 8, plus `ReferenceScanner` from Task 6.
+- Produces: six more `StateProvider` implementations, `ReferenceResolver`, and `ReferenceScanner::scan()`. No other new public API.
 
 **Provider specifications.** Five of the six are database-owned with no Git counterpart: `has_git_baseline()` returns `false` and `baseline_records()` returns `array()`. **`CustomCssState` is the exception** — see its row and the hard rules below.
 
@@ -2960,6 +2989,30 @@ Expected: FAIL — the six provider classes do not exist.
 
 Implement each to the table and hard rules above, then add all six to `StateRegistry`'s built-in map.
 
+- [ ] **Step 3a: Write `ReferenceResolver` and `ReferenceScanner::scan()`**
+
+Moved here from Task 6 by the orchestrator, because `ReferenceResolver` reads `StateRegistry` (Task 8) while Task 8 consumes `ReferenceScanner` (Task 6). This is the first task where every provider it can reach exists.
+
+Create `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php` to the contract, the eleven reference keys, and the resolution table documented in **Task 6's Interfaces block**. Then add the one missing method to `ReferenceScanner`, and nothing else in that file:
+
+```php
+	/** WordPress-coupled: parse_blocks(), scan_parsed(), then ReferenceResolver::resolve(). @return list<array<string, mixed>> */
+	public static function scan( string $markup, string $record_key ): array {
+		return ReferenceResolver::resolve( self::scan_parsed( parse_blocks( $markup ), $record_key ) );
+	}
+```
+
+`ReferenceResolver` is the only WordPress-coupled part. It must resolve `targetHash` through the owning provider (`StateRegistry::provider( 'navigation' )->record( $target_key )`), never by re-hashing raw `post_content`, so the hash matches the bundle byte for byte. Guard against recursion: `ReferenceResolver` must not itself trigger a reference scan — the provider's `record()` builds references for the target too, which would recurse. Break the cycle by passing `false` for the `bool $with_references` parameter that `StateProvider::record()` already declares (Task 5):
+
+```php
+	/** Live single-record re-read; null when the record no longer exists.
+	 *  $with_references = false suppresses reference detection, which
+	 *  ReferenceResolver uses to break the scan -> resolve -> scan cycle. */
+	public function record( string $key, bool $with_references = true ): ?StateRecord;
+```
+
+`test_resolving_a_reference_does_not_recurse_forever()` in Step 3b is the test that proves the guard works. It must be shown to fail for the right reason before the guard is added.
+
 - [ ] **Step 3b: Write the reference-resolver integration test**
 
 Create `tests/Integration/State/ReferenceResolverTest.php`. This is the test that proves Task 3 can enforce the §7.4 v1 navigation policy from a templates-only bundle:
@@ -3028,7 +3081,7 @@ Create `tests/Integration/State/ReferenceResolverTest.php`. This is the test tha
 
 Add `make_synced_pattern()` to the `SeedsStateFixtures` trait, and make every `make_*()` helper return the created post ID.
 
-- [ ] **Step 4: Restore the real registry assertion**
+- [ ] **Step 4: Restore the real registry assertion and add the two `content` cases**
 
 In `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php`, change Task 8 Step 3's temporary assertion back to:
 
@@ -3038,7 +3091,19 @@ In `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php`, change Task 8
 	}
 ```
 
-and delete the note in the test docblock about the temporary state.
+and delete the note in the test docblock about the temporary state, together with the comment inside this method about `content` belonging to Task 9.
+
+**Add the two `content` assertions here.** They were deliberately held back from Task 8 because `ContentState` does not exist until this task, and `resolve()` validates a named slug against the registered providers:
+
+```php
+	public function test_include_content_adds_the_content_provider(): void {
+		self::assertContains( 'content', StateRegistry::resolve( null, true ) );
+	}
+
+	public function test_an_explicitly_named_content_provider_is_honoured_without_the_flag(): void {
+		self::assertSame( array( 'content' ), StateRegistry::resolve( 'content', false ) );
+	}
+```
 
 - [ ] **Step 5: Run both suites to green**
 
@@ -3055,6 +3120,8 @@ Expected: PASS.
 ddev composer verify:fast
 git add web/app/mu-plugins/agency-platform/src/State/Providers/ \
   web/app/mu-plugins/agency-platform/src/State/StateRegistry.php \
+  web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php \
+  web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php \
   tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php \
   tests/Integration/State/SeedsStateFixtures.php \
   tests/Integration/State/ProviderRecordsTest.php \
@@ -4474,15 +4541,29 @@ git commit -m "feat(state): add the state-export and state-diff WP-CLI commands"
 
 **Proposal §15 ownership-table exception, recorded for this sequenced work only:** Unit 2 owns exactly one fully qualified `StateSubsystem` registration line in `Plugin.php`, after Task 1 merges and before Unit 3 adds its own separately sequenced registration. This plan records the exception; it does not edit `BLOCK_THEME_PROPOSAL.md` or the tracking file. No `use` import, reorder, or other `Plugin.php` change is allowed.
 
+**SECOND ownership transfer, decided and recorded by the orchestrator on 2026-08-05 — `AgencyCommands.php` and its unit test.**
+
+The tracking file grants Unit 1 "all Release 1 behavior in … `src/Cli/AgencyCommands.php`" and separately grants Unit 2 "deletion of `DatabaseOverrideCheck.php`". Those two grants cannot both hold. `AgencyCommands.php:7` imports `DatabaseOverrideCheck` and line 53 constructs it, so deleting the class without editing that file makes every `wp agency check-overrides` invocation fatal. The plan needed an explicit decision rather than an implied one.
+
+**The decision: transfer, do not defer.** Unit 2 owns, in the single commit that deletes the class:
+
+1. `AgencyCommands::check_overrides()` — its body, its docblock, and the two `use` lines. The signature is already correct and does not change.
+2. `AgencyCommands::drift_is_failure()` and `AgencyCommands::drift_summary_lines()` — deleted. Both are pure helpers over the `DatabaseOverrideCheck` report shape (`overrides` / `expected` / `synced_patterns`), which nothing produces once the class is gone.
+3. `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php` — deleted. **This file is an orchestrator finding, not part of the original audit.** All four of its tests call only those two helpers, and its `report()` fixture hand-builds the same dead shape. Leaving it would keep a passing unit test for a report nothing produces; deleting the helpers without it makes the unit suite fatal on `Call to undefined method`.
+
+Nothing else in `AgencyCommands.php` may change: `sanitize()`, `verify_env()`, and `register()` are untouched. Deferring the alias rewrite was rejected because it would ship a knowingly fatal command, and deferring the deletion was rejected because §11.10's drift reporting then has two competing implementations across a unit boundary. Unit 1 is merged, so this transfer creates no live conflict. The orchestrator records it in the tracking file's shared-file ownership section in the same wave as this correction.
+
 **Files:**
 - Modify: `web/app/mu-plugins/agency-platform/src/Plugin.php` (**one** array line)
-- Modify: `web/app/mu-plugins/agency-platform/src/Cli/AgencyCommands.php` (`check_overrides()` only)
+- Modify: `web/app/mu-plugins/agency-platform/src/Cli/AgencyCommands.php` (`check_overrides()`, the two drift helpers, and the imports — ownership transferred above)
 - Modify: `web/app/mu-plugins/agency-platform/src/Health/SanitizeSteps.php` (one docblock line — ownership transferred by the coordinator)
 - Modify: `tests/Integration/Environment/EnvironmentSafetyTest.php` (ownership transferred by the coordinator)
 - Modify: `scripts/check-database-overrides` (header comment only)
 - Delete: `web/app/mu-plugins/agency-platform/src/Health/DatabaseOverrideCheck.php`
 - Delete: `tests/Unit/AgencyPlatform/DatabaseOverrideClassifyTest.php`
-- Test: `tests/Integration/State/CheckOverridesAliasTest.php` (new)
+- Delete: `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php` (ownership transferred above)
+- Test: `tests/Integration/State/StateCommandRunnerCheckOverridesTest.php` (new — the renamed runner test, Step 3)
+- Test: `tests/Integration/State/CheckOverridesAliasTest.php` (new — the real `wp agency check-overrides` test, Step 3c)
 
 **Verified inventory of every `DatabaseOverrideCheck` reference in the repository** (checked at planning time — re-run the grep in Step 5 to confirm nothing new appeared):
 
@@ -4490,7 +4571,7 @@ git commit -m "feat(state): add the state-export and state-diff WP-CLI commands"
 |---|---|---|
 | `src/Health/DatabaseOverrideCheck.php` | the class | delete |
 | `src/Cli/AgencyCommands.php:7` | `use` import | remove |
-| `src/Cli/AgencyCommands.php:34` | `new DatabaseOverrideCheck()` | replace with the runner |
+| `src/Cli/AgencyCommands.php:53` | `new DatabaseOverrideCheck()` | replace with the runner (**line 34 at planning time; Unit 1's `d0da3f3` moved it to 53**) |
 | `src/Health/SanitizeSteps.php:24` | docblock prose only | reword |
 | `tests/Unit/AgencyPlatform/DatabaseOverrideClassifyTest.php` | whole file | delete |
 | `tests/Integration/Environment/EnvironmentSafetyTest.php:7,16,26,139` | docblock, `use`, `@covers`, one test method | rewrite the method against `StateDiffer` |
@@ -4533,9 +4614,13 @@ Add **exactly one line** to the `$providers` array, fully qualified. Do **not** 
 
 `git diff web/app/mu-plugins/agency-platform/src/Plugin.php` must show exactly one added line and zero removed lines. If it shows more, undo and try again.
 
-- [ ] **Step 3: Write the failing alias test**
+- [ ] **Step 3: Write the failing runner test**
 
-Create `tests/Integration/State/CheckOverridesAliasTest.php`. Because Task 12 moved every command body into `StateCommandRunner`, this test drives the **real** alias logic — exit codes, streams, and all — without WP-CLI being loaded. Its `@covers` tag therefore names `StateCommandRunner`, and the assertions are about the command contract, not just a report array:
+> **Orchestrator correction, 2026-08-05 — this test was misnamed and its claim was false.** The original step called this file `CheckOverridesAliasTest.php` and said it "drives the **real** alias logic — exit codes, streams, and all". It does not. Every assertion below calls `$this->runner()->check_overrides( … )`, which is `StateCommandRunner`. It never calls `AgencyCommands::check_overrides()`, never registers a WP-CLI command, and never reaches `CliOutput::emit()`. An alias that was deleted, misspelled, wired to the wrong runner method, or fatal on a missing import would pass all five of these tests. That is the same silent-pass failure class as Unit 1's `pages` pattern category and its wrong-docroot install proof.
+>
+> The file is therefore **renamed** to `tests/Integration/State/StateCommandRunnerCheckOverridesTest.php` and keeps exactly the assertions below. It is a good runner test; it is simply not an alias test. Step 3c adds the real one. Its `@covers` tag names `StateCommandRunner`, which was already true.
+
+Create `tests/Integration/State/StateCommandRunnerCheckOverridesTest.php`. Because Task 12 moved every command body into `StateCommandRunner`, this test pins the runner's contract — exit codes and streams — without WP-CLI being loaded. The assertions are about the command contract, not just a report array:
 
 ```php
 	public function test_an_override_alone_does_not_fail_the_command(): void {
@@ -4624,9 +4709,47 @@ final class CheckOverridesAliasTest extends IntegrationTestCase {
 
 `make_template()`, `make_navigation()`, and `entry()` come from the `Tests\Integration\State\SeedsStateFixtures` trait created in Task 8 Step 5.
 
+- [ ] **Step 3c: Write the REAL alias test — the one that fails when the alias is broken**
+
+Added by the orchestrator on 2026-08-05. Step 3 pins the runner. Nothing above it executes the command a human actually types, so nothing above it can tell you that `wp agency check-overrides` still works. This step closes that hole and it is a required gate, not an optional extra.
+
+Create `tests/Integration/State/CheckOverridesAliasTest.php`. It shells out to real WP-CLI inside DDEV, so it exercises `AgencyCommands::register()`, the `WP_CLI::add_command` registration, the `check_overrides()` body, `CliOutput::emit()`, and the process exit code as one path:
+
+```php
+	/**
+	 * @return array{exit_code: int, stdout: string, stderr: string}
+	 */
+	private function wp_cli( string ...$arguments ): array {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions -- CLI-only test harness; proc_open is the only way to observe a real WP-CLI exit code and both streams separately.
+		…
+	}
+
+	public function test_the_registered_command_runs_and_reports_without_failing(): void {
+		$this->make_template( 'page', '<!-- wp:paragraph --><p>Client edit</p><!-- /wp:paragraph -->' );
+
+		$result = $this->wp_cli( 'agency', 'check-overrides' );
+
+		self::assertSame( 0, $result['exit_code'], 'The default run must never fail because a client edited a template.' );
+		self::assertStringContainsString( 'templates:page', $result['stdout'] );
+		self::assertStringContainsString( 'deprecated', $result['stderr'] );
+	}
+
+	public function test_the_registered_command_honours_fail_on_drift(): void {
+		$this->make_template( 'page', '<!-- wp:paragraph --><p>Client edit</p><!-- /wp:paragraph -->' );
+
+		self::assertSame( 1, $this->wp_cli( 'agency', 'check-overrides', '--fail-on-drift' )['exit_code'] );
+	}
+```
+
+**Both flag cases are required.** A single case would pass against a command wired to ignore `$assoc_args` entirely.
+
+**Prove it is not vacuous before you commit it.** Comment out the `\WP_CLI::add_command( 'agency check-overrides', … )` line, run this file, and record the exact failure text in your report. Then restore the line and confirm it passes. A test that cannot be shown to fail for the right reason is not evidence. If WP-CLI is unreachable from the integration suite, that is a FAILED gate: assert the failure directly and stop with evidence. Do not convert it to a PHPUnit skip — Global Constraints and the tracking file both forbid turning a required case into a skip.
+
 - [ ] **Step 4: Rewire `check_overrides()`**
 
-**The signature must change.** The current method is `public static function check_overrides(): void` and takes no arguments at all, so it cannot read `--fail-on-drift`. WP-CLI passes positional arguments first and the flag map second, exactly as `sanitize()` in the same file already declares. Replace the signature with:
+**The signature is already correct on this branch; only the BODY changes.** (Orchestrator correction, 2026-08-05. This step previously claimed the method "takes no arguments at all". That was true when the plan was written and is false on `feat/block-theme-fse-migration`: Unit 1's Task 11 shipped `d0da3f3`, which gave `check_overrides()` the signature below at `AgencyCommands.php:52`, added the `--fail-on-drift` flag, and added the pure helpers `drift_is_failure()` at line 86 and `drift_summary_lines()` at line 94. Verify with `git show HEAD:web/app/mu-plugins/agency-platform/src/Cli/AgencyCommands.php` before you start; do not "fix" a signature that is already right.)
+
+Keep the signature and the `phpcs:ignore` line exactly as they are. Replace the method body with one line:
 
 ```php
 	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed -- $args is required by the WP-CLI command signature (positional args precede $assoc_args); this command takes no positional arguments.
@@ -4634,6 +4757,8 @@ final class CheckOverridesAliasTest extends IntegrationTestCase {
 		CliOutput::emit( ( new StateCommandRunner() )->check_overrides( $assoc_args ) );
 	}
 ```
+
+`drift_is_failure()` and `drift_summary_lines()` exist only to serve the old `DatabaseOverrideCheck` report shape, which this task deletes. Delete both, and delete `tests/Unit/AgencyPlatform/CheckOverridesReportTest.php` with them — all four of its tests call only those two helpers. Run `grep -rn "drift_is_failure\|drift_summary_lines" --include=*.php .` first and confirm the only remaining hits are the two definitions and that one test file. If anything else appears, stop and report it instead of widening the deletion.
 
 Flag parsing lives in `StateCommandRunner::check_overrides()` and is exactly `$fail_on_drift = ! empty( $assoc_args['fail-on-drift'] );` — WP-CLI normalises `--fail-on-drift` to the key `fail-on-drift`.
 
@@ -4682,9 +4807,13 @@ In `tests/Integration/Environment/EnvironmentSafetyTest.php`, make four edits an
 
 ```bash
 git rm web/app/mu-plugins/agency-platform/src/Health/DatabaseOverrideCheck.php \
-  tests/Unit/AgencyPlatform/DatabaseOverrideClassifyTest.php
+  tests/Unit/AgencyPlatform/DatabaseOverrideClassifyTest.php \
+  tests/Unit/AgencyPlatform/CheckOverridesReportTest.php
 ddev exec bash -c 'rg -n --glob "*.php" "DatabaseOverrideCheck" web tests scripts; status=$?; if [ "$status" -eq 0 ]; then exit 1; fi; if [ "$status" -eq 1 ]; then exit 0; fi; exit "$status"'
+ddev exec bash -c 'rg -n --glob "*.php" "drift_is_failure|drift_summary_lines" web tests scripts; status=$?; if [ "$status" -eq 0 ]; then exit 1; fi; if [ "$status" -eq 1 ]; then exit 0; fi; exit "$status"'
 ```
+
+`CheckOverridesReportTest.php` is deleted here under the ownership transfer recorded at the top of this task: it tests only the two drift helpers Step 4 removes, over the report shape this step deletes.
 
 Expected: `rg` returns no matches and the DDEV command exits `0`, because Step 4 and Step 4b removed the four remaining references. Any match makes the command fail. Inspect the reported file; if it is not listed in this task's inventory table, stop and report it rather than editing that file.
 
@@ -4758,6 +4887,7 @@ git add web/app/mu-plugins/agency-platform/src/Plugin.php \
   web/app/mu-plugins/agency-platform/src/Health/SanitizeSteps.php \
   tests/Integration/Environment/EnvironmentSafetyTest.php \
   scripts/check-database-overrides \
+  tests/Integration/State/StateCommandRunnerCheckOverridesTest.php \
   tests/Integration/State/CheckOverridesAliasTest.php
 ddev composer verify:fast
 git commit -m "feat(state): wire the state subsystem and rebuild check-overrides on the differ"
