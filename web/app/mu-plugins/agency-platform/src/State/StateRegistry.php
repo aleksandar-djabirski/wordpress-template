@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace AgencyPlatform\State;
 
+use AgencyPlatform\State\Providers\ContentState;
+use AgencyPlatform\State\Providers\CustomCssState;
+use AgencyPlatform\State\Providers\FontLibraryState;
 use AgencyPlatform\State\Providers\GlobalStylesState;
+use AgencyPlatform\State\Providers\MediaReferencesState;
+use AgencyPlatform\State\Providers\NavigationState;
+use AgencyPlatform\State\Providers\SyncedPatternsState;
 use AgencyPlatform\State\Providers\TemplatePartsState;
 use AgencyPlatform\State\Providers\TemplatesState;
 
@@ -21,11 +27,11 @@ use AgencyPlatform\State\Providers\TemplatesState;
  * resolve() turns the raw --providers option into the deterministic slug
  * list the exporter runs. The default set is derived from the REGISTERED
  * providers, never from STRUCTURAL_SLUGS: that constant documents the full
- * eight-slug structural set, while the registry ships a subset until later
- * tasks register the rest — so the constant must never drive resolution or
- * the registry would silently export providers that do not exist. An
- * explicitly named provider always wins: naming a content provider includes
- * it even without --include-content.
+ * eight-slug structural set, and the registry now ships all of them — but
+ * the constant must never drive resolution, or a filter-narrowed registry
+ * would silently export providers that do not exist. An explicitly named
+ * provider always wins: naming a content provider includes it even without
+ * --include-content.
  */
 final class StateRegistry {
 
@@ -62,9 +68,15 @@ final class StateRegistry {
 		}
 
 		$builtin = array(
-			'global-styles'  => new GlobalStylesState(),
-			'template-parts' => new TemplatePartsState(),
-			'templates'      => new TemplatesState(),
+			'custom-css'       => new CustomCssState(),
+			'content'          => new ContentState(),
+			'fonts'            => new FontLibraryState(),
+			'global-styles'    => new GlobalStylesState(),
+			'media-references' => new MediaReferencesState(),
+			'navigation'       => new NavigationState(),
+			'synced-patterns'  => new SyncedPatternsState(),
+			'template-parts'   => new TemplatePartsState(),
+			'templates'        => new TemplatesState(),
 		);
 
 		$filtered = apply_filters( self::FILTER, $builtin );

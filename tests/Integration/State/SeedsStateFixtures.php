@@ -31,6 +31,10 @@ trait SeedsStateFixtures {
 		return $this->entry( 'wp_navigation', $slug, $markup, $status );
 	}
 
+	protected function make_synced_pattern( string $slug, string $markup, string $status = 'publish' ): int {
+		return $this->entry( 'wp_block', $slug, $markup, $status );
+	}
+
 	protected function make_global_styles( string $json, string $status = 'publish' ): int {
 		return $this->entry( 'wp_global_styles', get_stylesheet(), $json, $status );
 	}

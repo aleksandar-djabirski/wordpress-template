@@ -184,7 +184,7 @@ final class TemplatePartsState extends BaseStateProvider {
 			$post->post_status,
 			$post->post_modified_gmt,
 			Normalizer::normalize_content( array( 'markup' => Normalizer::normalize_block_markup( $post->post_content ) ) ),
-			ReferenceScanner::scan_parsed( parse_blocks( $post->post_content ), $key ),
+			ReferenceScanner::scan( $post->post_content, $key ),
 			$this->ownership(),
 			$this->promotion()
 		);

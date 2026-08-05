@@ -42,17 +42,24 @@ abstract class BaseStateProvider implements StateProvider {
 	}
 
 	/**
-	 * §7.1 "Dependency/reference detection". The base default detects
-	 * nothing: markup-bearing providers (templates, template parts,
-	 * navigation, synced patterns) override this once ReferenceScanner
-	 * ships, and content without a markup key can never reference another
-	 * record.
+	 * §7.1 "Dependency/reference detection". The base default scans a
+	 * record's markup through the shared scanner, so every markup-bearing
+	 * provider that does not override this method — navigation, synced
+	 * patterns, content — resolves its references the same way. Content
+	 * without a markup key can never reference another record. Restored in
+	 * Task 9: Task 5 was forced to ship `return array();` because
+	 * ReferenceScanner did not exist, and an empty reference list is a
+	 * silent, schema-valid, correctly-hashed WRONG answer.
 	 *
 	 * @param array<string, mixed> $content
 	 * @return list<array<string, mixed>>
 	 */
 	public function detect_references( array $content, string $record_key ): array {
-		return array();
+		if ( ! isset( $content['markup'] ) || ! is_string( $content['markup'] ) || '' === $content['markup'] ) {
+			return array();
+		}
+
+		return ReferenceScanner::scan( $content['markup'], $record_key );
 	}
 
 	/**

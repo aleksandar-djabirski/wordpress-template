@@ -69,6 +69,16 @@ final class ReferenceScanner {
 	}
 
 	/**
+	 * WordPress-coupled: parse_blocks(), scan_parsed(), then
+	 * ReferenceResolver::resolve() fills the three target fields.
+	 *
+	 * @return list<array<string, mixed>>
+	 */
+	public static function scan( string $markup, string $record_key ): array {
+		return ReferenceResolver::resolve( self::scan_parsed( parse_blocks( $markup ), $record_key ) );
+	}
+
+	/**
 	 * A reference is unresolved until ReferenceResolver has filled its three
 	 * target fields; only a resolved binding can ever satisfy this.
 	 *

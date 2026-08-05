@@ -6,20 +6,14 @@
  * deterministic, sorted, de-duplicated slug list the exporter runs.
  *
  * This test must not touch the database, so it exercises resolve() only —
- * the three providers' constructors are side-effect free by contract.
+ * every provider constructor is side-effect free by contract.
  *
- * Task 8 ships only the three Git-backed providers. The default-set test
- * therefore asserts them in canonical ascending order —
- * array( 'global-styles', 'template-parts', 'templates' ) — and Task 9
- * restores the full StateRegistry::STRUCTURAL_SLUGS assertion after it
- * registers the other five structural providers. Every `content` assertion
- * also lives in Task 9, not here: the `content` provider is ContentState,
- * which Task 9 creates, and resolve() validates a named slug against the
- * REGISTERED providers, so resolve( 'content', … ) is a hard error in Task
- * 8 by design. The default set itself is derived from the REGISTERED
- * providers, never from STRUCTURAL_SLUGS — that constant names all eight
- * slugs while this task registers three, so reading the constant here would
- * make the test pass by accident and the registry wrong.
+ * With all eight structural providers registered, the default set IS
+ * StateRegistry::STRUCTURAL_SLUGS. The constant never drives resolution,
+ * though — the set is derived from the REGISTERED providers, so the two can
+ * only coincide while the registry is complete. `content` is the one
+ * provider resolve() excludes from the default set: it is gated behind
+ * --include-content unless named explicitly.
  *
  * @package Tests\Unit
  */
@@ -46,7 +40,15 @@ final class StateRegistryResolveTest extends TestCase {
 	}
 
 	public function test_the_default_set_is_the_structural_providers(): void {
-		self::assertSame( array( 'global-styles', 'template-parts', 'templates' ), StateRegistry::resolve( null, false ) );
+		self::assertSame( StateRegistry::STRUCTURAL_SLUGS, StateRegistry::resolve( null, false ) );
+	}
+
+	public function test_include_content_adds_the_content_provider(): void {
+		self::assertContains( 'content', StateRegistry::resolve( null, true ) );
+	}
+
+	public function test_an_explicitly_named_content_provider_is_honoured_without_the_flag(): void {
+		self::assertSame( array( 'content' ), StateRegistry::resolve( 'content', false ) );
 	}
 
 	public function test_the_default_set_never_contains_content(): void {

@@ -17,7 +17,12 @@ namespace Tests\Integration\State;
 
 use AgencyPlatform\State\Ownership;
 use AgencyPlatform\State\PromotionPolicy;
+use AgencyPlatform\State\Providers\ContentState;
+use AgencyPlatform\State\Providers\CustomCssState;
 use AgencyPlatform\State\Providers\GlobalStylesState;
+use AgencyPlatform\State\Providers\MediaReferencesState;
+use AgencyPlatform\State\Providers\NavigationState;
+use AgencyPlatform\State\Providers\SyncedPatternsState;
 use AgencyPlatform\State\Providers\TemplatePartsState;
 use AgencyPlatform\State\Providers\TemplatesState;
 use AgencyPlatform\State\ReferenceScanner;
@@ -27,6 +32,12 @@ use Tests\Integration\IntegrationTestCase;
  * @covers \AgencyPlatform\State\Providers\TemplatesState
  * @covers \AgencyPlatform\State\Providers\TemplatePartsState
  * @covers \AgencyPlatform\State\Providers\GlobalStylesState
+ * @covers \AgencyPlatform\State\Providers\NavigationState
+ * @covers \AgencyPlatform\State\Providers\SyncedPatternsState
+ * @covers \AgencyPlatform\State\Providers\ContentState
+ * @covers \AgencyPlatform\State\Providers\FontLibraryState
+ * @covers \AgencyPlatform\State\Providers\MediaReferencesState
+ * @covers \AgencyPlatform\State\Providers\CustomCssState
  */
 final class ProviderRecordsTest extends IntegrationTestCase {
 
@@ -151,5 +162,97 @@ final class ProviderRecordsTest extends IntegrationTestCase {
 		$this->make_template( 'page', '<!-- wp:paragraph --><p>Ours</p><!-- /wp:paragraph -->' );
 
 		self::assertSame( array( 'templates:page' ), array_map( static fn ( $record ) => $record->key(), ( new TemplatesState() )->records() ) );
+	}
+
+	public function test_navigation_is_database_owned_and_never_promoted(): void {
+		$this->make_navigation( 'primary', '<!-- wp:navigation-link {"label":"Home"} /-->' );
+
+		$record = ( new NavigationState() )->records()[0];
+
+		self::assertSame( 'navigation:primary', $record->key() );
+		self::assertSame( Ownership::DATABASE, $record->ownership() );
+		self::assertSame( PromotionPolicy::EXPORT_AND_DIFF, $record->promotion() );
+		self::assertFalse( ( new NavigationState() )->has_git_baseline() );
+	}
+
+	public function test_content_records_carry_no_password_and_no_email(): void {
+		$page_id = self::factory()->post->create(
+			array(
+				'post_type'     => 'page',
+				'post_title'    => 'Protected',
+				'post_password' => 'super-secret-password',
+			)
+		);
+
+		$record = ( new ContentState() )->record( 'content:page-' . $page_id );
+
+		self::assertTrue( $record->content()['hasPassword'] );
+		self::assertStringNotContainsString( 'super-secret-password', wp_json_encode( $record->to_array() ) );
+		self::assertArrayNotHasKey( 'postPassword', $record->content() );
+	}
+
+	public function test_media_references_are_derived_from_template_markup(): void {
+		$attachment_id = self::factory()->attachment->create_object(
+			array(
+				'file'           => '2026/08/hero.jpg',
+				'post_mime_type' => 'image/jpeg',
+				'post_title'     => 'Hero',
+			)
+		);
+		wp_update_attachment_metadata(
+			$attachment_id,
+			array(
+				'file'   => '2026/08/hero.jpg',
+				'width'  => 1440,
+				'height' => 900,
+			)
+		);
+
+		$this->make_template( 'media', sprintf( '<!-- wp:image {"id":%d} /-->', $attachment_id ) );
+
+		$records = ( new MediaReferencesState() )->records();
+
+		self::assertSame( 'media-references:attachment-' . $attachment_id, $records[0]->key() );
+		self::assertArrayHasKey( 'mimeType', $records[0]->content() );
+		self::assertArrayNotHasKey( 'bytes', $records[0]->content() );
+	}
+
+	public function test_custom_css_is_detected_in_global_styles_and_in_the_custom_css_post(): void {
+		$this->make_global_styles( '{"version":3,"styles":{"css":"body{color:red}"}}' );
+		wp_update_custom_css_post( '.legacy { color: blue; }' );
+
+		$records = ( new CustomCssState() )->records();
+		$by_key  = array_combine( array_map( static fn( $record ) => $record->key(), $records ), $records );
+
+		self::assertStringContainsString( 'body{color:red}', $by_key['custom-css:global-styles']->content()['css'] );
+		self::assertStringContainsString( '.legacy', $by_key['custom-css:custom-css-post']->content()['css'] );
+		self::assertSame( PromotionPolicy::REFUSE, $by_key['custom-css:global-styles']->promotion() );
+	}
+
+	public function test_custom_css_records_exist_even_when_no_css_is_set(): void {
+		$records = ( new CustomCssState() )->records();
+
+		self::assertCount( 2, $records, 'Both custom-CSS records are always emitted so the record set stays deterministic.' );
+		self::assertSame( '', $records[0]->content()['css'] );
+	}
+
+	public function test_no_custom_css_matches_the_no_css_git_baseline(): void {
+		$provider = new CustomCssState();
+
+		self::assertTrue( $provider->has_git_baseline(), 'Git owns the theme stylesheets; "no Additional CSS" IS the baseline.' );
+		self::assertSame(
+			array_map( static fn ( $record ) => $record->content_hash(), $provider->baseline_records() ),
+			array_map( static fn ( $record ) => $record->content_hash(), $provider->records() ),
+			'An untouched site must produce no custom-css drift at all.'
+		);
+	}
+
+	public function test_the_base_detect_references_default_scans_markup_for_references(): void {
+		$navigation_id = $this->make_navigation( 'primary', '<!-- wp:navigation-link {"label":"Home"} /-->' );
+		$this->make_synced_pattern( 'hero', sprintf( '<!-- wp:navigation {"ref":%d} /-->', $navigation_id ) );
+
+		$references = ( new SyncedPatternsState() )->record( 'synced-patterns:hero' )->references();
+
+		self::assertNotEmpty( $references, 'The base detect_references() default must scan markup: an empty list means the Task 5 return-array() landmine is still in place.' );
 	}
 }
