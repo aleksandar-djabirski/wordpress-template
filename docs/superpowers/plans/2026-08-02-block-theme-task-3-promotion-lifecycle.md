@@ -834,7 +834,21 @@ public function load( string $path_or_dash ): PromotionManifest {
 
 `render()`: `$data = $manifest->to_array()`, `unset( $data['hmac'], $data['hmacKeyId'] )`, `sign_manifest()`, merge the returned pair back in, `validate_manifest_schema()` on the signed document (catches a schema break introduced by this code), then `$this->gateway->canonical_json_document( $data )` — Task 2's canonical encoder gives deterministic bytes plus exactly one trailing LF.
 
-`write()`: `wp_mkdir_p( dirname( $path ) )`, write `render()`'s output to `$path . '.' . wp_generate_uuid4() . '.tmp'` in the same directory, `fflush()`, `fclose()`, `chmod( $tmp, 0600 )`, `rename( $tmp, $path )`. On any failure `unlink()` the temp file and throw `PromotionException::hard()`. Every native call carries the approved `phpcs:ignore`. **`write()` rejects `-` with `PromotionException::hard()`; the command layer decides whether a document goes to STDOUT.**
+**CORRECTION (orchestrator, Unit 3A) — `write()` MUST go through the shared web-root guard.**
+
+As originally written this step took an operator-supplied `$path` and wrote to it with no containment check. That is a direct recurrence of Unit 2's twenty-third defect, the CRITICAL one its whole-unit review found: a second write path that bypassed the guard let customer state be written into the public web root, where everything is served over HTTP. A signed promotion manifest carries the target site UUID, every prepared file path and every content hash, so it must never land under `web/`.
+
+There is exactly ONE implementation of that rule and this task calls it rather than writing a second copy — two implementations of one security rule drifting apart is how the original defect arose:
+
+```php
+public static function StateDirectory::resolve_output( string $path, string $setting ): string;
+```
+
+It normalises backslashes, resolves a relative path against the repository root, collapses `.` and `..` lexically, resolves symlinks in existing components, and rejects anything landing inside `<repo root>/web`. **It returns the canonical path the caller must actually write**, so the guard and the write can never disagree. It is confirmed usable inside the DDEV container: `GitBaseline::repo_root()` reads `AGENCY_REPO_ROOT` or walks up from `ABSPATH` looking for `web/` plus `composer.json`, and never shells out to git.
+
+`write()`: first `$resolved = StateDirectory::resolve_output( $path, '--manifest' )`, wrapped so a `StateException` is rethrown through `PromotionException::from_state_exception()`. Then `wp_mkdir_p( dirname( $resolved ) )`, write `render()`'s output to `$resolved . '.' . wp_generate_uuid4() . '.tmp'` in the same directory, `fflush()`, `fclose()`, `chmod( $tmp, 0600 )`, `rename( $tmp, $resolved )`. **Every subsequent operation uses `$resolved`, never the raw `$path`.** On any failure `unlink()` the temp file and throw `PromotionException::hard()`. Every native call carries the approved `phpcs:ignore`. **`write()` rejects `-` with `PromotionException::hard()`; the command layer decides whether a document goes to STDOUT.** `write_canonical()` routes through `write()` so there is still only one write path.
+
+The guard must be proven BY ATTACK, not by reading the diff — that is how Unit 2 verified the original fix. `ManifestStoreTest` adds cases for an absolute path inside the web root, a relative path inside the web root, a `..` traversal that lands in the web root, a path nested deep under `web/app/uploads/`, and a legitimate `var/agency-state/` path that still writes. Each refusal asserts BOTH that it throws AND that `false === file_exists( $path )` — a test that only asserted the throw would pass even if the file had been written first.
 
 `canonical_path()` returns `$this->gateway->state_dir() . '/promotions/' . $promotion_id . '.json'`. `write_canonical()` creates that directory with `wp_mkdir_p()` and `chmod( $dir, 0700 )`. `load_canonical()` throws `PromotionException::hard( 'No finalized promotion found for <id>. Run --finalize on this host first.' )` when the file is absent.
 
