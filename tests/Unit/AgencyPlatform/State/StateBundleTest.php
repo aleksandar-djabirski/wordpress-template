@@ -108,15 +108,67 @@ final class StateBundleTest extends TestCase {
 		);
 	}
 
-	public function test_records_are_unreadable_until_the_signature_is_verified(): void {
+	public function test_no_content_accessor_answers_until_the_signature_is_verified(): void {
 		$bundle = StateBundle::from_array( $this->signed_document() );
 
-		self::assertFalse( $bundle->is_verified() );
+		self::assertFalse( $bundle->is_verified(), 'is_verified() must answer before verification: it is the only ungated method.' );
 
-		$this->expectException( StateException::class );
-		$this->expectExceptionMessageMatches( '/not been verified/' );
+		$accessors = array(
+			'to_array'          => static function ( StateBundle $bundle ): void {
+				$bundle->to_array();
+			},
+			'schema_version'    => static function ( StateBundle $bundle ): void {
+				$bundle->schema_version();
+			},
+			'export_id'         => static function ( StateBundle $bundle ): void {
+				$bundle->export_id();
+			},
+			'exported_at_utc'   => static function ( StateBundle $bundle ): void {
+				$bundle->exported_at_utc();
+			},
+			'site_uuid'         => static function ( StateBundle $bundle ): void {
+				$bundle->site_uuid();
+			},
+			'site_url'          => static function ( StateBundle $bundle ): void {
+				$bundle->site_url();
+			},
+			'environment'       => static function ( StateBundle $bundle ): void {
+				$bundle->environment();
+			},
+			'wordpress_version' => static function ( StateBundle $bundle ): void {
+				$bundle->wordpress_version();
+			},
+			'active_theme'      => static function ( StateBundle $bundle ): void {
+				$bundle->active_theme();
+			},
+			'state_hash'        => static function ( StateBundle $bundle ): void {
+				$bundle->state_hash();
+			},
+			'provider_slugs'    => static function ( StateBundle $bundle ): void {
+				$bundle->provider_slugs();
+			},
+			'provider_meta'     => static function ( StateBundle $bundle ): void {
+				$bundle->provider_meta( 'templates' );
+			},
+			'records'           => static function ( StateBundle $bundle ): void {
+				$bundle->records( 'templates' );
+			},
+			'record'            => static function ( StateBundle $bundle ): void {
+				$bundle->record( 'templates:page' );
+			},
+		);
 
-		$bundle->records( 'templates' );
+		foreach ( $accessors as $name => $invoke ) {
+			try {
+				$invoke( $bundle );
+			} catch ( StateException $exception ) {
+				self::assertSame( StateException::EXIT_TAMPER, $exception->exit_code(), $name . ' must fail with exit code 4 while the bundle is unverified.' );
+				self::assertStringContainsString( 'not been verified', $exception->getMessage(), $name . ' must name the verification gate.' );
+				continue;
+			}
+
+			self::fail( $name . ' must throw StateException with exit code ' . StateException::EXIT_TAMPER . ' while the bundle is unverified; an unverified accessor defeats the signer.' );
+		}
 	}
 
 	public function test_records_are_readable_after_verification(): void {
@@ -145,7 +197,7 @@ final class StateBundleTest extends TestCase {
 		$document              = $this->signed_document();
 		$document['stateHash'] = str_repeat( '0', 64 );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- unit fixture file for StateBundle::load(); no WordPress filesystem credentials context exists in this unit suite.
-		file_put_contents( $path, wp_json_encode( $document ) );
+		file_put_contents( $path, Normalizer::canonical_json_document( $document ) );
 
 		$this->expectException( StateException::class );
 
@@ -160,22 +212,39 @@ final class StateBundleTest extends TestCase {
 		}
 	}
 
-	public function test_the_wrapper_metadata_is_exposed(): void {
+	public function test_the_wrapper_metadata_is_exposed_after_verification(): void {
 		$bundle = StateBundle::from_array( $this->signed_document() );
+		$bundle->verify_signature( $this->signer() );
 
 		self::assertSame( 1, $bundle->schema_version() );
 		self::assertSame( '11111111-2222-4333-8444-555566667777', $bundle->export_id() );
 		self::assertSame( '2026-08-02T09:00:00Z', $bundle->exported_at_utc() );
 		self::assertSame( '99999999-2222-4333-8444-555566667777', $bundle->site_uuid() );
+		self::assertSame( 'https://agency-starter.ddev.site', $bundle->site_url() );
 		self::assertSame( 'development', $bundle->environment() );
+		self::assertSame( '7.0', $bundle->wordpress_version() );
 		self::assertSame( 'site-theme', $bundle->active_theme()['stylesheet'] );
+		self::assertSame( '0.1.0', $bundle->active_theme()['version'] );
+		self::assertNull( $bundle->active_theme()['gitCommit'] );
+		self::assertSame( array( 'templates' ), $bundle->provider_slugs() );
+		self::assertSame( $this->signed_document()['stateHash'], $bundle->state_hash() );
+		self::assertSame( Ownership::GIT_BASELINE_PLUS_DB, $bundle->provider_meta( 'templates' )['ownership'] );
+		self::assertSame( $this->signed_document(), $bundle->to_array() );
 	}
 
 	public function test_provider_slugs_are_sorted(): void {
 		$document              = $this->signed_document();
 		$document['providers'] = array( 'templates' => $document['providers']['templates'] ) + array( 'global-styles' => $this->empty_provider( 'global-styles' ) );
+		$document['stateHash'] = Normalizer::hash( StateExporter::canonical_provider_records( $document['providers'] ) );
 
-		self::assertSame( array( 'global-styles', 'templates' ), StateBundle::from_array( $document )->provider_slugs() );
+		$signature             = $this->signer()->sign( $document, HmacSigner::PURPOSE_BUNDLE );
+		$document['hmacKeyId'] = $signature['hmacKeyId'];
+		$document['hmac']      = $signature['hmac'];
+
+		$bundle = StateBundle::from_array( $document );
+		$bundle->verify_signature( $this->signer() );
+
+		self::assertSame( array( 'global-styles', 'templates' ), $bundle->provider_slugs() );
 	}
 
 	/**

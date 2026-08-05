@@ -17,7 +17,10 @@ namespace Tests\Integration\State;
 
 use AgencyPlatform\State\HmacSigner;
 use AgencyPlatform\State\Normalizer;
+use AgencyPlatform\State\Ownership;
+use AgencyPlatform\State\PromotionPolicy;
 use AgencyPlatform\State\SchemaValidator;
+use AgencyPlatform\State\StateBundle;
 use AgencyPlatform\State\StateException;
 use AgencyPlatform\State\StateExporter;
 use AgencyPlatform\State\StateRegistry;
@@ -75,7 +78,16 @@ final class StateExportTest extends IntegrationTestCase {
 
 	/**
 	 * Section 7.2 states exactly which wrapper fields are outside stateHash.
-	 * This asserts it directly instead of inferring it from two export runs.
+	 * Every mutation is pushed through the hash the EXPORTER actually
+	 * produced: the mutated document is re-signed (the signature covers
+	 * every field, so any mutation invalidates the original signature),
+	 * written, and re-read through StateBundle::load(), which recomputes
+	 * the hash over the canonical provider records and compares it with the
+	 * recorded stateHash. A broken exporter that hashed any wrapper or
+	 * provider-metadata field would record a hash that no longer matches
+	 * after the mutation, and load() would throw exit 4 — the assertion
+	 * below could not pass. The re-sign itself proves the signature fields
+	 * are outside the hash too: they change on every iteration.
 	 */
 	public function test_no_excluded_wrapper_field_participates_in_the_state_hash(): void {
 		$this->make_template( 'page', '<!-- wp:paragraph --><p>Stable</p><!-- /wp:paragraph -->' );
@@ -90,27 +102,58 @@ final class StateExportTest extends IntegrationTestCase {
 			'siteUuid'         => '00000000-1111-4222-8333-444455556666',
 			'environment'      => 'production',
 			'wordpressVersion' => '0.0',
-			'hmacKeyId'        => 'other-key',
-			'hmac'             => str_repeat( 'f', 64 ),
 		);
 
 		foreach ( $mutations as $field => $value ) {
 			$mutated           = $bundle;
 			$mutated[ $field ] = $value;
 
-			self::assertSame( $expected, Normalizer::hash( StateExporter::canonical_provider_records( $mutated['providers'] ) ), sprintf( '"%s" must not affect stateHash.', $field ) );
+			self::assertSame( $expected, $this->reported_hash( $mutated ), sprintf( '"%s" must not affect the exporter\'s stateHash.', $field ) );
 		}
 
 		$mutated                             = $bundle;
 		$mutated['activeTheme']['gitCommit'] = str_repeat( '9', 40 );
 
-		self::assertSame( $expected, Normalizer::hash( StateExporter::canonical_provider_records( $mutated['providers'] ) ), 'activeTheme.gitCommit must not affect stateHash.' );
+		self::assertSame( $expected, $this->reported_hash( $mutated ), 'activeTheme.gitCommit must not affect the exporter\'s stateHash.' );
 
 		foreach ( array( 'slug', 'ownership', 'promotion', 'hasGitBaseline' ) as $field ) {
 			$mutated                                     = $bundle;
-			$mutated['providers']['templates'][ $field ] = 'hasGitBaseline' === $field ? false : 'changed-metadata';
+			$mutated['providers']['templates'][ $field ] = 'hasGitBaseline' === $field ? false : ( 'slug' === $field ? 'global-styles' : ( 'ownership' === $field ? Ownership::DATABASE : PromotionPolicy::NEVER_PROMOTE ) );
 
-			self::assertSame( $expected, Normalizer::hash( StateExporter::canonical_provider_records( $mutated['providers'] ) ), sprintf( 'Provider metadata "%s" must not affect stateHash.', $field ) );
+			self::assertSame( $expected, $this->reported_hash( $mutated ), sprintf( 'Provider metadata "%s" must not affect the exporter\'s stateHash.', $field ) );
+		}
+	}
+
+	/**
+	 * Re-signs a mutated bundle document, writes it as canonical bytes, and
+	 * re-reads it through StateBundle::load(), which recomputes stateHash
+	 * over the canonical provider records and compares it with the recorded
+	 * hash. Returns the hash the reader reports — the exporter's recorded
+	 * stateHash — and throws exit 4 when the recorded hash no longer
+	 * matches the records, which is exactly what a broken exporter that
+	 * hashed wrapper or metadata fields would produce.
+	 *
+	 * @param array<string, mixed> $document
+	 */
+	private function reported_hash( array $document ): string {
+		$signature             = $this->signer()->sign( $document, HmacSigner::PURPOSE_BUNDLE );
+		$document['hmacKeyId'] = $signature['hmacKeyId'];
+		$document['hmac']      = $signature['hmac'];
+
+		$path = tempnam( sys_get_temp_dir(), 'bundle' );
+
+		try {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- integration fixture file for StateBundle::load(); the WP_Filesystem credentials context does not exist here.
+			file_put_contents( $path, Normalizer::canonical_json_document( $document ) );
+
+			$loaded = StateBundle::load( $path, $this->signer() );
+
+			self::assertTrue( $loaded->is_verified(), 'The re-signed bundle must verify.' );
+
+			return $loaded->state_hash();
+		} finally {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- deleting an integration fixture file; the WP_Filesystem credentials context does not exist here.
+			unlink( $path );
 		}
 	}
 

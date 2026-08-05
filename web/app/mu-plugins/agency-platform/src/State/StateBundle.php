@@ -6,13 +6,16 @@ namespace AgencyPlatform\State;
 
 /**
  * The only sanctioned bundle reader (BLOCK_THEME_PROPOSAL.md §9.5): content
- * stays mechanically unreadable until the signature verifies. records(),
- * record(), and provider_meta() throw exit 4 while is_verified() is false,
- * so no code path can ever hand out records from an unverified document and
- * defeat the signer. load() is the full path Task 3 consumes: read, decode,
- * schema-validate, verify the HMAC, then recompute stateHash from the
- * providers and compare — a mismatch is tamper, not a hard error, because
- * content that no longer hashes to its recorded hash has been altered.
+ * stays mechanically unreadable until the signature verifies. Every content
+ * accessor — the wrapper getters, provider_slugs(), provider_meta(),
+ * records(), record(), and to_array() — throws exit 4 while is_verified()
+ * is false, so no code path can ever hand out records from an unverified
+ * document and defeat the signer. is_verified() is the only method that
+ * answers before verification: a caller must be able to ask. load() is the
+ * full path Task 3 consumes: read, decode, schema-validate, verify the
+ * HMAC, then recompute stateHash from the providers and compare — a
+ * mismatch is tamper, not a hard error, because content that no longer
+ * hashes to its recorded hash has been altered.
  */
 final class StateBundle {
 
@@ -120,38 +123,83 @@ final class StateBundle {
 		return $this->verified;
 	}
 
+	/**
+	 * @return int
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function schema_version(): int {
+		$this->assert_verified();
+
 		return (int) $this->document['schemaVersion'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function export_id(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['exportId'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function exported_at_utc(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['exportedAtUtc'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function site_uuid(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['siteUuid'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function site_url(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['siteUrl'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function environment(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['environment'];
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function wordpress_version(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['wordpressVersion'];
 	}
 
 	/**
 	 * @return array{stylesheet: string, version: string, gitCommit: string|null}
+	 * @throws StateException Exit 4 when unverified.
 	 */
 	public function active_theme(): array {
+		$this->assert_verified();
+
 		$git_commit = $this->document['activeTheme']['gitCommit'] ?? null;
 
 		return array(
@@ -161,14 +209,23 @@ final class StateBundle {
 		);
 	}
 
+	/**
+	 * @return string
+	 * @throws StateException Exit 4 when unverified.
+	 */
 	public function state_hash(): string {
+		$this->assert_verified();
+
 		return (string) $this->document['stateHash'];
 	}
 
 	/**
 	 * @return list<string> Sorted provider slugs present in this bundle.
+	 * @throws StateException Exit 4 when unverified.
 	 */
 	public function provider_slugs(): array {
+		$this->assert_verified();
+
 		$slugs = array_keys( $this->document['providers'] );
 		sort( $slugs, SORT_STRING );
 
@@ -242,8 +299,11 @@ final class StateBundle {
 	 * The raw document.
 	 *
 	 * @return array<string, mixed>
+	 * @throws StateException Exit 4 when unverified.
 	 */
 	public function to_array(): array {
+		$this->assert_verified();
+
 		return $this->document;
 	}
 
