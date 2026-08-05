@@ -32,6 +32,8 @@ Seven plan defects were found and corrected before Task 1 started. Six came from
 | 8 | Task 1 Step 8 (found during execution) | The `phpcs:ignore` sniff code was `Generic.CodeAnalysis.UnusedFunctionParameter.Found`. The installed PHPCS reports the warning as `…UnusedFunctionParameter.FoundAfterLastUsed`, so the suppression never matched and `lint:php` failed inside `verify:fast`. Proven by restoring the wrong code and re-running phpcs. Corrected to `FoundAfterLastUsed`. |
 
 | 9 | Task 2 Step 5 (found during execution) | The plan's own verbatim `Normalizer` code cannot pass this repo's `lint:php`. `WordPress.Security.EscapeOutput.ExceptionNotEscaped` fires on every variable in an exception message, and this subsystem's diagnostics name the offending key by design. Resolved by a scoped `phpcs.xml` exclusion; see the ruling below. |
+| 10 | Task 4 Interfaces block (found during execution) | Required "message lists every violation"; the pinned library is fail-fast and cannot. Amended to first-violation-with-pointer-path; see the amendment below. |
+| 11 | Task 5 line 1700 → Task 9 (found during execution) | `BaseStateProvider::detect_references()` was specified to scan markup, but `ReferenceScanner` does not exist in Task 5, so it shipped as `return array();`. **Nothing forced a later task to restore it.** Task 9 Step 3c now does, non-optionally, with a required break-and-restore proof. This is the second consequence of the same Task 6/8 circularity — see defect 2. |
 
 **Sniff codes are version-specific.** Defect 8 is a reminder for every later task in this plan: a `phpcs:ignore` whose code does not match what the installed sniff actually emits is silently inert. If a suppression does not take effect, re-read the real phpcs output for the exact code rather than assuming the plan's code is current. Never replace a failing suppression with a broader one, and never add `@phpstan-ignore` to production code.
 
@@ -2906,6 +2908,7 @@ git commit -m "feat(state): add the provider registry and the git-backed provide
 - Create: `web/app/mu-plugins/agency-platform/src/State/Providers/CustomCssState.php`
 - Create: `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php` (moved here from Task 6 — see Step 3a)
 - Modify: `web/app/mu-plugins/agency-platform/src/State/ReferenceScanner.php` (add `scan()` only)
+- **Modify: `web/app/mu-plugins/agency-platform/src/State/BaseStateProvider.php` (restore `detect_references()` — see Step 3c. NON-OPTIONAL.)**
 - Modify: `web/app/mu-plugins/agency-platform/src/State/StateRegistry.php` (register the six)
 - Modify: `tests/Unit/AgencyPlatform/State/StateRegistryResolveTest.php` (Task 8 Step 3's temporary assertion, plus the two `content` cases)
 - Modify: `tests/Integration/State/ProviderRecordsTest.php`
@@ -3057,6 +3060,32 @@ Create `web/app/mu-plugins/agency-platform/src/State/ReferenceResolver.php` to t
 ```
 
 `test_resolving_a_reference_does_not_recurse_forever()` in Step 3b is the test that proves the guard works. It must be shown to fail for the right reason before the guard is added.
+
+- [ ] **Step 3c: RESTORE `BaseStateProvider::detect_references()` — a landmine Task 5 was forced to leave**
+
+Added by the orchestrator on 2026-08-05. **Do not skip this step. If you skip it, the subsystem ships silently broken and every gate stays green.**
+
+Task 5's `Interfaces` block specified `detect_references()` as "scans `$content['markup']` when present, else `array()`". Task 5 could not implement that: the scan is `ReferenceScanner`, which did not exist yet, and referencing an unknown class fails PHPStan level 6 inside `verify:fast`. The Task 5 worker therefore shipped the only thing that could compile — an unconditional `return array();` — and reported it, which was correct.
+
+`ReferenceScanner::scan()` exists as of Step 3a, so restore the real behaviour now:
+
+```php
+	/**
+	 * @param array<string, mixed> $content
+	 * @return list<array<string, mixed>>
+	 */
+	public function detect_references( array $content, string $record_key ): array {
+		if ( ! isset( $content['markup'] ) || ! is_string( $content['markup'] ) || '' === $content['markup'] ) {
+			return array();
+		}
+
+		return ReferenceScanner::scan( $content['markup'], $record_key );
+	}
+```
+
+**Why this is dangerous rather than merely incomplete.** Left as `return array();`, every provider that inherits `BaseStateProvider` reports ZERO references. References are what carry §7.4's v1 navigation policy — the exported navigation's content hash has to travel inside the reference so a templates-only bundle can still be judged at finalisation. A bundle whose references are all empty is structurally valid, passes the schema, hashes deterministically, signs correctly, and is WRONG. Nothing in the current suite fails.
+
+**Prove the restore is real.** Add an integration assertion that a markup-bearing record with a `core/navigation` reference returns a NON-EMPTY reference list through `BaseStateProvider`'s default path — not only through a provider that overrides it. Then temporarily restore `return array();`, confirm that assertion FAILS, record the exact failure text in your report, and put the scan back. An assertion that cannot be shown to fail for the right reason is not coverage.
 
 - [ ] **Step 3b: Write the reference-resolver integration test**
 
