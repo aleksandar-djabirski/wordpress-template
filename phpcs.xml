@@ -55,6 +55,36 @@
     </rule>
 
     <!--
+        The state subsystem (AgencyPlatform\State\*) is a WP-CLI-only
+        surface. Its single failure type, StateException, is caught by the
+        command layer and converted into a WP-CLI exit code; the message is
+        never echoed into an HTTP response. WPCS flags ANY variable in an
+        exception message because it assumes the message may reach a
+        browser, and that premise does not hold here.
+
+        The two obvious alternatives were rejected, with reasons:
+
+        - esc_html() on the message would make these classes depend on
+          WordPress. That breaks the subsystem's stated design constraint
+          that every unit-tested method is WordPress-free (so that
+          tests/support/wp-stubs.php never has to grow into a shadow
+          WordPress), and it would mangle CLI diagnostics for no security
+          benefit whatsoever.
+        - A per-throw phpcs:ignore does not scale. Every diagnostic in this
+          subsystem names the offending key, key id, provider slug or file
+          path by design, so the suppression count would grow without bound
+          across the unit, and each one is a place where a genuine escaping
+          bug could later hide.
+
+        Scoped to src/State/ deliberately. The sniff stays fully active
+        everywhere else — the theme and the site-* plugins included — where
+        exception text really can reach output.
+    -->
+    <rule ref="WordPress.Security.EscapeOutput.ExceptionNotEscaped">
+        <exclude-pattern>web/app/mu-plugins/agency-platform/src/State/*</exclude-pattern>
+    </rule>
+
+    <!--
         Text-domain checks: one text domain per source-controlled package
         in this repo (agency-platform mu-plugin, the three site-* plugins,
         and the theme).

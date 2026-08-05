@@ -4,7 +4,7 @@
  * a `development` WordPress install: lead delivery resolves to the safe
  * in-process fake (never a real webhook), delivering a lead makes no
  * outbound HTTP call, FileModGuard's production-only guard stays inactive,
- * and DatabaseOverrideCheck reports a clean baseline on a fresh install.
+ * and a fresh install reports no drift against the Git baseline.
  *
  * @package Tests\Integration
  */
@@ -13,9 +13,10 @@ declare(strict_types=1);
 
 namespace Tests\Integration\Environment;
 
-use AgencyPlatform\Health\DatabaseOverrideCheck;
 use AgencyPlatform\Security\FileModGuard;
 use AgencyPlatform\Security\MailGuard;
+use AgencyPlatform\State\StateDiffer;
+use AgencyPlatform\State\StateRegistry;
 use SiteCore\Leads\LeadSubmissionHandler;
 use SiteIntegrations\LeadDelivery\FakeLeadDelivery;
 use Tests\Integration\IntegrationTestCase;
@@ -23,7 +24,7 @@ use Tests\Integration\IntegrationTestCase;
 /**
  * @covers \AgencyPlatform\Security\FileModGuard
  * @covers \AgencyPlatform\Security\MailGuard
- * @covers \AgencyPlatform\Health\DatabaseOverrideCheck
+ * @covers \AgencyPlatform\State\StateDiffer
  * @covers \SiteCore\Leads\LeadSubmissionHandler
  * @covers \SiteIntegrations\LeadDelivery\LeadDeliveryResolver
  */
@@ -135,10 +136,13 @@ final class EnvironmentSafetyTest extends IntegrationTestCase {
 		);
 	}
 
-	public function test_database_override_check_reports_a_clean_baseline_on_a_fresh_install(): void {
-		$result = ( new DatabaseOverrideCheck() )->run();
+	public function test_a_fresh_install_reports_no_drift_against_the_git_baseline(): void {
+		$report = ( new StateDiffer() )->diff_against_git( StateRegistry::resolve( null, false ) );
 
-		self::assertSame( array(), $result['overrides'] );
+		self::assertFalse(
+			StateDiffer::has_drift( $report ),
+			'A fresh install has no client overrides and no Additional CSS, so nothing may register as drift.'
+		);
 	}
 
 	/**
