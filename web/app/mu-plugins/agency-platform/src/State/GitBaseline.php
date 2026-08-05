@@ -274,14 +274,14 @@ final class GitBaseline {
 	}
 
 	/**
-	 * @return array<string, string> slug => normalised block markup, sorted by slug.
+	 * @return array<array-key, string> slug => normalised block markup, sorted by slug.
 	 */
 	public function template_markup(): array {
 		return self::markup_from_dir( $this->theme_dir() . '/templates' );
 	}
 
 	/**
-	 * @return array<string, string> slug => normalised block markup, sorted by slug.
+	 * @return array<array-key, string> slug => normalised block markup, sorted by slug.
 	 */
 	public function part_markup(): array {
 		return self::markup_from_dir( $this->theme_dir() . '/parts' );
@@ -309,7 +309,11 @@ final class GitBaseline {
 	 * result is normal and not an error — a pre-migration hybrid theme has no
 	 * .html templates, and every database template then reads as `added`.
 	 *
-	 * @return array<string, string>
+	 * The key type is array-key, not string: PHP casts a numeric basename
+	 * ("404.html" → "404") to an INT array key, so callers must cast the slug
+	 * back to string at the point of use.
+	 *
+	 * @return array<array-key, string>
 	 */
 	private static function markup_from_dir( string $directory ): array {
 		$markup = array();
@@ -329,7 +333,7 @@ final class GitBaseline {
 			$markup[ basename( $file, '.html' ) ] = Normalizer::normalize_block_markup( $contents );
 		}
 
-		ksort( $markup );
+		ksort( $markup, SORT_STRING );
 
 		return $markup;
 	}

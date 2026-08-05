@@ -28,6 +28,12 @@ use AgencyPlatform\State\StateRecord;
  */
 final class TemplatePartsState extends BaseStateProvider {
 
+	private GitBaseline $git;
+
+	public function __construct( ?GitBaseline $git = null ) {
+		$this->git = $git ?? new GitBaseline();
+	}
+
 	public function slug(): string {
 		return 'template-parts';
 	}
@@ -83,10 +89,10 @@ final class TemplatePartsState extends BaseStateProvider {
 	public function baseline_records(): array {
 		$records = array();
 
-		foreach ( ( new GitBaseline() )->part_markup() as $slug => $markup ) {
+		foreach ( $this->git->part_markup() as $slug => $markup ) {
 			$records[] = StateRecord::create(
 				$this->slug(),
-				$slug,
+				(string) $slug,
 				null,
 				'baseline',
 				null,
