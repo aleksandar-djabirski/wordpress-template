@@ -125,21 +125,31 @@ final class SchemaValidatorTest extends TestCase {
 	}
 
 	/**
-	 * The promotion-manifest constant is declared by this task so the promotion
-	 * track never passes a magic string, but the schema FILE is that track's to
-	 * ship. Until it exists, validate() must fail with a clear "not found"
-	 * message rather than a confusing schema error — a later unit depends on
-	 * exactly that failure, so this test drives validate() itself.
+	 * The promotion-manifest constant is declared by the state track so the
+	 * promotion track never passes a magic string. The schema FILE was the
+	 * promotion track's to ship, and it now HAS shipped, so this test flipped
+	 * direction: it used to pin the file's ABSENCE and the "not found" failure,
+	 * and it now pins the file's PRESENCE and proves the schema really enforces.
+	 *
+	 * The "not found" branch is not lost. It stays covered by
+	 * test_a_custom_schema_dir_is_used_by_both_validate_and_schema_path, which
+	 * points a validator at a schema directory that does not exist.
+	 *
+	 * Validating a BUNDLE document against the MANIFEST schema is the misuse
+	 * case, and it must be a hard error naming the manifest schema rather than a
+	 * silent pass. That is what makes this assertion able to fail: an empty or
+	 * permissive schema file would let the bundle straight through.
 	 */
-	public function test_the_promotion_manifest_constant_exists_and_missing_schema_is_a_hard_error(): void {
+	public function test_the_promotion_manifest_constant_names_a_real_schema_that_enforces(): void {
 		self::assertSame( 'promotion-manifest-v1', SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
 
 		$path = ( new SchemaValidator() )->schema_path( SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
 		self::assertStringEndsWith( 'promotion-manifest-v1.json', $path );
+		self::assertFileExists( $path );
 
 		$this->expectException( StateException::class );
 		$this->expectExceptionMessage(
-			sprintf( 'JSON schema "%s" was not found at %s.', SchemaValidator::SCHEMA_PROMOTION_MANIFEST, $path )
+			sprintf( 'The document does not match schema "%s"', SchemaValidator::SCHEMA_PROMOTION_MANIFEST )
 		);
 
 		( new SchemaValidator() )->validate( $this->bundle(), SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
