@@ -94,6 +94,7 @@ final class SchemaValidatorTest extends TestCase {
 		$bundle['stateHash'] = 'not-a-sha256';
 
 		$this->expectException( StateException::class );
+		$this->expectExceptionMessageMatches( '/validation stopped at the first violation/' );
 
 		( new SchemaValidator() )->validate( $bundle, SchemaValidator::SCHEMA_STATE_BUNDLE );
 	}
@@ -126,15 +127,36 @@ final class SchemaValidatorTest extends TestCase {
 	/**
 	 * The promotion-manifest constant is declared by this task so the promotion
 	 * track never passes a magic string, but the schema FILE is that track's to
-	 * ship. Until it exists, validation must fail with a clear "not found"
-	 * message rather than a confusing schema error.
+	 * ship. Until it exists, validate() must fail with a clear "not found"
+	 * message rather than a confusing schema error — a later unit depends on
+	 * exactly that failure, so this test drives validate() itself.
 	 */
-	public function test_the_promotion_manifest_constant_exists_and_names_its_schema_file(): void {
+	public function test_the_promotion_manifest_constant_exists_and_missing_schema_is_a_hard_error(): void {
 		self::assertSame( 'promotion-manifest-v1', SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
-		self::assertStringEndsWith(
-			'promotion-manifest-v1.json',
-			SchemaValidator::schema_path( SchemaValidator::SCHEMA_PROMOTION_MANIFEST )
+
+		$path = ( new SchemaValidator() )->schema_path( SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
+		self::assertStringEndsWith( 'promotion-manifest-v1.json', $path );
+
+		$this->expectException( StateException::class );
+		$this->expectExceptionMessage(
+			sprintf( 'JSON schema "%s" was not found at %s.', SchemaValidator::SCHEMA_PROMOTION_MANIFEST, $path )
 		);
+
+		( new SchemaValidator() )->validate( $this->bundle(), SchemaValidator::SCHEMA_PROMOTION_MANIFEST );
+	}
+
+	public function test_a_custom_schema_dir_is_used_by_both_validate_and_schema_path(): void {
+		$validator = new SchemaValidator( __DIR__ . '/fixtures/absent-schemas' );
+		$path      = $validator->schema_path( SchemaValidator::SCHEMA_STATE_BUNDLE );
+
+		self::assertStringEndsWith( '/fixtures/absent-schemas/state-bundle-v1.json', $path );
+
+		$this->expectException( StateException::class );
+		$this->expectExceptionMessage(
+			sprintf( 'JSON schema "%s" was not found at %s.', SchemaValidator::SCHEMA_STATE_BUNDLE, $path )
+		);
+
+		$validator->validate( $this->bundle(), SchemaValidator::SCHEMA_STATE_BUNDLE );
 	}
 
 	public function test_a_reference_without_its_resolved_target_is_rejected(): void {

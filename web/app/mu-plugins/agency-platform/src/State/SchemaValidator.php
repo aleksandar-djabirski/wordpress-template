@@ -36,23 +36,33 @@ final class SchemaValidator {
 	private string $schema_dir;
 
 	public function __construct( ?string $schema_dir = null ) {
-		$this->schema_dir = $schema_dir ?? self::schema_dir();
+		$this->schema_dir = $schema_dir ?? self::default_schema_dir();
 	}
 
-	public static function schema_dir(): string {
+	/**
+	 * The default schema directory of the plugin. This static helper always
+	 * returns the default location and ignores any directory configured on an
+	 * instance; resolve paths through the instance method schema_path() so
+	 * path lookups and validate() always agree.
+	 */
+	public static function default_schema_dir(): string {
 		return dirname( __DIR__, 2 ) . '/resources/schemas';
 	}
 
-	public static function schema_path( string $schema_name ): string {
-		return self::schema_dir() . '/' . $schema_name . '.json';
+	/**
+	 * The absolute path of the given schema file inside THIS instance's
+	 * configured directory.
+	 */
+	public function schema_path( string $schema_name ): string {
+		return $this->schema_dir . '/' . $schema_name . '.json';
 	}
 
 	/**
 	 * @param array<string, mixed> $document
-	 * @throws StateException Exit 1 when the schema is missing or the document is invalid.
+	 * @throws StateException Exit 1 when the schema is missing or the document is invalid; an invalid-document message names the first violation with its JSON pointer path and states that validation stopped at the first violation.
 	 */
 	public function validate( array $document, string $schema_name ): void {
-		$path = $this->schema_dir . '/' . $schema_name . '.json';
+		$path = $this->schema_path( $schema_name );
 
 		if ( ! is_file( $path ) ) {
 			throw StateException::hard_error( sprintf( 'JSON schema "%s" was not found at %s.', $schema_name, $path ) );
@@ -70,7 +80,7 @@ final class SchemaValidator {
 			$schema->in( json_decode( Normalizer::canonical_json( $document ), false, 512, JSON_THROW_ON_ERROR ) );
 		} catch ( InvalidValue $invalid ) {
 			throw StateException::hard_error(
-				sprintf( 'The document does not match schema "%s": %s', $schema_name, $invalid->getMessage() ),
+				sprintf( 'The document does not match schema "%s": %s; validation stopped at the first violation.', $schema_name, $invalid->getMessage() ),
 				$invalid
 			);
 		} catch ( JsonSchemaException | \JsonException $error ) {
