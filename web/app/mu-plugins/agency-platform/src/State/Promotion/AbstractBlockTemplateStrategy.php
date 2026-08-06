@@ -19,7 +19,44 @@ use AgencyPlatform\State\StateRecord;
  */
 abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrategy {
 
+	/**
+	 * The post fields a restore may write, in wp_insert_post's own order.
+	 * post_modified and post_modified_gmt are DELIBERATELY excluded:
+	 * WordPress derives them from post_date on insert and silently ignores
+	 * supplied values, so passing them would create a manifest that
+	 * disagrees with the database.
+	 *
+	 * @var list<string>
+	 */
+	private const WRITABLE_POST_FIELDS = array(
+		'post_author',
+		'post_date',
+		'post_date_gmt',
+		'post_content',
+		'post_content_filtered',
+		'post_title',
+		'post_excerpt',
+		'post_status',
+		'post_type',
+		'comment_status',
+		'ping_status',
+		'post_password',
+		'post_name',
+		'to_ping',
+		'pinged',
+		'post_parent',
+		'menu_order',
+		'post_mime_type',
+		'guid',
+	);
+
 	private StateGateway $gateway;
+
+	/**
+	 * The object id of the most recent restore() call, so the rollback can
+	 * record restoredObjectId without changing Task 2's interface signature.
+	 */
+	private ?int $last_restored_object_id = null;
 
 	/**
 	 * The expected post-reset hashes of the current prepare attempt, keyed
@@ -197,8 +234,11 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 	/**
 	 * §7.9: recreate the database override from the backup payload captured
 	 * by capture_backup(). The restored row is a NEW row — the old one was
-	 * deleted by reset() — so the backup's ID is dropped, and the wp_theme
-	 * terms and every meta value are re-attached.
+	 * deleted by reset() — so the backup's ID is never copied, and the
+	 * wp_theme terms and every meta value are re-attached, add_post_meta()
+	 * ONCE PER VALUE so a multi-value key survives as separate rows instead
+	 * of being collapsed into one serialized array by update_post_meta().
+	 * The new id is exposed through last_restored_object_id().
 	 *
 	 * @param array<string, mixed> $backup
 	 */
@@ -211,9 +251,15 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 			);
 		}
 
-		unset( $post['ID'], $post['meta_input'] );
+		$data = array();
 
-		$new_id = wp_insert_post( $post, true );
+		foreach ( self::WRITABLE_POST_FIELDS as $field ) {
+			if ( array_key_exists( $field, $post ) ) {
+				$data[ $field ] = $post[ $field ];
+			}
+		}
+
+		$new_id = wp_insert_post( $data, true );
 
 		if ( is_wp_error( $new_id ) ) {
 			throw PromotionException::hard(
@@ -221,25 +267,39 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 			);
 		}
 
-		$terms = isset( $backup['terms'] ) && is_array( $backup['terms'] ) ? $backup['terms'] : array();
+		$this->last_restored_object_id = (int) $new_id;
 
-		if ( array() !== $terms ) {
-			wp_set_object_terms( $new_id, $terms, 'wp_theme' );
+		$terms = wp_set_object_terms( $new_id, $backup['terms'], 'wp_theme' );
+
+		if ( is_wp_error( $terms ) ) {
+			throw PromotionException::hard(
+				sprintf( 'Could not restore the wp_theme terms of %s: %s', $record->key(), $terms->get_error_message() )
+			);
 		}
 
 		$meta = isset( $backup['meta'] ) && is_array( $backup['meta'] ) ? $backup['meta'] : array();
 
-		foreach ( $meta as $meta_key => $values ) {
-			if ( ! is_string( $meta_key ) || ! is_array( $values ) ) {
+		foreach ( $meta as $key => $values ) {
+			if ( ! is_string( $key ) || ! is_array( $values ) ) {
 				continue;
 			}
 
-			foreach ( $values as $value ) {
-				if ( is_scalar( $value ) || null === $value ) {
-					update_post_meta( $new_id, $meta_key, $value );
+			foreach ( (array) $values as $value ) {
+				if ( false === add_post_meta( $new_id, $key, maybe_unserialize( $value ) ) ) {
+					throw PromotionException::hard(
+						sprintf( 'Could not restore the meta key "%s" of %s.', $key, $record->key() )
+					);
 				}
 			}
 		}
+	}
+
+	/**
+	 * The object id of the most recent restore() call, or null when no
+	 * restore has run on this strategy instance.
+	 */
+	public function last_restored_object_id(): ?int {
+		return $this->last_restored_object_id;
 	}
 
 	/**
