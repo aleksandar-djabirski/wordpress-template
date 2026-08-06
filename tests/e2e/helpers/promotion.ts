@@ -30,7 +30,28 @@ export function wpCli( args: string[], env: NodeJS.ProcessEnv = {} ): string {
 		throw new Error( 'WP-CLI is required for the promotion lifecycle gate.' );
 	}
 
-	const result = spawnSync( wp.command, [ ...wp.args, ...args ], {
+	// When WP-CLI runs through `ddev`, the command executes INSIDE the
+	// container, so environment variables set on this Node child process never
+	// reach it. CI proved that: every promotion command failed with
+	// "AGENCY_PROMOTION_HMAC_KEYS is not set".
+	//
+	// `ddev exec` in this DDEV version has no -e flag — verified, it errors with
+	// "unknown shorthand flag: 'e'" — so the values are carried by the `env`
+	// binary inside the container, which works under ddev's raw exec.
+	const invocation =
+		wp.command === 'ddev' && Object.keys( env ).length > 0
+			? [
+					'exec',
+					'env',
+					...Object.entries( env ).map(
+						( [ key, value ] ) => `${ key }=${ value ?? '' }`
+					),
+					'wp',
+					...args,
+			  ]
+			: [ ...wp.args, ...args ];
+
+	const result = spawnSync( wp.command, invocation, {
 		env: { ...process.env, ...env },
 		encoding: 'utf8',
 	} );
@@ -178,7 +199,14 @@ export function promotionEnv(): NodeJS.ProcessEnv {
 		AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID: 'e2e',
 		AGENCY_TARGET_SITE_UUID: wpCli( [ 'option', 'get', 'agency_platform_site_uuid' ] ).trim(),
 		AGENCY_STATE_DIR: 'var/agency-state',
-		AGENCY_REPO_ROOT: process.cwd(),
+		// The MIRROR IMAGE of themeDir(). That helper needs the path as the
+		// Playwright process sees it, because Node reads and writes the theme
+		// files. AGENCY_REPO_ROOT is read by the PHP promotion code, which runs
+		// wherever WP-CLI runs — so under `ddev` it must be the CONTAINER path,
+		// not this process's cwd. Passing the runner path there made
+		// GitRepository point at a directory that does not exist in the
+		// container.
+		AGENCY_REPO_ROOT: wpRunsInContainer() ? '/var/www/html' : process.cwd(),
 	};
 }
 
@@ -186,6 +214,15 @@ export function promotionEnv(): NodeJS.ProcessEnv {
  * Resolves the WP-CLI entry point: `wp` on PATH (inside a CI/DDEV
  * container) or `ddev wp` (host runs against a DDEV project).
  */
+/**
+ * True when WP-CLI executes inside the DDEV container rather than in this
+ * process's own filesystem view. Decides which side of the boundary a path
+ * handed to PHP must be expressed in.
+ */
+export function wpRunsInContainer(): boolean {
+	return resolveWp()?.command === 'ddev';
+}
+
 function resolveWp(): WpResolution | null {
 	const direct = spawnSync( 'wp', [ '--version' ], { encoding: 'utf8' } );
 
