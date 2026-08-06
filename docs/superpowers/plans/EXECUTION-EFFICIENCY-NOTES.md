@@ -271,6 +271,37 @@ The pre-dispatch audit that pays for itself, per task, in a few minutes:
    critical defects across two units were unguarded write paths.
 4. **Ask which assertion would still pass if the code did nothing.** That is the
    dominant defect family of this engagement.
+5. **Ask whether the rule is tested against a FIXTURE or against the real
+   artefact the release depends on.** This is now the single highest-yield
+   question in the audit — see §8b.
+
+## 8b. Test the shipped artefact, not a fixture built to satisfy the rule
+
+Unit 3A found two CRITICAL, release-blocking defects with exactly this shape:
+
+- A ref-less `core/navigation` block produced no exported reference, so the
+  policy refused the shipped `parts/site-header.html`.
+- The promotion validator compared a NORMALISING function's output to its raw
+  input, so it refused `templates/page.html`, `templates/index.html` and
+  `parts/site-header.html` — the entire shipped theme.
+
+Both were invisible for the same reason: **every test used a fixture written to
+satisfy the rule**, while the real file the release depends on failed it. In the
+second case a worker even had to keep its fixture artificially simple to get
+past the bug, and only found it because it reported the workaround honestly.
+
+Both would have surfaced first at the Task 16 vertical slice — six to ten tasks
+after the cause — as a mysterious end-to-end failure.
+
+**The countermeasure, applied twice and now standing policy:** for any rule that
+governs shipped content, write at least one test that drives the SHIPPED file
+through the REAL code path. Not a fixture, not a synthetic reference, not a
+simplified copy. Both regression tests in this unit read the real theme file and
+run the real scanner, resolver, policy or validator.
+
+Unit 4A owns commerce templates and Unit 3B owns the Global Styles surface. Both
+will produce shipped artefacts governed by exactly these rules. Write the
+shipped-artefact test FIRST there.
 
 ## 8a. Two worker behaviours to correct in the brief
 

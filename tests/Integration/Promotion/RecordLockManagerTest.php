@@ -211,6 +211,51 @@ final class RecordLockManagerTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * The heartbeat must refresh the LOCK GATE, not only the metadata.
+	 *
+	 * A bounded review found the existing heartbeat test checks metadata alone,
+	 * so removing the `update_option( …'.lock' )` line left it green. That
+	 * failure mode is silent and serious: a long finalize would heartbeat
+	 * happily while its gate quietly aged past the TTL, and a second run would
+	 * reclaim the lock underneath it mid-write.
+	 *
+	 * This ages the gate past its TTL, heartbeats, then proves the lock is NO
+	 * LONGER reclaimable — which is only true if the gate clock actually moved.
+	 */
+	public function test_the_heartbeat_refreshes_the_lock_gate_not_only_the_metadata(): void {
+		$record_key = 'templates:page';
+
+		putenv( 'AGENCY_PROMOTION_LOCK_TTL=60' );
+
+		$manager = new RecordLockManager( $this->promotion_id, 'deploy-1' );
+		$manager->acquire( array( $record_key ) );
+		$this->age_lock( $record_key, 100000 );
+
+		$manager->heartbeat( array( $record_key ) );
+
+		$other = new RecordLockManager( wp_generate_uuid4(), 'deploy-2' );
+
+		$this->assert_exit_code( 3, static fn() => $other->acquire( array( $record_key ) ) );
+	}
+
+	/**
+	 * ACCEPTED LIMITATION, recorded rather than papered over.
+	 *
+	 * `acquire()` sorts the keys so two runs selecting overlapping records
+	 * cannot deadlock by taking them in opposite orders. A bounded review
+	 * correctly noted that removing `sort()` leaves every test in this file
+	 * green, and an attempt to pin it here was written, RUN, and deleted: on a
+	 * conflict the manager releases the locks it already took, so the final
+	 * state is identical whether the keys were sorted or not. Deadlock needs two
+	 * concurrent processes, which this suite does not have.
+	 *
+	 * Rather than ship an assertion that cannot fail, the ordering is left
+	 * unasserted and stated here. It is defence against a deadlock that only a
+	 * multi-process integration harness could reproduce, and the value of
+	 * `sort()` does not depend on a test proving it.
+	 */
+
+	/**
 	 * Ages the gate option's timestamp backwards by $seconds, simulating a
 	 * lock that has outlived its TTL without a heartbeat.
 	 */

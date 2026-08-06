@@ -37,10 +37,23 @@ final class PromotionBackup {
 	public function __construct( private string $promotion_id ) {}
 
 	/**
+	 * Removes option rows written by a store() attempt that then failed, so a
+	 * retry is not blocked by its own debris.
+	 *
+	 * @param list<string> $options
+	 */
+	private static function delete_options( array $options ): void {
+		foreach ( $options as $option ) {
+			delete_option( $option );
+		}
+	}
+
+	/**
 	 * Idempotent: an existing backup for this promotion+key is left untouched.
 	 *
 	 * @param array<string, mixed> $record_payload
-	 * @throws PromotionException Exit 1 on a non-JSON-encodable payload.
+	 * @throws PromotionException Exit 1 on a non-JSON-encodable payload or a
+	 *                            rejected write.
 	 */
 	public function store( string $record_key, array $record_payload ): void {
 		if ( $this->exists( $record_key ) ) {
@@ -59,12 +72,35 @@ final class PromotionBackup {
 		$chunks      = self::split_payload( $json, $chunk_bytes );
 		$prefix      = self::option_prefix( $this->promotion_id, $record_key );
 
+		// Every add_option() result is checked. Ignoring them let store() report
+		// SUCCESS for a partially written backup — an orphan chunk left by an
+		// interrupted store makes add_option() return false for that index,
+		// while the rest succeed and the meta row claims a complete backup. The
+		// failure then surfaces at RESTORE time, which is the one moment the
+		// backup is the only copy of the customer's content that still exists.
+		//
+		// On any failure the rows this attempt wrote are removed, so a retry
+		// starts from a clean slate rather than inheriting the debris.
+		$written = array();
+
 		foreach ( $chunks as $index => $chunk ) {
-			add_option( $prefix . self::chunk_suffix( $index ), $chunk, '', false );
+			$option = $prefix . self::chunk_suffix( $index );
+
+			if ( ! add_option( $option, $chunk, '', false ) ) {
+				self::delete_options( $written );
+
+				throw PromotionException::hard(
+					sprintf( 'The backup for "%s" could not be written: chunk %d was rejected. No partial backup was kept.', $record_key, $index )
+				);
+			}
+
+			$written[] = $option;
 		}
 
-		add_option(
-			$prefix . '_meta',
+		$meta_option = $prefix . '_meta';
+
+		$meta_written = add_option(
+			$meta_option,
 			array(
 				'chunks'    => count( $chunks ),
 				'bytes'     => strlen( $json ),
@@ -74,6 +110,14 @@ final class PromotionBackup {
 			'',
 			false
 		);
+
+		if ( ! $meta_written ) {
+			self::delete_options( $written );
+
+			throw PromotionException::hard(
+				sprintf( 'The backup for "%s" could not be written: its metadata row was rejected. No partial backup was kept.', $record_key )
+			);
+		}
 
 		$this->update_index(
 			function ( array $index ) use ( $record_key, $json ): array {
@@ -345,10 +389,19 @@ final class PromotionBackup {
 			require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 		}
 
-		if ( ! class_exists( 'WP_Upgrader' ) ) {
-			throw PromotionException::lock_conflict(
-				'This WordPress build does not expose \WP_Upgrader::create_lock()/release_lock(); backup index locking cannot be made atomic without it. Refusing to write the backup index.'
-			);
+		// class_exists() alone is not enough: a build that ships the class
+		// WITHOUT these two static methods reached a fatal static call instead
+		// of the intended exit 3. The method names are carried in a variable so
+		// this stays a runtime check rather than a compile-time tautology,
+		// matching RecordLockManager::require_core_lock_api().
+		$required_methods = array( 'create_lock', 'release_lock' );
+
+		foreach ( $required_methods as $required_method ) {
+			if ( ! class_exists( 'WP_Upgrader' ) || ! method_exists( 'WP_Upgrader', $required_method ) ) {
+				throw PromotionException::lock_conflict(
+					'This WordPress build does not expose \WP_Upgrader::create_lock()/release_lock(); backup index locking cannot be made atomic without it. Refusing to write the backup index.'
+				);
+			}
 		}
 
 		for ( $attempt = 0; $attempt < self::INDEX_LOCK_RETRIES; $attempt++ ) {

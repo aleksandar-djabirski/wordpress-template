@@ -377,6 +377,51 @@ final class PromotionBackupTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * A bounded review proved store() reported SUCCESS for a partial backup: it
+	 * ignored every add_option() result, so an orphan chunk left by an
+	 * interrupted store made one write fail while the meta row still claimed a
+	 * complete backup. Its probe printed
+	 *
+	 *   store=success
+	 *   retrieve=PromotionException:1:Backup ... is corrupt.
+	 *
+	 * The failure surfaced at RESTORE — the one moment the backup is the only
+	 * remaining copy of the customer's content. store() must fail loudly and
+	 * leave nothing behind.
+	 */
+	public function test_store_refuses_a_partial_write_and_keeps_no_partial_backup(): void {
+		$promotion_id = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+		$record_key   = 'templates:page';
+
+		putenv( 'AGENCY_PROMOTION_BACKUP_CHUNK_BYTES=100' );
+
+		// The debris an interrupted store leaves behind: chunk 1 already exists,
+		// so add_option() rejects that index while chunk 0 succeeds.
+		add_option( $this->chunk_option_name( $promotion_id, $record_key, 1 ), 'orphan', '', false );
+
+		try {
+			$backup = new PromotionBackup( $promotion_id );
+
+			$this->assert_exit_code(
+				1,
+				static fn() => $backup->store( $record_key, array( 'markup' => str_repeat( 'x', 400 ) ) )
+			);
+
+			self::assertFalse(
+				get_option( $this->meta_option_name( $promotion_id, $record_key ), false ),
+				'A failed store must not leave a metadata row claiming a complete backup.'
+			);
+			self::assertFalse(
+				get_option( $this->chunk_option_name( $promotion_id, $record_key, 0 ), false ),
+				'A failed store must remove the chunks it wrote before the failure.'
+			);
+		} finally {
+			putenv( 'AGENCY_PROMOTION_BACKUP_CHUNK_BYTES' );
+			delete_option( $this->chunk_option_name( $promotion_id, $record_key, 1 ) );
+		}
+	}
+
+	/**
 	 * Asserts that the operation refuses with exactly the expected exit code,
 	 * and returns the exception so the caller can also assert the message.
 	 * Fails when no exception is thrown, when a non-PromotionException
