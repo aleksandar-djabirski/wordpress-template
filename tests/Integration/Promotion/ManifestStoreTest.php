@@ -80,6 +80,53 @@ final class ManifestStoreTest extends IntegrationTestCase {
 		$this->assert_exit_code( 4, fn() => $this->store->load( $path ) );
 	}
 
+	/**
+	 * The §11.13 tamper matrix: every field a promotion legitimately changes
+	 * between prepare and seal — the deploy commit, the per-record prepared
+	 * file hash, the expected post-reset hash, and the site uuid — must be
+	 * covered by the signature, so a hand edit is exit 4 on every one of
+	 * them.
+	 *
+	 * @return array<string, array{string, mixed}>
+	 */
+	public static function mutable_manifest_fields(): array {
+		return array(
+			'siteUuid'                        => array( 'siteUuid', '00000000-0000-4000-8000-000000000000' ),
+			'deployCommit'                    => array( 'deployCommit', str_repeat( 'f', 40 ) ),
+			'records[].preparedFileHash'      => array( 'records.0.preparedFileHash', str_repeat( 'a', 64 ) ),
+			'records[].expectedPostResetHash' => array( 'records.0.expectedPostResetHash', str_repeat( 'e', 64 ) ),
+		);
+	}
+
+	/**
+	 * @dataProvider mutable_manifest_fields
+	 *
+	 * @param mixed $value
+	 */
+	public function test_a_mutated_mutable_field_is_tamper( string $field_path, $value ): void {
+		$path = $this->write_signed_manifest();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents, WordPress.WP.AlternativeFunctions.json_decode_json_decode -- decoding the signed fixture back for mutation; the WP_Filesystem credentials context does not exist here.
+		$document = json_decode( file_get_contents( $path ), true );
+
+		$target = &$document;
+
+		foreach ( explode( '.', $field_path ) as $segment ) {
+			if ( is_numeric( $segment ) ) {
+				$target = &$target[ (int) $segment ];
+			} else {
+				$target = &$target[ $segment ];
+			}
+		}
+
+		$target = $value;
+		unset( $target );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- rewriting the signed fixture; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $path, wp_json_encode( $document ) );
+
+		$this->assert_exit_code( 4, fn() => $this->store->load( $path ) );
+	}
+
 	public function test_a_signed_manifest_broken_into_an_invalid_shape_is_still_tamper(): void {
 		// The HMAC must be checked BEFORE the schema. Deleting a required field
 		// from a signed document is tampering, not a hard error.

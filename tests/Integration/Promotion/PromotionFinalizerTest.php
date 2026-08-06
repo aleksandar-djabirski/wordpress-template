@@ -25,6 +25,7 @@ declare(strict_types=1);
 namespace Tests\Integration\Promotion;
 
 use AgencyPlatform\State\HmacSigner;
+use AgencyPlatform\State\Promotion\BundleView;
 use AgencyPlatform\State\Promotion\ManifestStore;
 use AgencyPlatform\State\Promotion\PreparablePromotionStrategy;
 use AgencyPlatform\State\Promotion\PromotionBackup;
@@ -32,9 +33,12 @@ use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionFinalizer;
 use AgencyPlatform\State\Promotion\PromotionManifest;
 use AgencyPlatform\State\Promotion\RecordLockManager;
+use AgencyPlatform\State\Promotion\RecordRefusal;
+use AgencyPlatform\State\Promotion\StagedPromotionEntry;
 use AgencyPlatform\State\Promotion\StateGateway;
 use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
 use AgencyPlatform\State\Promotion\TemplatePromotionStrategy;
+use AgencyPlatform\State\Promotion\ThemeDeclaredSlugs;
 use AgencyPlatform\State\PromotionStrategies;
 use AgencyPlatform\State\PromotionStrategy;
 use AgencyPlatform\State\StateRecord;
@@ -56,9 +60,10 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	/** The key id every fixture in this file signs with. */
 	private const KEY_ID = '2026-01';
 
-	private const PROMOTION_ID  = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-	private const SITE_UUID     = '11111111-2222-4333-8444-555555555555';
-	private const DEPLOY_COMMIT = 'ffffffffffffffffffffffffffffffffffffffff';
+	private const PROMOTION_ID        = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+	private const SECOND_PROMOTION_ID = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+	private const SITE_UUID           = '11111111-2222-4333-8444-555555555555';
+	private const DEPLOY_COMMIT       = 'ffffffffffffffffffffffffffffffffffffffff';
 
 	private string $tmp_dir;
 	private string $repo_root;
@@ -111,6 +116,11 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 		file_put_contents( $this->deployed_file, "<!-- wp:paragraph --><p>Page body</p><!-- /wp:paragraph -->\n" );
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing integration fixture files; the WP_Filesystem credentials context does not exist here.
 		file_put_contents( $this->deployed_part_file, "<!-- wp:paragraph --><p>Header body</p><!-- /wp:paragraph -->\n" );
+		// The overlap fixture's third record: a second promotion that shares
+		// templates:page must also carry a record of its own, and its
+		// deployed file must exist for the run-level file guard to pass.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing integration fixture files; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->theme_dir . '/templates/landing.html', "<!-- wp:paragraph --><p>Landing body</p><!-- /wp:paragraph -->\n" );
 
 		add_filter( 'stylesheet_directory', array( $this, 'fixture_stylesheet_directory' ) );
 		// _get_block_template_file() maps BOTH get_stylesheet_directory() and
@@ -135,6 +145,7 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 		// theme files are the only resolution source (no database rows yet).
 		$this->expected_hashes['templates:page']             = (string) $this->strategies['templates']->resolve_current_hash( 'page' );
 		$this->expected_hashes['template-parts:site-header'] = (string) $this->strategies['template-parts']->resolve_current_hash( 'site-header' );
+		$this->expected_hashes['templates:landing']          = (string) $this->strategies['templates']->resolve_current_hash( 'landing' );
 
 		$this->seed_database_rows();
 
@@ -467,6 +478,212 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * The §11.13 overlap case: two sealed manifests sharing one record key
+	 * and differing on another. The second run must exit 3 at the shared
+	 * key's lock AND release the lock it DID acquire before the conflict —
+	 * a run that leaves its own acquisition behind would wedge the third
+	 * promotion that tries the same key.
+	 */
+	public function test_overlapping_finalize_exits_three_and_releases_what_it_acquired(): void {
+		// BOTH manifests are written before the first finalize: the overlap
+		// manifest's record is built from the LIVE row, which finalize deletes.
+		$first_path  = $this->state_dir . '/first.json';
+		$second_path = $this->state_dir . '/second.json';
+
+		$this->store->write( $this->sealed_two_record_manifest(), $first_path );
+		$this->store->write( $this->sealed_overlap_manifest(), $second_path );
+
+		$first = $this->finalizer->finalize( $first_path );
+
+		self::assertSame( 0, $first['outcome']->exit_code() );
+
+		$exception = $this->assert_exit_code( 3, fn() => $this->finalizer->finalize( $second_path ) );
+
+		self::assertStringContainsString( 'locked by promotion', $exception->getMessage() );
+
+		self::assertNull(
+			( new RecordLockManager( self::SECOND_PROMOTION_ID, 'x' ) )->inspect( 'templates:landing' ),
+			'The conflicted run must release every lock it acquired before the conflict.'
+		);
+		self::assertNotNull(
+			( new RecordLockManager( self::PROMOTION_ID, 'x' ) )->inspect( 'templates:page' ),
+			'The first promotion\'s lock must survive the second run untouched.'
+		);
+	}
+
+	/**
+	 * §11.13: a reset failure must restore the ORIGINAL record — the
+	 * post_content, the wp_theme term, and every meta key, with a
+	 * multi-value meta key staying multi-value — not a half-restored row.
+	 */
+	public function test_a_reset_failure_restores_the_original_record_completely(): void {
+		$this->add_multi_value_meta_to_page_override();
+
+		$original = $this->read_override( 'page' );
+
+		self::assertNotNull( $original );
+
+		$original_terms = wp_get_object_terms( (int) $original->ID, 'wp_theme', array( 'fields' => 'slugs' ) );
+		$original_meta  = get_post_meta( (int) $original->ID );
+
+		// The deployed file is intact; only the post-reset comparison can
+		// catch the drift, which sends the record through the restore path.
+		$this->store->write(
+			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
+			$this->manifest_path
+		);
+
+		$outcome = $this->finalizer->finalize( $this->manifest_path );
+
+		self::assertSame( 'post-reset-mismatch', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+
+		$restored = $this->read_override( 'page' );
+
+		self::assertNotNull( $restored );
+		self::assertSame( $original->post_content, $restored->post_content, 'The restored row must carry the original content verbatim.' );
+		self::assertSame(
+			$original_terms,
+			wp_get_object_terms( (int) $restored->ID, 'wp_theme', array( 'fields' => 'slugs' ) ),
+			'The restored row must carry the original wp_theme term.'
+		);
+		self::assertSame( array_keys( $original_meta ), array_keys( get_post_meta( (int) $restored->ID ) ), 'Every meta key of the original row must be restored.' );
+		self::assertSame( array( 'a', 'b', 'c' ), get_post_meta( (int) $restored->ID, 'multi', false ), 'A multi-value meta key must stay multi-value.' );
+
+		foreach ( $original_meta as $meta_key => $meta_values ) {
+			self::assertSame(
+				$meta_values,
+				get_post_meta( (int) $restored->ID, (string) $meta_key, false ),
+				sprintf( 'The restored values of "%s" must match the original.', $meta_key )
+			);
+		}
+	}
+
+	/**
+	 * A failure AFTER the reset has run — the database row is already gone —
+	 * must abort the run, release the acquired lock and write no canonical
+	 * manifest, never report the record as promoted.
+	 */
+	public function test_an_exception_after_the_reset_aborts_the_run_and_releases_the_lock(): void {
+		$this->strategies['templates'] = new ThrowingResolveStrategy( $this->strategies['templates'] );
+
+		PromotionStrategies::reset();
+
+		try {
+			$this->finalizer->finalize( $this->manifest_path );
+
+			self::fail( 'An exception thrown after the reset must abort the run, not be swallowed.' );
+		} catch ( \RuntimeException $exception ) {
+			self::assertStringContainsString( 'resolve exploded', $exception->getMessage() );
+		}
+
+		self::assertNull(
+			( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ),
+			'An aborted run must release every lock it acquired.'
+		);
+		self::assertFalse( $this->store->canonical_exists( $this->promotion_id() ), 'An aborted run must not write the canonical manifest.' );
+	}
+
+	/**
+	 * The self-restore path must tolerate a backup retrieval that returns
+	 * null (the meta row is missing): refuse the record instead of crashing
+	 * on a null payload.
+	 */
+	public function test_restore_and_refuse_tolerates_a_missing_backup_retrieval(): void {
+		$this->store->write(
+			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
+			$this->manifest_path
+		);
+
+		$meta_name = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' ) . '_meta';
+
+		add_filter( 'pre_option_' . $meta_name, array( $this, 'hide_backup_meta' ) );
+
+		try {
+			$outcome = $this->finalizer->finalize( $this->manifest_path );
+		} finally {
+			remove_filter( 'pre_option_' . $meta_name, array( $this, 'hide_backup_meta' ) );
+		}
+
+		self::assertSame( 'post-reset-mismatch', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+		self::assertSame( 'restored', $outcome['manifest']->record( 'templates:page' )['finalizeStatus'] );
+		self::assertNull( $this->read_override( 'page' ), 'With no backup, the deleted override stays deleted — the run must not fabricate a restore.' );
+	}
+
+	/**
+	 * A CORRUPT backup retrieval (a chunk that does not match its meta
+	 * sha256) must abort the run loudly instead of restoring partial content
+	 * — the backup is the only remaining copy of the customer's row. The
+	 * corrupt backup is forged BEFORE finalize: store() is idempotent per
+	 * key, so the forged options are exactly what the self-restore path
+	 * reads.
+	 */
+	public function test_a_corrupt_backup_retrieval_aborts_the_run(): void {
+		$this->store->write(
+			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
+			$this->manifest_path
+		);
+
+		$this->forge_corrupt_backup();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'corrupt', $exception->getMessage() );
+		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'An aborted run must release every lock it acquired.' );
+	}
+
+	/**
+	 * A restore that itself throws must abort the run — the backup payload
+	 * is refused by the strategy, and a silent "restored" report would lie
+	 * about a row that was never recreated.
+	 */
+	public function test_a_restore_that_throws_aborts_the_run(): void {
+		$this->store->write(
+			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
+			$this->manifest_path
+		);
+
+		// Replace the backup with a schema-valid payload that has no post
+		// row, so the strategy's restore refuses AFTER retrieval succeeded.
+		$this->forge_backup_without_post_row();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'post row', $exception->getMessage() );
+		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'An aborted run must release every lock it acquired.' );
+		self::assertFalse( $this->store->canonical_exists( $this->promotion_id() ), 'An aborted run must not write the canonical manifest.' );
+	}
+
+	public function test_a_missing_strategy_for_the_record_provider_refuses_the_run(): void {
+		$this->strategies = array(
+			'template-parts' => new TemplatePartPromotionStrategy(),
+		);
+
+		PromotionStrategies::reset();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'No promotion strategy is registered for provider "templates"', $exception->getMessage() );
+	}
+
+	/**
+	 * A strategy that exists but does not implement PreparablePromotionStrategy
+	 * must be refused the same way — a non-preparable strategy would not know
+	 * how to stage or resolve the record.
+	 */
+	public function test_a_non_preparable_strategy_refuses_the_run(): void {
+		$this->strategies = array(
+			'templates'      => new NonPreparableStrategy(),
+			'template-parts' => new TemplatePartPromotionStrategy(),
+		);
+
+		PromotionStrategies::reset();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'No promotion strategy is registered for provider "templates"', $exception->getMessage() );
+	}
+
+	/**
 	 * Named filter callback — never a closure (master spec §4). Points
 	 * get_stylesheet_directory() at the fixture theme directory, so the
 	 * deployed prepared files and the file-backed template resolution both
@@ -496,6 +713,25 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * Named filter callback — never a closure (master spec §4). Short-circuits
+	 * get_option() for the backup meta row with null, so retrieve() sees a
+	 * missing backup without touching the real one. (Returning false would
+	 * NOT short-circuit — WordPress treats false as "keep looking".)
+	 */
+	public function hide_backup_meta( $value ): ?string {
+		return null;
+	}
+
+	/**
+	 * Named filter callback — never a closure (master spec §4). Short-circuits
+	 * get_option() for backup chunk 0 with a corrupt value, so retrieve()
+	 * sees a chunk whose bytes do not match the meta sha256.
+	 */
+	public function corrupt_backup_chunk( $value ): string {
+		return 'corrupted bytes';
+	}
+
+	/**
 	 * The live wp_template row the export saw, plus the part row the
 	 * two-record manifest needs. The page row deliberately uses markup that
 	 * differs from the deployed file, so the reset actually changes the
@@ -503,6 +739,7 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	 */
 	private function seed_database_rows(): void {
 		$this->make_template( 'page', '<!-- wp:paragraph --><p>DB page body</p><!-- /wp:paragraph -->' );
+		$this->make_template( 'landing', '<!-- wp:paragraph --><p>DB landing body</p><!-- /wp:paragraph -->' );
 		$this->make_part( 'site-header', '<!-- wp:paragraph --><p>DB header body</p><!-- /wp:paragraph -->' );
 	}
 
@@ -532,6 +769,74 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 
 	private function make_delete_post_fail(): void {
 		add_filter( 'pre_delete_post', array( $this, 'refuse_post_delete' ), 10, 2 );
+	}
+
+	/**
+	 * A multi-value meta key on the page override, added BEFORE finalize so
+	 * the backup captures it and the restore must reproduce it as separate
+	 * rows.
+	 */
+	private function add_multi_value_meta_to_page_override(): void {
+		$id = $this->override_id( 'page' );
+
+		add_post_meta( $id, 'multi', 'a' );
+		add_post_meta( $id, 'multi', 'b' );
+		add_post_meta( $id, 'multi', 'c' );
+	}
+
+	/**
+	 * Replaces the backup options of templates:page with a self-consistent
+	 * payload that has NO post row, so the strategy's restore() refuses with
+	 * its own hard error after retrieve() succeeded. store() sees the
+	 * existing meta row and skips, so the forged payload is what the
+	 * self-restore path reads.
+	 */
+	private function forge_backup_without_post_row(): void {
+		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
+		$payload = wp_json_encode(
+			array(
+				'terms' => array(),
+				'meta'  => array(),
+			)
+		);
+
+		add_option(
+			$prefix . '_meta',
+			array(
+				'chunks'    => 1,
+				'bytes'     => strlen( (string) $payload ),
+				'sha256'    => hash( 'sha256', (string) $payload ),
+				'recordKey' => 'templates:page',
+			),
+			'',
+			false
+		);
+		add_option( $prefix . '_c0000', $payload, '', false );
+	}
+
+	/**
+	 * Forges the backup options of templates:page with a chunk that does not
+	 * match its meta sha256, so retrieve() refuses loudly. The chunk is
+	 * VALID JSON on purpose: a byte mismatch that still parses is exactly
+	 * what only the sha256 check can catch. store() skips (the meta row
+	 * exists), so the forged options are what the self-restore path reads.
+	 */
+	private function forge_corrupt_backup(): void {
+		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
+		$payload = '{"post":[]}';
+
+		add_option(
+			$prefix . '_meta',
+			array(
+				'chunks'    => 1,
+				'bytes'     => strlen( $payload ),
+				'sha256'    => str_repeat( '0', 64 ),
+				'recordKey' => 'templates:page',
+			),
+			'',
+			false
+		);
+		add_option( $prefix . '_c0000', $payload, '', false );
 	}
 
 	private function promotion_id(): string {
@@ -607,13 +912,22 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * The signed, sealed overlap manifest: it SHARES templates:page with the
+	 * two-record manifest and differs on templates:landing — the §11.13
+	 * overlapping-finalize fixture.
+	 */
+	private function sealed_overlap_manifest(): PromotionManifest {
+		return $this->build_manifest( array( 'templates:landing', 'templates:page' ), self::SECOND_PROMOTION_ID )->with_deploy_commit( self::DEPLOY_COMMIT, '2026-08-01T10:00:00Z' );
+	}
+
+	/**
 	 * A manifest whose header matches this host (stylesheet, version, uuid,
 	 * URL, environment all read from the live environment) with the given
 	 * records built from the LIVE database rows.
 	 *
 	 * @param list<string> $keys
 	 */
-	private function build_manifest( array $keys ): PromotionManifest {
+	private function build_manifest( array $keys, string $promotion_id = self::PROMOTION_ID ): PromotionManifest {
 		$theme = array(
 			'stylesheet' => get_stylesheet(),
 			'version'    => (string) wp_get_theme()->get( 'Version' ),
@@ -621,7 +935,7 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 		);
 
 		$manifest = PromotionManifest::create(
-			self::PROMOTION_ID,
+			$promotion_id,
 			'2026-08-01T10:00:00Z',
 			array(
 				'exportId'      => '11111111-2222-4333-8444-555555555555',
@@ -789,5 +1103,121 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- deleting an integration fixture directory; the WP_Filesystem credentials context does not exist here.
 		rmdir( $directory );
+	}
+}
+
+/**
+ * A PreparablePromotionStrategy whose resolve_current_hash() throws — the
+ * deterministic trigger for "an exception thrown AFTER the reset" (the
+ * database row is already gone at that point, so the run must abort and
+ * release its locks rather than report anything).
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this throwing strategy to the finalizer test file so the post-reset failure path is deterministic.
+final class ThrowingResolveStrategy implements PreparablePromotionStrategy {
+
+	public function __construct( private PreparablePromotionStrategy $inner ) {}
+
+	public function provider_slug(): string {
+		return $this->inner->provider_slug();
+	}
+
+	/**
+	 * @return array{preparedPath: string, preparedHash: string, originalHash: string|null}
+	 */
+	public function prepare( StateRecord $record, string $target_path ): array {
+		return $this->inner->prepare( $record, $target_path );
+	}
+
+	public function reset( StateRecord $record ): void {
+		$this->inner->reset( $record );
+	}
+
+	/**
+	 * @param array<string, mixed> $backup
+	 */
+	public function restore( StateRecord $record, array $backup ): void {
+		$this->inner->restore( $record, $backup );
+	}
+
+	public function expected_post_reset_hash( StateRecord $record ): string {
+		return $this->inner->expected_post_reset_hash( $record );
+	}
+
+	public function stage( StateRecord $record, string $theme_root ): StagedPromotionEntry {
+		return $this->inner->stage( $record, $theme_root );
+	}
+
+	public function theme_relative_path( string $record_slug ): string {
+		return $this->inner->theme_relative_path( $record_slug );
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return $this->inner->declares( $declared, $record_slug );
+	}
+
+	public function post_finalize_record_state(): string {
+		return $this->inner->post_finalize_record_state();
+	}
+
+	public function defers_expected_hash(): bool {
+		return $this->inner->defers_expected_hash();
+	}
+
+	public function resolve_current_hash( string $record_slug ): ?string {
+		throw new \RuntimeException( 'resolve exploded' );
+	}
+
+	/**
+	 * @param array<string, mixed> $bundle_record
+	 * @param list<string>         $selected_keys
+	 * @return list<RecordRefusal>
+	 */
+	public function validate_for_promotion( array $bundle_record, BundleView $bundle, array $selected_keys ): array {
+		return $this->inner->validate_for_promotion( $bundle_record, $bundle, $selected_keys );
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function capture_backup( StateRecord $record ): array {
+		return $this->inner->capture_backup( $record );
+	}
+}
+
+/**
+ * A PromotionStrategy that deliberately does NOT implement
+ * PreparablePromotionStrategy — the shape of a provider (global-styles in
+ * Release 4, say) that registered a strategy before the preparable contract
+ * existed. The finalizer must refuse it, never call it.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this non-preparable stub to the finalizer test file.
+final class NonPreparableStrategy implements PromotionStrategy {
+
+	public function provider_slug(): string {
+		return 'templates';
+	}
+
+	/**
+	 * @return array{preparedPath: string, preparedHash: string, originalHash: string|null}
+	 */
+	public function prepare( StateRecord $record, string $target_path ): array {
+		return array(
+			'preparedPath' => $target_path,
+			'preparedHash' => '',
+			'originalHash' => null,
+		);
+	}
+
+	public function reset( StateRecord $record ): void {
+	}
+
+	/**
+	 * @param array<string, mixed> $backup
+	 */
+	public function restore( StateRecord $record, array $backup ): void {
+	}
+
+	public function expected_post_reset_hash( StateRecord $record ): string {
+		return '';
 	}
 }

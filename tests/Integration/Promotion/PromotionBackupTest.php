@@ -274,6 +274,40 @@ final class PromotionBackupTest extends IntegrationTestCase {
 		self::assertSame( $this->promotion_b, $rows[0]['promotionId'], 'The index must no longer mention the pruned promotion.' );
 	}
 
+	/**
+	 * The §11.13 retention shape: a CONFIRMED promotion inside its window is
+	 * not pruned; the SAME promotion, after its finalization and settlement
+	 * both age past the window, is pruned. Retention is anchored on the
+	 * later of finalization and settlement (master spec §7.9). --older-than=1d
+	 * keeps the cutoff out of the way: with the promotion ten days old, the
+	 * retention WINDOW is the only gate that can protect the backup.
+	 */
+	public function test_a_confirmed_backup_is_pruned_only_after_its_retention_window(): void {
+		$backup = new PromotionBackup( $this->promotion_a );
+		$backup->store( 'templates:page', array( 'post' => array( 'ID' => 1 ) ) );
+
+		$ten_days_ago = gmdate( 'Y-m-d\TH:i:s\Z', time() - 10 * 86400 );
+
+		$backup->mark_finalized( $ten_days_ago );
+		$backup->mark_settled( 'confirmed', $ten_days_ago );
+
+		// Ten days into a 30-day window: not prunable, so a real prune keeps it.
+		self::assertSame( array(), PromotionBackup::prune( '1d', false ), 'A confirmed backup inside its window must survive prune.' );
+		self::assertTrue( $backup->exists( 'templates:page' ) );
+
+		// Age the promotion past the window: the SAME promotion is now pruned.
+		$index = get_option( PromotionBackup::INDEX_OPTION );
+
+		self::assertIsArray( $index );
+
+		$index[ $this->promotion_a ]['finalizedAtUtc'] = gmdate( 'Y-m-d\TH:i:s\Z', time() - 31 * 86400 );
+		$index[ $this->promotion_a ]['settledAtUtc']   = gmdate( 'Y-m-d\TH:i:s\Z', time() - 31 * 86400 );
+		update_option( PromotionBackup::INDEX_OPTION, $index, false );
+
+		self::assertSame( array( $this->promotion_a ), PromotionBackup::prune( '1d', false ) );
+		self::assertFalse( $backup->exists( 'templates:page' ), 'A confirmed backup past its window must be pruned.' );
+	}
+
 	public function test_later_claims_finds_later_finalizations_and_ignores_rolled_back_promotions(): void {
 		$first = new PromotionBackup( $this->promotion_a );
 		$first->store( 'templates:page', array( 'post' => array( 'ID' => 1 ) ) );

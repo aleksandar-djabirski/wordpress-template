@@ -39,6 +39,7 @@ use AgencyPlatform\State\Promotion\PreparablePromotionStrategy;
 use AgencyPlatform\State\Promotion\PrepareLock;
 use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionPreparer;
+use AgencyPlatform\State\Promotion\PromotionSelector;
 use AgencyPlatform\State\Promotion\StagedPromotionEntry;
 use AgencyPlatform\State\Promotion\StateGateway;
 use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
@@ -365,6 +366,73 @@ final class PromotionPreparerTest extends IntegrationTestCase {
 		self::assertFileDoesNotExist( $this->theme_dir . '/templates/gallery.html' );
 		self::assertSame( array(), glob( $this->theme_dir . '/templates/*.tmp' ) );
 		self::assertSame( array(), glob( $this->theme_dir . '/parts/*.tmp' ) );
+	}
+
+	/**
+	 * The §11.13 Release 3 boundary: every export-only provider — and
+	 * global-styles in particular — has no registered promotion strategy, so
+	 * selecting any of its records is invalid operator input at selection:
+	 * exit 1, never a per-record refusal.
+	 *
+	 * @dataProvider export_only_providers
+	 */
+	public function test_export_only_providers_are_refused_at_selection( string $provider, string $record_slug ): void {
+		$exception = $this->assert_exit_code(
+			1,
+			fn() => PromotionSelector::parse(
+				$provider . ':' . $record_slug,
+				static fn(): bool => false,
+				static fn(): bool => true
+			)
+		);
+
+		self::assertStringContainsString( $provider, $exception->getMessage() );
+		self::assertStringContainsString( 'No promotion strategy is registered', $exception->getMessage() );
+	}
+
+	/**
+	 * @return array<string, array{string, string}>
+	 */
+	public static function export_only_providers(): array {
+		return array(
+			'navigation'       => array( 'navigation', 'primary-menu' ),
+			'synced-patterns'  => array( 'synced-patterns', 'callout' ),
+			'fonts'            => array( 'fonts', 'inter' ),
+			'media-references' => array( 'media-references', 'header' ),
+			'custom-css'       => array( 'custom-css', 'global-styles' ),
+			'content'          => array( 'content', 'page-2' ),
+			'global-styles'    => array( 'global-styles', 'default' ),
+		);
+	}
+
+	/**
+	 * Additional CSS is never promotable: neither the global-styles row nor
+	 * the custom-css post row has a strategy, so both are refused at
+	 * selection with exit 1.
+	 *
+	 * @dataProvider additional_css_records
+	 */
+	public function test_additional_css_records_are_never_promotable( string $select ): void {
+		$exception = $this->assert_exit_code(
+			1,
+			fn() => PromotionSelector::parse(
+				$select,
+				static fn(): bool => false,
+				static fn(): bool => true
+			)
+		);
+
+		self::assertStringContainsString( 'custom-css', $exception->getMessage() );
+	}
+
+	/**
+	 * @return array<string, array{string}>
+	 */
+	public static function additional_css_records(): array {
+		return array(
+			'global styles row'   => array( 'custom-css:global-styles' ),
+			'custom css post row' => array( 'custom-css:custom-css-post' ),
+		);
 	}
 
 	/**

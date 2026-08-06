@@ -203,7 +203,17 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 
 		$this->confirmer->confirm( $this->manifest_path );
 
-		self::assertSame( 0, $this->confirmer->confirm( $this->manifest_path )['outcome']->exit_code() );
+		$settled_before = $this->store->load_canonical( $this->promotion_id() )->settled_at_utc();
+
+		$second = $this->confirmer->confirm( $this->manifest_path );
+
+		self::assertSame( 0, $second['outcome']->exit_code() );
+		self::assertSame(
+			array( 'templates:page' => 'skipped' ),
+			$second['outcome']->outcomes(),
+			'A re-confirm must report the skipped record — an empty outcome map would pass an exit-code-only test.'
+		);
+		self::assertSame( $settled_before, $second['manifest']->settled_at_utc(), 'A re-confirm must not refresh the settlement timestamp.' );
 	}
 
 	public function test_confirm_refuses_a_promotion_that_was_never_finalized(): void {
@@ -213,6 +223,82 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 
 		self::assertStringContainsString( 'never finalized', $exception->getMessage() );
 		self::assertStringContainsString( self::PROMOTION_ID, $exception->getMessage() );
+	}
+
+	/**
+	 * The canonical-manifest authority (bounded-review gap): the SUPPLIED
+	 * manifest is used ONLY to authenticate the promotion id. A forged
+	 * supplied document that claims a DIFFERENT promotion id must not be
+	 * confirmed against some other promotion's canonical copy — there is no
+	 * canonical copy for the forged id, so it is a hard error.
+	 */
+	public function test_confirm_authenticates_the_promotion_id_against_the_canonical_store(): void {
+		// The forged document is built BEFORE finalize (build_manifest reads
+		// the live row, which finalize deletes) but only placed at the
+		// supplied path AFTER finalize, so the canonical copy belongs to the
+		// real promotion.
+		$forged = $this->build_manifest( array( 'templates:page' ) )
+			->with_field( 'promotionId', 'cccccccc-dddd-4eee-8fff-000000000001' )
+			->with_deploy_commit( self::DEPLOY_COMMIT, '2026-08-01T10:00:00Z' );
+
+		$this->finalize_fixture();
+
+		$this->store->write( $forged, $this->manifest_path );
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->confirmer->confirm( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'No finalized promotion found for', $exception->getMessage() );
+		self::assertStringContainsString( 'cccccccc-dddd-4eee-8fff-000000000001', $exception->getMessage() );
+	}
+
+	/**
+	 * The canonical-manifest authority, second direction: a forged SUPPLIED
+	 * document that claims the promotion was already confirmed in 2020 must
+	 * be ignored — confirm reads the CANONICAL host copy, which is still
+	 * pending, so it proceeds and stamps fresh settlement metadata.
+	 */
+	public function test_confirm_ignores_a_forged_supplied_manifest_and_uses_the_canonical_copy(): void {
+		// The forged document is built BEFORE finalize (sealed_page_manifest
+		// reads the live row, which finalize deletes) but only placed at the
+		// supplied path AFTER finalize.
+		$forged = $this->sealed_page_manifest()
+			->with_field( 'settlementStatus', 'confirmed' )
+			->with_field( 'settledAtUtc', '2020-01-01T00:00:00Z' )
+			->with_field( 'retentionUntilUtc', '2020-02-01T00:00:00Z' );
+
+		$this->finalize_fixture();
+
+		$this->store->write( $forged, $this->manifest_path );
+
+		$before  = time();
+		$outcome = $this->confirmer->confirm( $this->manifest_path );
+		$after   = time();
+
+		self::assertSame( 'confirmed', $outcome['manifest']->settlement_status() );
+
+		$canonical = $this->store->load_canonical( $this->promotion_id() );
+
+		self::assertSame( 'confirmed', $canonical->settlement_status() );
+
+		$settled = $canonical->settled_at_utc();
+
+		self::assertNotNull( $settled );
+		self::assertNotSame( '2020-01-01T00:00:00Z', $settled, 'The forged supplied settlement timestamp must never reach the canonical copy.' );
+		self::assertGreaterThanOrEqual( $before, strtotime( $settled ) );
+		self::assertLessThanOrEqual( $after, strtotime( $settled ) );
+
+		// Retention is exactly settledAt + the 30-day window (master spec
+		// §7.9; the safer end of the 14–30 range is chosen).
+		self::assertSame(
+			gmdate( 'Y-m-d\TH:i:s\Z', strtotime( $settled ) + 30 * 86400 ),
+			$canonical->retention_until_utc()
+		);
+
+		// The backup index carries the same settlement metadata.
+		$rows = PromotionBackup::list_all();
+
+		self::assertSame( 'confirmed', $rows[0]['settlementStatus'] );
+		self::assertSame( $settled, $rows[0]['settledAtUtc'] );
 	}
 
 	public function test_rollback_restores_the_original_database_record(): void {
@@ -354,6 +440,146 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 
 		self::assertSame( 1, $outcome['outcome']->exit_code() );
 		self::assertSame( 'backup-missing', $outcome['manifest']->record( 'templates:page' )['rollbackRefusalReason'] );
+	}
+
+	/**
+	 * Bounded-review gap: the present-state branch (a record finalize left
+	 * in place, not deleted) must detect that the live row changed after
+	 * finalisation and refuse with changed-since-finalize — never treat the
+	 * changed row as a client recreation and never overwrite it.
+	 */
+	public function test_rollback_detects_a_changed_present_state_record(): void {
+		$this->finalize_fixture();
+
+		// The client recreated the record after finalisation...
+		$this->create_override( 'page', '<!-- wp:paragraph --><p>client recreated</p><!-- /wp:paragraph -->' );
+
+		// ...and the canonical manifest records the record as present-state
+		// with a semantic hash that does not match the live row.
+		$canonical = $this->store->load_canonical( $this->promotion_id() );
+
+		$this->store->write_canonical(
+			$canonical->with_record_changes(
+				'templates:page',
+				array(
+					'postFinalizeRecordState'  => 'present',
+					'postFinalizeSemanticHash' => str_repeat( 'f', 64 ),
+					'postFinalizeModifiedGmt'  => null,
+				)
+			)
+		);
+
+		$outcome = $this->rollback->rollback( $this->manifest_path );
+
+		self::assertSame( 'changed-since-finalize', $outcome['manifest']->record( 'templates:page' )['rollbackRefusalReason'] );
+		self::assertSame( 'refused', $outcome['manifest']->record( 'templates:page' )['rollbackStatus'] );
+		self::assertStringContainsString( 'client recreated', $this->read_override( 'page' )->post_content, 'A refused present-state record must survive rollback untouched.' );
+	}
+
+	/**
+	 * A corrupt rollback payload must abort the run loudly: the backup is
+	 * the only remaining copy of the customer's row, so a partial restore
+	 * would destroy the last good copy.
+	 */
+	public function test_a_corrupt_rollback_payload_aborts_the_run(): void {
+		$this->finalize_fixture();
+
+		$this->corrupt_backup_chunk( 'templates:page' );
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->rollback->rollback( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'corrupt', $exception->getMessage() );
+		self::assertSame(
+			'pending',
+			$this->store->load_canonical( $this->promotion_id() )->settlement_status(),
+			'An aborted rollback must not settle anything.'
+		);
+	}
+
+	/**
+	 * A restore that itself throws must abort the rollback — reporting the
+	 * record restored would lie about a row that was never recreated.
+	 */
+	public function test_a_restore_that_throws_aborts_the_rollback(): void {
+		$this->finalize_fixture();
+
+		// Replace the backup with a self-consistent payload that has no post
+		// row, so the strategy's restore refuses AFTER retrieval succeeded.
+		$this->replace_backup_without_post_row( 'templates:page' );
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->rollback->rollback( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'post row', $exception->getMessage() );
+		self::assertNull(
+			( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ),
+			'An aborted rollback must release every lock it acquired.'
+		);
+	}
+
+	/**
+	 * Bounded-review gap: a restored row whose content does NOT match the
+	 * recorded original must be flagged restored-hash-mismatch and refused —
+	 * never reported as a clean restore.
+	 */
+	public function test_a_restored_row_that_does_not_match_the_original_is_flagged(): void {
+		$this->finalize_fixture();
+
+		// Corrupt the recorded original hash in the canonical manifest: the
+		// restore itself reproduces the real row byte-exactly, so only the
+		// post-restore verification can catch the discrepancy.
+		$canonical = $this->store->load_canonical( $this->promotion_id() );
+
+		$this->store->write_canonical(
+			$canonical->with_record_changes( 'templates:page', array( 'originalContentHash' => str_repeat( '0', 64 ) ) )
+		);
+
+		$outcome = $this->rollback->rollback( $this->manifest_path );
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'restored-hash-mismatch', $outcome['manifest']->record( 'templates:page' )['rollbackStatus'] );
+
+		$reported = array();
+
+		foreach ( $outcome['outcome']->refusals() as $refusal ) {
+			$reported[] = $refusal->reason_code;
+		}
+
+		self::assertContains( 'restored-hash-mismatch', $reported, 'The refusal report must carry the mismatch reason.' );
+		self::assertNotNull( $this->gateway->live_state_record( 'templates', 'page' ), 'The row must still be restored — only its verification failed.' );
+	}
+
+	/**
+	 * Bounded-review gap: a PARTIAL rollback — at least one restored record
+	 * and at least one refused — must settle as partially-rolled-back, never
+	 * as a clean rolled-back.
+	 */
+	public function test_a_partial_rollback_reports_partially_rolled_back(): void {
+		$path = $this->finalize_two_record_state();
+
+		$this->create_override( 'page', '<!-- wp:paragraph --><p>newer client work</p><!-- /wp:paragraph -->' );
+
+		$outcome = $this->rollback->rollback( $path );
+
+		self::assertSame( 2, $outcome['outcome']->exit_code() );
+		self::assertSame( 'partially-rolled-back', $outcome['manifest']->settlement_status() );
+		self::assertSame( 'restored', $outcome['manifest']->record( 'template-parts:site-header' )['rollbackStatus'] );
+		self::assertSame( 'refused', $outcome['manifest']->record( 'templates:page' )['rollbackStatus'] );
+	}
+
+	/**
+	 * Bounded-review gap: the ROOT manifest finalizeStatus must return to
+	 * pending after a rollback restores every record, so the same manifest
+	 * is re-finalisable — the record-level check alone would miss a manifest
+	 * left claiming 'complete'.
+	 */
+	public function test_a_rollback_resets_the_root_manifest_finalize_status(): void {
+		$this->finalize_fixture();
+
+		$outcome = $this->rollback->rollback( $this->manifest_path );
+
+		self::assertSame( 0, $outcome['outcome']->exit_code() );
+		self::assertSame( 'pending', $outcome['manifest']->finalize_status(), 'A full rollback must return the whole manifest to a re-finalisable state.' );
+		self::assertSame( 'rolled-back', $outcome['manifest']->settlement_status() );
 	}
 
 	public function test_rollback_restores_parts_before_templates(): void {
@@ -522,6 +748,45 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		}
 
 		delete_option( $prefix . '_meta' );
+	}
+
+	/**
+	 * Corrupts chunk 0 of one record key's backup with VALID JSON, so
+	 * retrieve() fails its sha256 verification and refuses loudly — a byte
+	 * mismatch that still parses is exactly what only the sha256 check can
+	 * catch.
+	 */
+	private function corrupt_backup_chunk( string $record_key ): void {
+		$prefix = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', $record_key );
+
+		update_option( $prefix . '_c0000', '{"post":[]}', false );
+	}
+
+	/**
+	 * Overwrites one record key's backup options with a self-consistent
+	 * payload that has NO post row, so the strategy's restore() refuses with
+	 * its own hard error after retrieve() succeeded.
+	 */
+	private function replace_backup_without_post_row( string $record_key ): void {
+		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', $record_key );
+		$payload = wp_json_encode(
+			array(
+				'terms' => array(),
+				'meta'  => array(),
+			)
+		);
+
+		update_option(
+			$prefix . '_meta',
+			array(
+				'chunks'    => 1,
+				'bytes'     => strlen( (string) $payload ),
+				'sha256'    => hash( 'sha256', (string) $payload ),
+				'recordKey' => $record_key,
+			),
+			false
+		);
+		update_option( $prefix . '_c0000', $payload, false );
 	}
 
 	private function promotion_id(): string {
