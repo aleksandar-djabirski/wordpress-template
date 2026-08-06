@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+#
+# Deployment-side orchestration for the promotion lifecycle (master spec
+# section 6, plan Task 19): finalizes a sealed promotion manifest on the
+# WordPress host, verifies the deployed frontend, then confirms the
+# promotion or rolls it back. Runs where CI runs, never on the WordPress
+# host -- which may have no Node, no Playwright browsers and no repository
+# checkout. Every host operation goes through the remote WP-CLI command
+# AGENCY_REMOTE_WP_CLI_COMMAND.
+#
+# Usage: promote-overrides --manifest=<local path> [--dry-run]
+#
+# Required environment: AGENCY_REMOTE_WP_CLI_COMMAND, AGENCY_DEPLOY_URL,
+# AGENCY_REMOTE_STATE_DIR, AGENCY_PLAYWRIGHT_PROJECT,
+# AGENCY_VERIFICATION_TIMEOUT. Optional: AGENCY_PROMOTION_LOG_DIR,
+# AGENCY_HEARTBEAT_INTERVAL, AGENCY_PLAYWRIGHT_COMMAND,
+# AGENCY_PLAYWRIGHT_TESTS.
+#
+# Exit codes mirror the PHP layer so the operator can tell a lock conflict
+# from tamper: 0 success, 1 hard error, 2 partial success, 3 lock conflict,
+# 4 tamper detection.
+set -euo pipefail
+
+MANIFEST=''
+DRY_RUN=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --manifest=*)
+      MANIFEST="${arg#--manifest=}"
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      ;;
+    *)
+      echo "error: unknown argument: $arg" >&2
+      echo "usage: promote-overrides --manifest=<local path> [--dry-run]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [ -z "$MANIFEST" ]; then
+  echo "error: --manifest=<local path> is required." >&2
+  echo "usage: promote-overrides --manifest=<local path> [--dry-run]" >&2
+  exit 1
+fi
+
+MISSING=0
+for var in AGENCY_REMOTE_WP_CLI_COMMAND AGENCY_DEPLOY_URL AGENCY_REMOTE_STATE_DIR AGENCY_PLAYWRIGHT_PROJECT AGENCY_VERIFICATION_TIMEOUT; do
+  if [ -z "${!var:-}" ]; then
+    echo "error: missing required environment variable: $var" >&2
+    MISSING=1
+  fi
+done
+if [ "$MISSING" -eq 1 ]; then
+  exit 1
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "error: node is required for the promotion wrapper release gate." >&2
+  exit 1
+fi
+
+PROMOTION_ID="$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).promotionId)' "$MANIFEST")"
+if [ -z "$PROMOTION_ID" ]; then
+  echo "error: the manifest at $MANIFEST has no promotionId." >&2
+  exit 1
+fi
+
+REMOTE_MANIFEST="${AGENCY_REMOTE_STATE_DIR%/}/$(basename "$MANIFEST")"
+
+# The wrapper does NOT transfer the file: master spec section 7.7 makes
+# placing the protected CI artifact into AGENCY_STATE_DIR the deployment
+# pipeline's job.
+echo "note: place the protected manifest at $REMOTE_MANIFEST on the host before finalize; this wrapper does not transfer it (master spec section 7.7)." >&2
+
+LOG_DIR="${AGENCY_PROMOTION_LOG_DIR:-./promotion-logs}/$PROMOTION_ID"
+mkdir -p "$LOG_DIR"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "run_remote agency promote-overrides --finalize --manifest=$REMOTE_MANIFEST"
+  echo "run_remote agency promote-overrides --heartbeat --manifest=$REMOTE_MANIFEST"
+  echo "WP_BASE_URL=$AGENCY_DEPLOY_URL ${AGENCY_PLAYWRIGHT_COMMAND:-npx playwright test} --project=$AGENCY_PLAYWRIGHT_PROJECT ${AGENCY_PLAYWRIGHT_TESTS:-tests/e2e}"
+  echo "run_remote agency promote-overrides --confirm --manifest=$REMOTE_MANIFEST"
+  echo "run_remote agency promote-overrides --rollback --manifest=$REMOTE_MANIFEST"
+  exit 0
+fi
+
+# AGENCY_VERIFICATION_TIMEOUT accepts plain seconds (600) or a duration
+# with a trailing m (10m); an empty or malformed value is a hard error.
+# The parsed value is a shell-local variable -- it is never exported as a
+# second AGENCY_* variable -- and the deadline arithmetic never depends on
+# GNU timeout suffix parsing.
+parse_verify_timeout() {
+  local input="${AGENCY_VERIFICATION_TIMEOUT}"
+  local seconds="${input%m}"
+  if [ "$seconds" = "$input" ]; then
+    case "$input" in
+      ''|*[!0-9]*)
+        echo "error: AGENCY_VERIFICATION_TIMEOUT must be seconds or a duration like 10m." >&2
+        exit 1
+        ;;
+    esac
+    verify_timeout_seconds="$input"
+  else
+    case "$seconds" in
+      ''|*[!0-9]*)
+        echo "error: AGENCY_VERIFICATION_TIMEOUT must be seconds or a duration like 10m." >&2
+        exit 1
+        ;;
+    esac
+    verify_timeout_seconds=$(( seconds * 60 ))
+  fi
+  if [ "$verify_timeout_seconds" -le 0 ]; then
+    echo "error: AGENCY_VERIFICATION_TIMEOUT must be greater than zero." >&2
+    exit 1
+  fi
+}
+parse_verify_timeout
+
+# The remote adapter: AGENCY_REMOTE_WP_CLI_COMMAND is a shell command
+# string that legitimately contains quotes (e.g. ssh deploy@example.com
+# 'cd /var/www && wp'), so it must be executed by a shell, while every
+# argument the wrapper appends is quoted individually with printf %q.
+run_remote() {
+  local quoted=''
+  local arg
+  for arg in "$@"; do
+    quoted+=" $(printf '%q' "$arg")"
+  done
+  bash -c "${AGENCY_REMOTE_WP_CLI_COMMAND}${quoted}"
+}
+
+# Lifecycle flags guarantee settlement (confirm or rollback) happens at
+# most once, and only after a finalized promotion. The ERR trap settles a
+# rollback on any unexpected failure; the EXIT trap kills the heartbeat
+# loop and settles a rollback on every exit path that has not already
+# settled.
+FINALIZED=0
+SETTLED=0
+FINALIZE_STATUS=0
+
+settle() {                    # settle confirm | settle rollback
+  [ "$SETTLED" -eq 1 ] && return 0
+  [ "$FINALIZED" -eq 0 ] && return 0
+  SETTLED=1
+  run_remote agency promote-overrides "--$1" --manifest="$REMOTE_MANIFEST" 2>&1 | tee "$LOG_DIR/$1.log"
+}
+
+trap 'settle rollback' ERR INT TERM
+trap '[ -z "${HEARTBEAT_PID:-}" ] || kill "$HEARTBEAT_PID" 2>/dev/null || true; settle rollback' EXIT
+
+# Finalize into its own log, capturing the exit code. 0 or 2 proceeds; a
+# lock conflict (3), a hard error (1) or tamper detection (4) exits with
+# that same code and does NOT roll back -- a lock conflict released its own
+# locks, and a hard error either happened before any mutation or was
+# already self-restored.
+set +e
+run_remote agency promote-overrides --finalize --manifest="$REMOTE_MANIFEST" >"$LOG_DIR/finalize.log" 2>&1
+FINALIZE_STATUS=$?
+set -e
+
+case "$FINALIZE_STATUS" in
+  0|2)
+    FINALIZED=1
+    ;;
+  *)
+    exit "$FINALIZE_STATUS"
+    ;;
+esac
+
+# The heartbeat loop keeps the per-record promotion locks alive while
+# verification runs; a lost lock writes a sentinel the polling loop below
+# watches, because the wrapper must never confirm a promotion it no longer
+# owns.
+( while sleep "${AGENCY_HEARTBEAT_INTERVAL:-60}"; do
+    run_remote agency promote-overrides --heartbeat --manifest="$REMOTE_MANIFEST" >>"$LOG_DIR/heartbeat.log" 2>&1 \
+      || { touch "$LOG_DIR/heartbeat.failed"; break; }
+  done ) &
+HEARTBEAT_PID=$!
+
+( WP_BASE_URL="$AGENCY_DEPLOY_URL" ${AGENCY_PLAYWRIGHT_COMMAND:-npx playwright test} \
+    --project="$AGENCY_PLAYWRIGHT_PROJECT" "${AGENCY_PLAYWRIGHT_TESTS:-tests/e2e}" ) >"$LOG_DIR/verify.log" 2>&1 &
+VERIFY_PID=$!
+DEADLINE=$(( $(date +%s) + verify_timeout_seconds ))
+
+VERIFY_STATUS=0
+while kill -0 "$VERIFY_PID" 2>/dev/null; do
+  if [ -f "$LOG_DIR/heartbeat.failed" ]; then
+    echo "error: the promotion lock was lost; stopping verification." >&2
+    kill "$VERIFY_PID" 2>/dev/null || true
+    VERIFY_STATUS=1
+    break
+  fi
+  if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+    echo "error: verification exceeded AGENCY_VERIFICATION_TIMEOUT." >&2
+    kill "$VERIFY_PID" 2>/dev/null || true
+    VERIFY_STATUS=1
+    break
+  fi
+  sleep 2
+done
+wait "$VERIFY_PID" 2>/dev/null || VERIFY_STATUS=1
+
+if [ "$VERIFY_STATUS" -eq 0 ]; then
+  settle confirm
+  if [ "$FINALIZE_STATUS" -eq 2 ]; then
+    echo "note: finalize was partial (exit 2); confirming the succeeded records." >&2
+    exit 2
+  fi
+  exit 0
+fi
+
+echo "error: verification failed; rolling back the promotion." >&2
+set +e
+settle rollback
+ROLLBACK_STATUS=$?
+set -e
+echo "error: promotion logs are in $LOG_DIR" >&2
+if [ "$ROLLBACK_STATUS" -ne 0 ]; then
+  echo "error: rollback failed with exit code $ROLLBACK_STATUS; manual intervention is required." >&2
+fi
+if [ "$ROLLBACK_STATUS" -gt 1 ]; then
+  exit "$ROLLBACK_STATUS"
+fi
+exit 1
