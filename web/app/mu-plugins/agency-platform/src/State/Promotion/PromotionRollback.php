@@ -22,10 +22,13 @@ use AgencyPlatform\State\StateRecord;
  * --finalize on the same manifest passes its concurrency check instead of
  * refusing on a stale identity.
  *
- * The locks are re-acquired for the attempt (confirm released them) and
- * every lock the attempt acquired is released in a finally — a refused,
- * skipped, restored or exception-aborted record never holds a lock until
- * its TTL.
+ * The locks are re-acquired for the attempt and every lock the attempt
+ * acquired is released in a finally — a refused, skipped, restored or
+ * exception-aborted record never holds a lock until its TTL. Rollback
+ * refuses, with exit 1 before any lock is acquired, a manifest that was
+ * never finalized (the same guard confirm uses) and a CONFIRMED promotion:
+ * confirm is the point of no return, because retention may prune the
+ * backups at any moment after it.
  */
 final class PromotionRollback {
 
@@ -37,8 +40,9 @@ final class PromotionRollback {
 	/**
 	 * @return array{manifest: PromotionManifest, outcome: PromotionOutcome}
 	 * @throws PromotionException Exit 1 when the promotion was never
-	 *                            finalized or the canonical copy is missing,
-	 *                            exit 3 on a lock conflict.
+	 *                            finalized, is already confirmed, or the
+	 *                            canonical copy is missing, exit 3 on a
+	 *                            lock conflict.
 	 */
 	public function rollback( string $manifest_path_or_dash ): array {
 		$input = $this->store->load( $manifest_path_or_dash );
@@ -53,6 +57,19 @@ final class PromotionRollback {
 			return array(
 				'manifest' => $manifest,
 				'outcome'  => new PromotionOutcome( $this->all_skipped_outcomes( $manifest ), array() ),
+			);
+		}
+
+		if ( 'pending' === $manifest->finalize_status() ) {
+			throw PromotionException::hard( sprintf( 'Promotion %s was never finalized.', $id ) );
+		}
+
+		if ( 'confirmed' === $manifest->settlement_status() ) {
+			// Confirm is the point of no return: retention may prune the
+			// backups at any moment after it, so a rollback that appears to
+			// work could silently restore nothing.
+			throw PromotionException::hard(
+				sprintf( 'Promotion %s is already confirmed; rollback is refused after confirm.', $id )
 			);
 		}
 

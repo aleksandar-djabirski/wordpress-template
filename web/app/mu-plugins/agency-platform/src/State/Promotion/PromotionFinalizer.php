@@ -376,9 +376,13 @@ final class PromotionFinalizer {
 			);
 		}
 
-		// 2. The concurrency check: content hash AND modification marker must
-		// both still match what the manifest recorded.
-		if ( $live->content_hash() !== ( is_string( $record['originalContentHash'] ?? null ) ? $record['originalContentHash'] : '' )
+		// 2. The concurrency check: object id, content hash AND modification
+		// marker must all still match what the manifest recorded. The object
+		// id comparison catches a row that was deleted and recreated with
+		// identical content and modification marker — the other two alone
+		// would accept the new row as the one the export prepared against.
+		if ( $live->object_id() !== ( $record['objectId'] ?? null )
+			|| $live->content_hash() !== ( is_string( $record['originalContentHash'] ?? null ) ? $record['originalContentHash'] : '' )
 			|| $live->modified_gmt() !== ( $record['originalModifiedGmt'] ?? null ) ) {
 			return $this->refuse_record(
 				$manifest,

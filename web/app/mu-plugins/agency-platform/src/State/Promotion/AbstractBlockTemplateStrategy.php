@@ -240,14 +240,36 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 	 * of being collapsed into one serialized array by update_post_meta().
 	 * The new id is exposed through last_restored_object_id().
 	 *
+	 * The ENTIRE payload is validated before anything is written: a backup
+	 * with no post row, no terms list, or no meta map is a hard error with
+	 * NO write attempted. A failure in any step AFTER the insert deletes
+	 * the newly created row before rethrowing — a half-restored row would
+	 * otherwise make the next rollback retry see it as a client recreation
+	 * and refuse. WordPress offers no portable database transaction here,
+	 * so the undo is explicit.
+	 *
 	 * @param array<string, mixed> $backup
 	 */
 	public function restore( StateRecord $record, array $backup ): void {
-		$post = isset( $backup['post'] ) && is_array( $backup['post'] ) ? $backup['post'] : null;
+		$post  = isset( $backup['post'] ) && is_array( $backup['post'] ) ? $backup['post'] : null;
+		$terms = isset( $backup['terms'] ) && is_array( $backup['terms'] ) ? $backup['terms'] : null;
+		$meta  = isset( $backup['meta'] ) && is_array( $backup['meta'] ) ? $backup['meta'] : null;
 
 		if ( null === $post ) {
 			throw PromotionException::hard(
 				sprintf( 'Cannot restore %s: its backup carries no post row.', $record->key() )
+			);
+		}
+
+		if ( null === $terms ) {
+			throw PromotionException::hard(
+				sprintf( 'Cannot restore %s: its backup carries no terms list.', $record->key() )
+			);
+		}
+
+		if ( null === $meta ) {
+			throw PromotionException::hard(
+				sprintf( 'Cannot restore %s: its backup carries no meta map.', $record->key() )
 			);
 		}
 
@@ -269,28 +291,33 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 
 		$this->last_restored_object_id = (int) $new_id;
 
-		$terms = wp_set_object_terms( $new_id, $backup['terms'], 'wp_theme' );
+		try {
+			$terms_result = wp_set_object_terms( $new_id, $terms, 'wp_theme' );
 
-		if ( is_wp_error( $terms ) ) {
-			throw PromotionException::hard(
-				sprintf( 'Could not restore the wp_theme terms of %s: %s', $record->key(), $terms->get_error_message() )
-			);
-		}
-
-		$meta = isset( $backup['meta'] ) && is_array( $backup['meta'] ) ? $backup['meta'] : array();
-
-		foreach ( $meta as $key => $values ) {
-			if ( ! is_string( $key ) || ! is_array( $values ) ) {
-				continue;
+			if ( is_wp_error( $terms_result ) ) {
+				throw PromotionException::hard(
+					sprintf( 'Could not restore the wp_theme terms of %s: %s', $record->key(), $terms_result->get_error_message() )
+				);
 			}
 
-			foreach ( (array) $values as $value ) {
-				if ( false === add_post_meta( $new_id, $key, maybe_unserialize( $value ) ) ) {
-					throw PromotionException::hard(
-						sprintf( 'Could not restore the meta key "%s" of %s.', $key, $record->key() )
-					);
+			foreach ( $meta as $key => $values ) {
+				if ( ! is_string( $key ) || ! is_array( $values ) ) {
+					continue;
+				}
+
+				foreach ( (array) $values as $value ) {
+					if ( false === add_post_meta( $new_id, $key, maybe_unserialize( $value ) ) ) {
+						throw PromotionException::hard(
+							sprintf( 'Could not restore the meta key "%s" of %s.', $key, $record->key() )
+						);
+					}
 				}
 			}
+		} catch ( PromotionException $exception ) {
+			// Delete the newly created row so a retry starts clean.
+			wp_delete_post( (int) $new_id, true );
+
+			throw $exception;
 		}
 	}
 

@@ -262,6 +262,58 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 		self::assertSame( 'concurrent-delete', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
 	}
 
+	/**
+	 * Bounded-review finding 4: the concurrency check must ALSO compare
+	 * objectId. A row deleted and recreated with identical content and an
+	 * identical modification marker slips past the content-hash and
+	 * modified-gmt comparisons alone — the recreated row must be refused as
+	 * a concurrent edit, never promoted.
+	 */
+	public function test_a_recreated_row_with_identical_content_and_marker_is_refused(): void {
+		$original = $this->read_override( 'page' );
+
+		self::assertNotNull( $original );
+
+		$original_id = (int) $original->ID;
+
+		$this->delete_override( 'page' );
+
+		// Recreate the row with the SAME content and the ORIGINAL row's
+		// dates: wp_insert_post() derives post_modified/post_modified_gmt
+		// from post_date/post_date_gmt on insert (wp-includes/post.php), so
+		// the recreated row carries the same content hash AND the same
+		// modification marker — only its objectId differs from what the
+		// manifest recorded.
+		$recreated_id = wp_insert_post(
+			array(
+				'post_type'     => 'wp_template',
+				'post_name'     => 'page',
+				'post_status'   => 'publish',
+				'post_content'  => '<!-- wp:paragraph --><p>DB page body</p><!-- /wp:paragraph -->',
+				'post_date'     => $original->post_modified,
+				'post_date_gmt' => $original->post_modified_gmt,
+			),
+			true
+		);
+
+		self::assertNotWPError( $recreated_id );
+
+		wp_set_object_terms( (int) $recreated_id, get_stylesheet(), 'wp_theme' );
+
+		$recreated = $this->read_override( 'page' );
+
+		self::assertNotNull( $recreated );
+		self::assertNotSame( $original_id, (int) $recreated->ID, 'The recreated row must be a NEW row for this test to mean anything.' );
+		self::assertSame( $original->post_modified_gmt, $recreated->post_modified_gmt, 'The recreated row must carry the same modification marker, so only the objectId comparison can catch the swap.' );
+		self::assertSame( $this->original_content_hash, $this->live_record( 'templates', 'page' )->content_hash(), 'The recreated row must carry the same content hash.' );
+
+		$outcome = $this->finalizer->finalize( $this->manifest_path );
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'concurrent-edit', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+		self::assertNotNull( $this->read_override( 'page' ), 'A refused record must survive finalize untouched.' );
+	}
+
 	public function test_locks_are_released_for_every_record_that_was_not_promoted(): void {
 		$this->edit_template_override_after_export();
 

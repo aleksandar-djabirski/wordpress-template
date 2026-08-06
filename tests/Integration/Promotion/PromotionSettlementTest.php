@@ -249,12 +249,63 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		self::assertSame( 'pending', $record['finalizeStatus'] );
 	}
 
-	public function test_rollback_remains_possible_after_confirm_within_the_retention_window(): void {
+	/**
+	 * Orchestrator ruling (bounded-review finding 1): confirm is the point
+	 * of no return — retention may prune the backups at any moment after it
+	 * — so a confirmed manifest must be refused with exit 1 BEFORE any lock
+	 * is acquired.
+	 */
+	public function test_rollback_refuses_a_confirmed_manifest(): void {
 		$this->finalize_fixture();
 
 		$this->confirmer->confirm( $this->manifest_path );
 
-		self::assertSame( 0, $this->rollback->rollback( $this->manifest_path )['outcome']->exit_code() );
+		$exception = $this->assert_exit_code( 1, fn() => $this->rollback->rollback( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'confirm', $exception->getMessage() );
+	}
+
+	/**
+	 * Bounded-review finding 3: a manifest that was never finalized must be
+	 * refused with the same guard and exit code confirm uses — a pending
+	 * manifest must never be marked partially-rolled-back by a
+	 * missing-backup refusal.
+	 */
+	public function test_rollback_refuses_a_manifest_that_was_never_finalized(): void {
+		$this->store->write( $this->sealed_page_manifest(), $this->store->canonical_path( self::PROMOTION_ID ) );
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->rollback->rollback( $this->manifest_path ) );
+
+		self::assertStringContainsString( 'never finalized', $exception->getMessage() );
+		self::assertStringContainsString( self::PROMOTION_ID, $exception->getMessage() );
+	}
+
+	/**
+	 * Bounded-review finding 2: a failure after the insert (terms or meta)
+	 * must DELETE the newly created row — otherwise a retry sees the
+	 * half-restored row as a client recreation and refuses, and the content
+	 * is unrecoverable by the normal path.
+	 */
+	public function test_a_failed_meta_restore_deletes_the_partially_inserted_row(): void {
+		$this->finalize_fixture();
+
+		// add_post_metadata returning false makes every add_post_meta() call
+		// fail AFTER wp_insert_post() has already created the row.
+		add_filter( 'add_post_metadata', array( $this, 'refuse_meta_write' ), 10, 5 );
+
+		try {
+			$exception = $this->assert_exit_code( 1, fn() => $this->rollback->rollback( $this->manifest_path ) );
+
+			self::assertStringContainsString( 'meta', $exception->getMessage() );
+
+			$created_id = $this->real_strategies['templates']->last_restored_object_id();
+
+			self::assertNotNull( $created_id, 'The restore must have inserted the row before the meta write failed.' );
+			self::assertNull( get_post( $created_id ), 'A failed restore must delete the partially inserted row.' );
+			self::assertCount( 0, $this->overrides_named( 'page' ) );
+		} finally {
+			remove_filter( 'add_post_metadata', array( $this, 'refuse_meta_write' ), 10 );
+		}
 	}
 
 	public function test_rollback_is_idempotent(): void {
@@ -351,6 +402,15 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	 */
 	public function fixture_stylesheet_directory( string $stylesheet_dir ): string {
 		return $this->theme_dir;
+	}
+
+	/**
+	 * Named filter callback — never a closure (master spec §4). Returning
+	 * false from add_post_metadata makes every add_post_meta() call fail, so
+	 * the restore's post-insert meta step fails deterministically.
+	 */
+	public function refuse_meta_write( $check, $object_id, $meta_key, $meta_value, $unique ): bool {
+		return false;
 	}
 
 	/**
