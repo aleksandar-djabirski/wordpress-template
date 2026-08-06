@@ -54,35 +54,35 @@ final class PromotionCommands {
 	 *
 	 * ## OPTIONS
 	 *
-	 * --prepare
+	 * [--prepare]
 	 * : Stage the selected records into prepared files and write a signed,
 	 *   unsealed manifest. Requires --source, --select and --manifest.
 	 *
-	 * --seal
+	 * [--seal]
 	 * : Bind the prepared files to a deploy commit. Requires --manifest
 	 *   and --deploy-commit.
 	 *
-	 * --finalize
+	 * [--finalize]
 	 * : Apply the sealed manifest to this host's database. Requires
 	 *   --manifest.
 	 *
-	 * --confirm
+	 * [--confirm]
 	 * : Settle a finalized promotion as confirmed, releasing its locks.
 	 *   Requires --manifest.
 	 *
-	 * --rollback
+	 * [--rollback]
 	 * : Restore the pre-finalize database rows from the protected backups.
 	 *   Requires --manifest.
 	 *
-	 * --heartbeat
+	 * [--heartbeat]
 	 * : Refresh the promotion's per-record locks. Requires --manifest.
 	 *
-	 * --source=<path|-->
+	 * [--source=<path|-->]
 	 * : The state bundle to promote from. `-` reads the bundle JSON from
 	 *   STDIN. Required for --prepare.
 	 *
-	 * --select=<provider:slug,...>
-	 * : The comma-separated records to promote, e.g.
+	 * [--select=<records>]
+	 * : The comma-separated provider:slug records to promote, e.g.
 	 *   `templates:page,template-parts:site-header`. Required for
 	 *   --prepare.
 	 *
@@ -91,7 +91,7 @@ final class PromotionCommands {
 	 *   --prepare and --seal, and reads it from STDIN for every other mode.
 	 *   Required for every mode.
 	 *
-	 * --deploy-commit=<sha>
+	 * [--deploy-commit=<sha>]
 	 * : The 40-hex commit the prepared files are sealed to. Required for
 	 *   --seal.
 	 *
