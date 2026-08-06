@@ -79,10 +79,13 @@ final class ReferenceResolver {
 
 	/**
 	 * A navigation or synced-pattern reference: the value is the referenced
-	 * post's ID. The record slug mirrors the owning provider's rule —
-	 * post_name, with the provider-specific fallback for blank names — and
-	 * the target is re-read with $with_references = false, which is the
-	 * recursion guard.
+	 * post's ID. A navigation reference whose value is null has no explicit
+	 * ref (or a non-integer one) and resolves WordPress core's deterministic
+	 * fallback — the most recently published wp_navigation post — so the
+	 * source side records exactly what core will resolve at render time. The
+	 * record slug mirrors the owning provider's rule — post_name, with the
+	 * provider-specific fallback for blank names — and the target is re-read
+	 * with $with_references = false, which is the recursion guard.
 	 *
 	 * @param array<string, mixed> $reference
 	 * @return array<string, mixed>
@@ -90,11 +93,13 @@ final class ReferenceResolver {
 	private static function resolve_post_reference( array $reference, string $post_type, string $fallback_prefix ): array {
 		$value = $reference['value'];
 
-		if ( ! is_int( $value ) && ! is_string( $value ) ) {
+		if ( is_int( $value ) || is_string( $value ) ) {
+			$post = get_post( (int) $value );
+		} elseif ( 'wp_navigation' === $post_type ) {
+			$post = self::most_recently_published_navigation();
+		} else {
 			return $reference;
 		}
-
-		$post = get_post( (int) $value );
 
 		if ( null === $post || $post_type !== $post->post_type ) {
 			return $reference;
@@ -123,6 +128,31 @@ final class ReferenceResolver {
 		);
 
 		return $reference;
+	}
+
+	/**
+	 * WordPress core's deterministic navigation fallback (the same query
+	 * WP_Navigation_Fallback runs): the most recently published wp_navigation
+	 * post, or null when none exists — the fail-closed outcome that leaves
+	 * the ref-less reference unresolved for the promotion policy to refuse.
+	 */
+	private static function most_recently_published_navigation(): ?\WP_Post {
+		$posts = get_posts(
+			array(
+				'post_type'      => 'wp_navigation',
+				'post_status'    => 'publish',
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+				'posts_per_page' => 1,
+				'no_found_rows'  => true,
+			)
+		);
+
+		if ( array() === $posts ) {
+			return null;
+		}
+
+		return $posts[0];
 	}
 
 	/**

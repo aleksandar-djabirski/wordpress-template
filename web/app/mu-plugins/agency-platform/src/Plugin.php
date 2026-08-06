@@ -42,6 +42,7 @@ final class Plugin {
 			new MailGuard(),
 			new AgencyCommands(),
 			new \AgencyPlatform\State\StateSubsystem(),
+			new \AgencyPlatform\State\Promotion\PromotionSubsystem(),
 		);
 
 		foreach ( $providers as $provider ) {

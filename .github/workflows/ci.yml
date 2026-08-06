@@ -384,6 +384,14 @@ jobs:
           WP_BASE_URL: https://agency-starter.ddev.site
         run: npm run test:parity -- --workers=1
 
+      # Required release gate. The spec uses a test-only key inside its
+      # isolated DDEV site. Production keyrings still come from the host's
+      # secret store.
+      - name: Run promotion lifecycle end-to-end gate
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:e2e:promotion
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7
