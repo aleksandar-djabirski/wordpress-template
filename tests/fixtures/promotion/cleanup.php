@@ -14,7 +14,11 @@
  * @package Tests\E2e\Fixtures
  */
 
-declare(strict_types=1);
+// NOTE: no declare(strict_types=1) here, deliberately. wp eval-file wraps
+// this file in eval(), where a declare() is not the first statement in the
+// script. CI proved it:
+//   Fatal error: strict_types declaration must be the very first statement
+//   in the script ... EvalFile_Command.php(85) : eval()d code on line 17
 
 $part_ids = get_posts(
 	array(

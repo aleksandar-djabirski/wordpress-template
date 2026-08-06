@@ -11,7 +11,7 @@
     "lint": "npm run lint:js && npm run lint:css",
     "lint:js": "wp-scripts lint-js web/app/themes/site-theme/blocks",
     "lint:css": "stylelint \"web/app/themes/site-theme/**/*.css\" --ignore-pattern \"web/app/themes/site-theme/**/build/**\"",
-    "test:e2e": "playwright test tests/e2e",
+    "test:e2e": "playwright test tests/e2e --project=chromium-desktop --project=chromium-mobile",
     "test:e2e:commerce": "playwright test tests/commerce/e2e",
     "test:e2e:promotion": "playwright test tests/e2e/promotion-lifecycle.spec.ts --project=promotion --workers=1",
     "test:visual": "playwright test tests/visual",
