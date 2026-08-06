@@ -14,10 +14,13 @@ use AgencyPlatform\State\StateRecord;
  * NOTHING: an unsealed manifest, a deploy-commit mismatch, a theme
  * stylesheet OR version mismatch, a site uuid / URL / environment mismatch,
  * and any deployed file whose bytes no longer match its signed hash are all
- * exit 1 (exit 4 for tamper). Then the per-record loop promotes every
- * pending record: re-read the live row and refuse on any concurrent change,
- * verify the navigation expectation against the target's deterministic
- * fallback, back the row up, reset it, flush the runtime cache and confirm
+ * exit 1 (exit 4 for tamper). Then the canonical host manifest is written
+ * as the durable recovery record — BEFORE the first reset, with every
+ * record still pending, and again as each record completes — and the
+ * per-record loop promotes every pending record: re-read the live row and
+ * refuse on any concurrent change, verify the navigation expectation
+ * against the target's deterministic fallback, back the row up AND verify
+ * the backup is retrievable, reset it, flush the runtime cache and confirm
  * the resolved state equals the recorded expected hash — restoring the row
  * from the backup when it does not. Every record that is NOT left promoted
  * has its lock released, so a refused or self-restored record never holds
@@ -99,9 +102,12 @@ final class PromotionFinalizer {
 
 	/**
 	 * The §7.8 entry point: run-level guards, then the per-record promotion
-	 * loop, then the durable manifest write. When $manifest_path_or_dash is
-	 * a real file, the updated manifest is written back to it AND to the
-	 * canonical host copy.
+	 * loop, then the durable manifest write. The canonical host manifest is
+	 * written BEFORE the first reset — with every record still pending — and
+	 * rewritten as each record completes, so a failed write or a crash
+	 * mid-loop can never leave the rows deleted with no recovery record.
+	 * When $manifest_path_or_dash is a real file, the updated manifest is
+	 * written back to it AND to the canonical host copy.
 	 *
 	 * @return array{manifest: PromotionManifest, outcome: PromotionOutcome}
 	 * @throws PromotionException Exit 1 for run-level refusals, exit 4 for
@@ -135,8 +141,21 @@ final class PromotionFinalizer {
 		$refusals = array();
 
 		try {
+			// CRITICAL 2 (whole-unit review): the canonical manifest is the
+			// durable recovery record, and it is written BEFORE the first
+			// reset — with every record still pending. If THIS write fails,
+			// nothing has been reset yet and the run aborts with the database
+			// untouched. The old order wrote it only AFTER every row was
+			// reset: a failed write then left the rows deleted, the backup
+			// present, and NO canonical for --rollback to load.
+			$this->store->write_canonical( $manifest );
+
 			foreach ( $pending as $key ) {
 				$manifest = $this->promote_record( $key, $manifest, $backup, $outcomes, $refusals );
+
+				// ...and rewritten as each record completes, so an exception
+				// mid-loop cannot take the completed records' state with it.
+				$this->store->write_canonical( $manifest );
 			}
 
 			$finalized_at = gmdate( 'Y-m-d\TH:i:s\Z' );
@@ -417,6 +436,48 @@ final class PromotionFinalizer {
 		// reset runs; it is captured before anything is destroyed.
 		$backup->store( $key, $strategy->capture_backup( $live ) );
 
+		// 4a. CRITICAL 1 (whole-unit review): the backup must be RETRIEVABLE
+		// before the reset. store() returning success proves nothing until
+		// retrieve() reads it back — a missing meta row or a corrupt chunk
+		// used to surface only at restore time, AFTER the reset had deleted
+		// the customer's row. A backup that cannot be retrieved refuses this
+		// record before any reset: nothing is destroyed.
+		try {
+			$retrieved = $backup->retrieve( $key );
+		} catch ( PromotionException $exception ) {
+			return $this->refuse_record(
+				$manifest,
+				$key,
+				new RecordRefusal(
+					$key,
+					$provider,
+					$slug,
+					'backup-unavailable',
+					'The backup could not be retrieved before the reset: ' . $exception->getMessage() . ' The database override was NOT modified.'
+				),
+				'refused',
+				$outcomes,
+				$refusals
+			);
+		}
+
+		if ( null === $retrieved ) {
+			return $this->refuse_record(
+				$manifest,
+				$key,
+				new RecordRefusal(
+					$key,
+					$provider,
+					$slug,
+					'backup-unavailable',
+					'The backup could not be retrieved after it was stored; the database override was NOT modified.'
+				),
+				'refused',
+				$outcomes,
+				$refusals
+			);
+		}
+
 		// 5. Reset: remove the database override. A failure here means nothing
 		// was removed, so there is nothing to restore — refuse and move on.
 		try {
@@ -531,6 +592,13 @@ final class PromotionFinalizer {
 	 * backup (a half-finalised record is worse than a refused one), report
 	 * the refusal and leave the record in a state rollback will skip.
 	 *
+	 * CRITICAL 1 (whole-unit review): finalizeStatus=restored is recorded
+	 * ONLY when restore() actually completed. The retrievability
+	 * verification (step 4a) ran before the reset, so a null retrieval here
+	 * is unreachable in a healthy run — but a backup that vanishes mid-run,
+	 * or a restore() that throws, must never be reported as restored: the
+	 * row is GONE in both cases, and the refusal says so instead.
+	 *
 	 * @param array<string, string> $outcomes
 	 * @param list<RecordRefusal>   $refusals
 	 */
@@ -547,8 +615,40 @@ final class PromotionFinalizer {
 	): PromotionManifest {
 		$payload = $backup->retrieve( $key );
 
-		if ( null !== $payload ) {
+		if ( null === $payload ) {
+			return $this->refuse_record(
+				$manifest,
+				$key,
+				new RecordRefusal(
+					$key,
+					$live->provider_slug(),
+					$live->slug(),
+					'restore-unavailable',
+					$detail . ' The backup could not be retrieved either; the database row is deleted and needs operator attention.'
+				),
+				'refused',
+				$outcomes,
+				$refusals
+			);
+		}
+
+		try {
 			$strategy->restore( $live, $payload );
+		} catch ( PromotionException $exception ) {
+			return $this->refuse_record(
+				$manifest,
+				$key,
+				new RecordRefusal(
+					$key,
+					$live->provider_slug(),
+					$live->slug(),
+					'restore-failed',
+					$exception->getMessage() . ' The database row was already deleted by the reset and could not be recreated; it needs operator attention.'
+				),
+				'refused',
+				$outcomes,
+				$refusals
+			);
 		}
 
 		return $this->refuse_record(

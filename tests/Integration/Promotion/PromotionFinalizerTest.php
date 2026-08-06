@@ -560,10 +560,14 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 
 	/**
 	 * A failure AFTER the reset has run — the database row is already gone —
-	 * must abort the run, release the acquired lock and write no canonical
-	 * manifest, never report the record as promoted.
+	 * must abort the run and release the acquired lock. It must also leave
+	 * the canonical checkpoint (written before the first reset) and the
+	 * VERIFIED backup, so the customer's content survives and a restore
+	 * recreates the row byte-identically.
 	 */
 	public function test_an_exception_after_the_reset_aborts_the_run_and_releases_the_lock(): void {
+		$live = $this->live_record( 'templates', 'page' );
+
 		$this->strategies['templates'] = new ThrowingResolveStrategy( $this->strategies['templates'] );
 
 		PromotionStrategies::reset();
@@ -580,20 +584,39 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 			( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ),
 			'An aborted run must release every lock it acquired.'
 		);
-		self::assertFalse( $this->store->canonical_exists( $this->promotion_id() ), 'An aborted run must not write the canonical manifest.' );
+		self::assertTrue(
+			$this->store->canonical_exists( $this->promotion_id() ),
+			'The canonical checkpoint written before the first reset must survive an aborted run.'
+		);
+
+		// HIGH 4 (whole-unit review): the row is gone, but the backup — which
+		// the finalizer verified retrievable BEFORE the reset — still holds
+		// the customer's content byte-identically, and restoring from it
+		// recreates the row.
+		self::assertNull( $this->read_override( 'page' ) );
+
+		$payload = ( new PromotionBackup( $this->promotion_id() ) )->retrieve( 'templates:page' );
+
+		self::assertIsArray( $payload );
+
+		$this->strategies['templates']->restore( $live, $payload );
+
+		self::assertSame(
+			$this->original_content_hash,
+			$this->live_record( 'templates', 'page' )->content_hash(),
+			'Restoring from the verified backup must recreate the original content byte-identically.'
+		);
 	}
 
 	/**
-	 * The self-restore path must tolerate a backup retrieval that returns
-	 * null (the meta row is missing): refuse the record instead of crashing
-	 * on a null payload.
+	 * CRITICAL 1 (whole-unit review): a backup that cannot be retrieved must
+	 * be refused BEFORE the reset, so the database override survives. The
+	 * old behaviour — store(), reset, discover retrieve() returns null,
+	 * record finalizeStatus=restored — deleted the row while claiming it was
+	 * restored, and rollback then skipped it because it believed the record
+	 * was already restored.
 	 */
-	public function test_restore_and_refuse_tolerates_a_missing_backup_retrieval(): void {
-		$this->store->write(
-			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
-			$this->manifest_path
-		);
-
+	public function test_a_backup_that_cannot_be_retrieved_refuses_the_record_before_any_reset(): void {
 		$meta_name = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' ) . '_meta';
 
 		add_filter( 'pre_option_' . $meta_name, array( $this, 'hide_backup_meta' ) );
@@ -604,53 +627,215 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 			remove_filter( 'pre_option_' . $meta_name, array( $this, 'hide_backup_meta' ) );
 		}
 
-		self::assertSame( 'post-reset-mismatch', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
-		self::assertSame( 'restored', $outcome['manifest']->record( 'templates:page' )['finalizeStatus'] );
-		self::assertNull( $this->read_override( 'page' ), 'With no backup, the deleted override stays deleted — the run must not fabricate a restore.' );
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'refused', $outcome['manifest']->record( 'templates:page' )['finalizeStatus'] );
+		self::assertSame( 'backup-unavailable', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+		self::assertNotNull( $this->read_override( 'page' ), 'An un-retrievable backup must refuse BEFORE the reset, so the override survives.' );
+		self::assertSame(
+			$this->original_content_hash,
+			$this->live_record( 'templates', 'page' )->content_hash(),
+			'The refused record must keep its exact original content.'
+		);
 	}
 
 	/**
-	 * A CORRUPT backup retrieval (a chunk that does not match its meta
-	 * sha256) must abort the run loudly instead of restoring partial content
-	 * — the backup is the only remaining copy of the customer's row. The
-	 * corrupt backup is forged BEFORE finalize: store() is idempotent per
-	 * key, so the forged options are exactly what the self-restore path
-	 * reads.
+	 * CRITICAL 1 (whole-unit review): a CORRUPT backup (a chunk that does
+	 * not match its meta sha256) must be refused BEFORE the reset — the
+	 * corruption is detected by the retrievability verification, so the
+	 * database override survives and the refusal records why. The old
+	 * behaviour surfaced the corruption only at restore time, AFTER the
+	 * reset had deleted the customer's row.
 	 */
-	public function test_a_corrupt_backup_retrieval_aborts_the_run(): void {
-		$this->store->write(
-			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
-			$this->manifest_path
-		);
-
+	public function test_a_corrupt_backup_is_refused_before_any_reset(): void {
 		$this->forge_corrupt_backup();
 
-		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+		$outcome = $this->finalizer->finalize( $this->manifest_path );
 
-		self::assertStringContainsString( 'corrupt', $exception->getMessage() );
-		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'An aborted run must release every lock it acquired.' );
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'backup-unavailable', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+		self::assertNotNull( $this->read_override( 'page' ), 'A corrupt backup must refuse BEFORE the reset, so the override survives.' );
+		self::assertSame(
+			$this->original_content_hash,
+			$this->live_record( 'templates', 'page' )->content_hash(),
+			'The refused record must keep its exact original content.'
+		);
+		self::assertStringContainsString(
+			'corrupt',
+			(string) ( $outcome['manifest']->refusals()[0]['detail'] ?? '' ),
+			'The refusal detail must surface the corruption.'
+		);
+		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'A refused record must not hold a lock.' );
 	}
 
 	/**
-	 * A restore that itself throws must abort the run — the backup payload
-	 * is refused by the strategy, and a silent "restored" report would lie
-	 * about a row that was never recreated.
+	 * CRITICAL 1 (whole-unit review): a restore that itself throws must
+	 * refuse the record — never report finalizeStatus=restored for a row
+	 * that was not recreated. The backup (verified retrievable before the
+	 * reset) survives, and restoring through the REAL strategy recreates the
+	 * row byte-identically.
 	 */
-	public function test_a_restore_that_throws_aborts_the_run(): void {
+	public function test_a_restore_that_throws_refuses_the_record_and_keeps_the_content_recoverable(): void {
 		$this->store->write(
 			$this->sealed_page_manifest()->with_record_changes( 'templates:page', array( 'expectedPostResetHash' => str_repeat( 'd', 64 ) ) ),
 			$this->manifest_path
 		);
 
-		// Replace the backup with a schema-valid payload that has no post
-		// row, so the strategy's restore refuses AFTER retrieval succeeded.
-		$this->forge_backup_without_post_row();
+		$live  = $this->live_record( 'templates', 'page' );
+		$inner = $this->strategies['templates'];
 
-		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+		$this->strategies['templates'] = new ThrowingRestoreStrategy( $inner );
 
-		self::assertStringContainsString( 'post row', $exception->getMessage() );
-		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'An aborted run must release every lock it acquired.' );
-		self::assertFalse( $this->store->canonical_exists( $this->promotion_id() ), 'An aborted run must not write the canonical manifest.' );
+		PromotionStrategies::reset();
+
+		try {
+			$outcome = $this->finalizer->finalize( $this->manifest_path );
+		} finally {
+			$this->strategies['templates'] = $inner;
+
+			PromotionStrategies::reset();
+		}
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'refused', $outcome['manifest']->record( 'templates:page' )['finalizeStatus'], 'A row that was not recreated must never be reported as restored.' );
+		self::assertSame( 'restore-failed', $outcome['manifest']->record( 'templates:page' )['finalizeRefusalReason'] );
+		self::assertStringContainsString(
+			'restore exploded',
+			(string) ( $outcome['manifest']->refusals()[0]['detail'] ?? '' ),
+			'The refusal detail must surface the restore failure.'
+		);
+		self::assertNull( $this->read_override( 'page' ), 'The reset had already deleted the row when restore failed.' );
+		self::assertNull( ( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' ), 'A refused record must not hold a lock.' );
+		self::assertTrue( $this->store->canonical_exists( $this->promotion_id() ), 'The canonical checkpoint must exist for the operator to recover from.' );
+
+		// HIGH 4 (whole-unit review): the customer's content survives in the
+		// verified backup and a restore through the REAL strategy recreates
+		// the row byte-identically.
+		$payload = ( new PromotionBackup( $this->promotion_id() ) )->retrieve( 'templates:page' );
+
+		self::assertIsArray( $payload );
+
+		$inner->restore( $live, $payload );
+
+		self::assertSame(
+			$this->original_content_hash,
+			$this->live_record( 'templates', 'page' )->content_hash(),
+			'Restoring from the backup must recreate the original content byte-identically.'
+		);
+	}
+
+	/**
+	 * MEDIUM 5 (whole-unit review): a backup whose chunks and metadata exist
+	 * but whose index entry is missing — the debris of a store() that died
+	 * between the option writes and the index update — must be REPAIRED by
+	 * the next store(), not skipped: a skipped repair lets mark_finalized()
+	 * create an index entry with no recordKeys, and prune can never find the
+	 * payload again.
+	 */
+	public function test_an_orphaned_backup_from_a_crashed_store_is_repaired_into_the_index(): void {
+		$live    = $this->live_record( 'templates', 'page' );
+		$payload = $this->strategies['templates']->capture_backup( $live );
+		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
+		$json    = wp_json_encode( $payload );
+
+		self::assertIsString( $json );
+
+		// The debris a crashed store() leaves behind: the meta row and the
+		// chunks exist, the index entry does not.
+		add_option(
+			$prefix . '_meta',
+			array(
+				'chunks'    => 1,
+				'bytes'     => strlen( $json ),
+				'sha256'    => hash( 'sha256', $json ),
+				'recordKey' => 'templates:page',
+			),
+			'',
+			false
+		);
+		add_option( $prefix . '_c0000', $json, '', false );
+
+		self::assertSame( array(), PromotionBackup::list_all(), 'The fixture must start with NO index entry — that is the crash debris.' );
+
+		$outcome = $this->finalizer->finalize( $this->manifest_path );
+
+		self::assertSame( 0, $outcome['outcome']->exit_code() );
+
+		$rows = PromotionBackup::list_all();
+
+		self::assertCount( 1, $rows );
+		self::assertSame( array( 'templates:page' ), $rows[0]['recordKeys'], 'The finalize must repair the index entry so prune can find the payload.' );
+		self::assertSame( $payload, ( new PromotionBackup( self::PROMOTION_ID ) )->retrieve( 'templates:page' ), 'The repaired index entry must point at the surviving payload.' );
+	}
+
+	/**
+	 * MEDIUM 5 (whole-unit review): when repairing the index is impossible,
+	 * the orphaned backup must be REMOVED — an orphan the index cannot see
+	 * is dead weight that would block the next attempt.
+	 */
+	public function test_a_failed_index_repair_removes_the_orphaned_backup(): void {
+		$prefix = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
+
+		add_option(
+			$prefix . '_meta',
+			array(
+				'chunks'    => 1,
+				'bytes'     => strlen( '{}' ),
+				'sha256'    => hash( 'sha256', '{}' ),
+				'recordKey' => 'templates:page',
+			),
+			'',
+			false
+		);
+		add_option( $prefix . '_c0000', '{}', '', false );
+
+		add_filter( 'pre_update_option_' . PromotionBackup::INDEX_OPTION, array( $this, 'reject_index_writes' ) );
+
+		try {
+			$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+			self::assertStringContainsString( 'index', $exception->getMessage() );
+		} finally {
+			remove_filter( 'pre_update_option_' . PromotionBackup::INDEX_OPTION, array( $this, 'reject_index_writes' ) );
+		}
+
+		self::assertFalse( get_option( $prefix . '_meta', false ), 'A failed index repair must remove the orphaned metadata.' );
+		self::assertFalse( get_option( $prefix . '_c0000', false ), 'A failed index repair must remove the orphaned chunks.' );
+		self::assertNotNull( $this->read_override( 'page' ), 'A refused backup must never cost the database override.' );
+	}
+
+	/**
+	 * MEDIUM 6 (whole-unit review): a lock whose metadata add_option() is
+	 * rejected after the atomic gate was taken would be unreleasable —
+	 * inspect() sees no metadata, release() cannot release the gate, and the
+	 * record stays locked until its TTL. The gate must be released and the
+	 * run must exit 3.
+	 */
+	public function test_a_lock_whose_metadata_cannot_be_written_releases_the_gate_and_exits_three(): void {
+		$lock_option = RecordLockManager::option_name( 'templates:page' );
+
+		add_filter( 'pre_option_' . $lock_option, array( $this, 'fake_lock_metadata' ) );
+
+		try {
+			$exception = $this->assert_exit_code( 3, fn() => $this->finalizer->finalize( $this->manifest_path ) );
+
+			self::assertStringContainsString( 'lock metadata', $exception->getMessage() );
+		} finally {
+			remove_filter( 'pre_option_' . $lock_option, array( $this, 'fake_lock_metadata' ) );
+		}
+
+		self::assertFalse(
+			get_option( $lock_option . '.lock', false ),
+			'The atomic gate must be released when its metadata cannot be written.'
+		);
+		self::assertNotNull( $this->read_override( 'page' ), 'A lock failure must leave the database override untouched.' );
+
+		( new RecordLockManager( $this->promotion_id(), 'x' ) )->acquire( array( 'templates:page' ) );
+
+		self::assertSame(
+			$this->promotion_id(),
+			( new RecordLockManager( $this->promotion_id(), 'x' ) )->inspect( 'templates:page' )['promotionId'],
+			'A released gate must be acquirable again.'
+		);
 	}
 
 	public function test_a_missing_strategy_for_the_record_provider_refuses_the_run(): void {
@@ -724,6 +909,27 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 
 	/**
 	 * Named filter callback — never a closure (master spec §4). Short-circuits
+	 * update_option() for the backup index with a rejected write: the index
+	 * option does not exist yet (old value false), so update_option() returns
+	 * false without writing and write_index() must fail loudly.
+	 */
+	public function reject_index_writes( $value ) {
+		return false;
+	}
+
+	/**
+	 * Named filter callback — never a closure (master spec §4). Short-circuits
+	 * get_option() for the lock metadata option with a non-array value, so
+	 * write_fresh_metadata()'s add_option() sees the option as already taken
+	 * and is rejected (add_option() refuses when get_option() differs from
+	 * the default).
+	 */
+	public function fake_lock_metadata( $value ): string {
+		return 'stale';
+	}
+
+	/**
+	 * Named filter callback — never a closure (master spec §4). Short-circuits
 	 * get_option() for backup chunk 0 with a corrupt value, so retrieve()
 	 * sees a chunk whose bytes do not match the meta sha256.
 	 */
@@ -785,41 +991,12 @@ final class PromotionFinalizerTest extends IntegrationTestCase {
 	}
 
 	/**
-	 * Replaces the backup options of templates:page with a self-consistent
-	 * payload that has NO post row, so the strategy's restore() refuses with
-	 * its own hard error after retrieve() succeeded. store() sees the
-	 * existing meta row and skips, so the forged payload is what the
-	 * self-restore path reads.
-	 */
-	private function forge_backup_without_post_row(): void {
-		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
-		$payload = wp_json_encode(
-			array(
-				'terms' => array(),
-				'meta'  => array(),
-			)
-		);
-
-		add_option(
-			$prefix . '_meta',
-			array(
-				'chunks'    => 1,
-				'bytes'     => strlen( (string) $payload ),
-				'sha256'    => hash( 'sha256', (string) $payload ),
-				'recordKey' => 'templates:page',
-			),
-			'',
-			false
-		);
-		add_option( $prefix . '_c0000', $payload, '', false );
-	}
-
-	/**
 	 * Forges the backup options of templates:page with a chunk that does not
 	 * match its meta sha256, so retrieve() refuses loudly. The chunk is
 	 * VALID JSON on purpose: a byte mismatch that still parses is exactly
-	 * what only the sha256 check can catch. store() skips (the meta row
-	 * exists), so the forged options are what the self-restore path reads.
+	 * what only the sha256 check can catch. store() sees the existing meta
+	 * row and repairs the index, so the forged options are exactly what the
+	 * retrievability verification reads.
 	 */
 	private function forge_corrupt_backup(): void {
 		$prefix  = PromotionBackup::OPTION_PREFIX . self::PROMOTION_ID . '_' . hash( 'sha256', 'templates:page' );
@@ -1165,6 +1342,86 @@ final class ThrowingResolveStrategy implements PreparablePromotionStrategy {
 
 	public function resolve_current_hash( string $record_slug ): ?string {
 		throw new \RuntimeException( 'resolve exploded' );
+	}
+
+	/**
+	 * @param array<string, mixed> $bundle_record
+	 * @param list<string>         $selected_keys
+	 * @return list<RecordRefusal>
+	 */
+	public function validate_for_promotion( array $bundle_record, BundleView $bundle, array $selected_keys ): array {
+		return $this->inner->validate_for_promotion( $bundle_record, $bundle, $selected_keys );
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function capture_backup( StateRecord $record ): array {
+		return $this->inner->capture_backup( $record );
+	}
+}
+
+/**
+ * A PreparablePromotionStrategy whose restore() throws — the deterministic
+ * trigger for "a restore that cannot complete after the reset": the row is
+ * already gone at that point, so the finalizer must refuse the record with a
+ * truthful status instead of reporting it as restored. Everything else
+ * delegates to the real strategy, so the backup captured is the REAL one and
+ * the content-survival assertions stay honest.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this throwing strategy to the finalizer test file so the restore failure path is deterministic.
+final class ThrowingRestoreStrategy implements PreparablePromotionStrategy {
+
+	public function __construct( private PreparablePromotionStrategy $inner ) {}
+
+	public function provider_slug(): string {
+		return $this->inner->provider_slug();
+	}
+
+	/**
+	 * @return array{preparedPath: string, preparedHash: string, originalHash: string|null}
+	 */
+	public function prepare( StateRecord $record, string $target_path ): array {
+		return $this->inner->prepare( $record, $target_path );
+	}
+
+	public function reset( StateRecord $record ): void {
+		$this->inner->reset( $record );
+	}
+
+	/**
+	 * @param array<string, mixed> $backup
+	 */
+	public function restore( StateRecord $record, array $backup ): void {
+		throw PromotionException::hard( 'restore exploded' );
+	}
+
+	public function expected_post_reset_hash( StateRecord $record ): string {
+		return $this->inner->expected_post_reset_hash( $record );
+	}
+
+	public function stage( StateRecord $record, string $theme_root ): StagedPromotionEntry {
+		return $this->inner->stage( $record, $theme_root );
+	}
+
+	public function theme_relative_path( string $record_slug ): string {
+		return $this->inner->theme_relative_path( $record_slug );
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return $this->inner->declares( $declared, $record_slug );
+	}
+
+	public function post_finalize_record_state(): string {
+		return $this->inner->post_finalize_record_state();
+	}
+
+	public function defers_expected_hash(): bool {
+		return $this->inner->defers_expected_hash();
+	}
+
+	public function resolve_current_hash( string $record_slug ): ?string {
+		return $this->inner->resolve_current_hash( $record_slug );
 	}
 
 	/**

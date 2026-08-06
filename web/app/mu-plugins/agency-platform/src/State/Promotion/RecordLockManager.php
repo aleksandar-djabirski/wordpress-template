@@ -284,12 +284,22 @@ final class RecordLockManager {
 	/**
 	 * Overwrites the lock record with this promotion's, delete-then-add so a
 	 * reclaimed gate never keeps the previous owner's metadata. Non-autoloaded.
+	 *
+	 * MEDIUM 6 (whole-unit review): the add_option() result is checked. An
+	 * unreleasable lock is worse than no lock — with the gate taken and no
+	 * metadata, inspect() sees nothing and release() can never release the
+	 * gate, so the record stays locked until its TTL. On a rejected write
+	 * the atomic gate is released and the failure fails closed as a lock
+	 * conflict.
+	 *
+	 * @throws PromotionException Exit 3 when the metadata write is rejected.
 	 */
 	private function write_fresh_metadata( string $record_key, int $ttl ): void {
 		$option = self::option_name( $record_key );
 
 		delete_option( $option );
-		add_option(
+
+		$written = add_option(
 			$option,
 			array(
 				'promotionId'  => $this->promotion_id,
@@ -301,6 +311,14 @@ final class RecordLockManager {
 			'',
 			false
 		);
+
+		if ( ! $written ) {
+			\WP_Upgrader::release_lock( $option );
+
+			throw PromotionException::lock_conflict(
+				sprintf( 'The lock metadata for record "%s" could not be written; the lock was released.', $record_key )
+			);
+		}
 	}
 
 	/**

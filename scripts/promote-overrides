@@ -144,8 +144,14 @@ FINALIZE_STATUS=0
 settle() {                    # settle confirm | settle rollback
   [ "$SETTLED" -eq 1 ] && return 0
   [ "$FINALIZED" -eq 0 ] && return 0
-  SETTLED=1
-  run_remote agency promote-overrides "--$1" --manifest="$REMOTE_MANIFEST" 2>&1 | tee "$LOG_DIR/$1.log"
+  # HIGH 7 (whole-unit review): SETTLED is set only AFTER the remote command
+  # succeeds. Setting it first silenced every trap on a failed confirm and
+  # left the finalized promotion neither confirmed nor rolled back.
+  if run_remote agency promote-overrides "--$1" --manifest="$REMOTE_MANIFEST" 2>&1 | tee "$LOG_DIR/$1.log"; then
+    SETTLED=1
+    return 0
+  fi
+  return 1
 }
 
 trap 'settle rollback' ERR INT TERM
@@ -204,12 +210,32 @@ done
 wait "$VERIFY_PID" 2>/dev/null || VERIFY_STATUS=1
 
 if [ "$VERIFY_STATUS" -eq 0 ]; then
+  set +e
   settle confirm
-  if [ "$FINALIZE_STATUS" -eq 2 ]; then
-    echo "note: finalize was partial (exit 2); confirming the succeeded records." >&2
-    exit 2
+  CONFIRM_STATUS=$?
+  set -e
+
+  if [ "$CONFIRM_STATUS" -eq 0 ]; then
+    if [ "$FINALIZE_STATUS" -eq 2 ]; then
+      echo "note: finalize was partial (exit 2); confirming the succeeded records." >&2
+      exit 2
+    fi
+    exit 0
   fi
-  exit 0
+
+  # HIGH 7 (whole-unit review): confirmation failed. The promotion is
+  # finalized but not settled; roll it back instead of leaving it in limbo.
+  echo "error: confirmation failed (exit $CONFIRM_STATUS); rolling back the promotion." >&2
+  set +e
+  settle rollback
+  ROLLBACK_STATUS=$?
+  set -e
+  echo "error: promotion logs are in $LOG_DIR" >&2
+  if [ "$ROLLBACK_STATUS" -gt 1 ]; then
+    echo "error: rollback failed with exit code $ROLLBACK_STATUS; manual intervention is required." >&2
+    exit "$ROLLBACK_STATUS"
+  fi
+  exit 1
 fi
 
 echo "error: verification failed; rolling back the promotion." >&2

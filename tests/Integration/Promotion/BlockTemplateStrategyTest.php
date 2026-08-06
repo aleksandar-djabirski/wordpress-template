@@ -113,15 +113,19 @@ final class BlockTemplateStrategyTest extends IntegrationTestCase {
 	 * The parse check originally compared `normalize_block_markup( $markup )`
 	 * to the RAW markup. Normalisation is a TRANSFORM — it strips the injected
 	 * theme attribute and ksorts the rest — so that comparison refused every
-	 * record whose attributes were not already sorted. That is all three
-	 * shipped files: templates/page.html and templates/index.html carry
-	 * four-attribute template-part blocks, and parts/site-header.html carries a
+	 * record whose attributes were not already sorted. That was every shipped
+	 * file: templates/page.html and templates/index.html carry four-attribute
+	 * template-part blocks, and parts/site-header.html carries a
 	 * multi-attribute navigation block. The entire theme was unpromotable and
 	 * nothing before the Task 16 vertical slice would have noticed.
 	 *
-	 * This drives the REAL shipped files rather than a fixture, for the same
-	 * reason the navigation regression test does: a fixture written to suit the
-	 * validator cannot detect that the validator rejects the real thing.
+	 * MEDIUM 8 (whole-unit review): the theme ships EIGHT template and part
+	 * files and every one must be covered — the release-blocking defects in
+	 * this unit were rules that the real theme files failed while fixtures
+	 * passed. This drives the REAL shipped files rather than a fixture, for
+	 * the same reason the navigation regression test does: a fixture written
+	 * to suit the validator cannot detect that the validator rejects the
+	 * real thing.
 	 *
 	 * @dataProvider shipped_theme_records
 	 */
@@ -174,9 +178,14 @@ final class BlockTemplateStrategyTest extends IntegrationTestCase {
 	/** @return array<string, array{string, string, string}> */
 	public static function shipped_theme_records(): array {
 		return array(
-			'page template'  => array( 'templates', 'page', 'templates/page.html' ),
-			'index template' => array( 'templates', 'index', 'templates/index.html' ),
-			'site header'    => array( 'template-parts', 'site-header', 'parts/site-header.html' ),
+			'404 template'     => array( 'templates', '404', 'templates/404.html' ),
+			'archive template' => array( 'templates', 'archive', 'templates/archive.html' ),
+			'index template'   => array( 'templates', 'index', 'templates/index.html' ),
+			'page template'    => array( 'templates', 'page', 'templates/page.html' ),
+			'search template'  => array( 'templates', 'search', 'templates/search.html' ),
+			'single template'  => array( 'templates', 'single', 'templates/single.html' ),
+			'site footer part' => array( 'template-parts', 'site-footer', 'parts/site-footer.html' ),
+			'site header part' => array( 'template-parts', 'site-header', 'parts/site-header.html' ),
 		);
 	}
 

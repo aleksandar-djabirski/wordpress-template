@@ -205,6 +205,25 @@ final class PromoteOverridesWrapperTest extends IntegrationTestCase {
 		self::assertStringContainsString( '--confirm', $this->remote_log() );
 	}
 
+	/**
+	 * HIGH 7 (whole-unit review): the wrapper used to set SETTLED=1 BEFORE
+	 * running confirm, so a failed confirm silenced every trap and left the
+	 * finalized promotion neither confirmed nor rolled back. The flag must
+	 * be set only after the remote command succeeds, and a failed confirm
+	 * must roll back.
+	 */
+	public function test_a_failed_confirm_rolls_back_and_exits_non_zero(): void {
+		$this->fake_remote_exit( 0 );
+		$this->fake_remote_exit_for( 'confirm', 1 );
+		$this->fake_playwright_exit( 0 );
+
+		self::assertNotSame( 0, $this->run_wrapper() );
+		self::assertStringContainsString( '--confirm', $this->remote_log() );
+		self::assertStringContainsString( '--rollback', $this->remote_log(), 'A failed confirm must not leave the promotion settled; it rolls back.' );
+		self::assertSame( 1, substr_count( $this->remote_log(), '--rollback' ), 'A successful rollback must settle exactly once.' );
+		self::assertStringContainsString( 'confirmation failed', $this->last_stderr );
+	}
+
 	public function test_a_tamper_detection_at_finalize_exits_four_without_rollback(): void {
 		$this->fake_remote_exit( 0 );
 		$this->fake_remote_exit_for( 'finalize', 4 );

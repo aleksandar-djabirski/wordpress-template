@@ -49,7 +49,12 @@ final class PromotionBackup {
 	}
 
 	/**
-	 * Idempotent: an existing backup for this promotion+key is left untouched.
+	 * Idempotent: an existing backup for this promotion+key is left
+	 * untouched — but its INDEX entry is repaired. A previous store() that
+	 * died between writing the chunks/meta and updating the index leaves
+	 * exactly this state, and skipping it entirely would let
+	 * mark_finalized() create an index entry with no recordKeys, so prune
+	 * could never find the payload again (whole-unit review, MEDIUM 5).
 	 *
 	 * @param array<string, mixed> $record_payload
 	 * @throws PromotionException Exit 1 on a non-JSON-encodable payload or a
@@ -57,6 +62,8 @@ final class PromotionBackup {
 	 */
 	public function store( string $record_key, array $record_payload ): void {
 		if ( $this->exists( $record_key ) ) {
+			$this->repair_index_entry( $record_key );
+
 			return;
 		}
 
@@ -129,6 +136,70 @@ final class PromotionBackup {
 				return $index;
 			}
 		);
+	}
+
+	/**
+	 * Re-adds one record key to the backup index. The chunks and metadata
+	 * already exist (a previous store() died between writing them and the
+	 * index update), so the entry must point at the payload the way a
+	 * completed store() would have. A failed repair REMOVES the orphaned
+	 * chunks, so the next attempt starts from a clean slate instead of
+	 * deadlocking on a backup the index cannot see.
+	 *
+	 * @throws PromotionException Re-thrown from the index write.
+	 */
+	private function repair_index_entry( string $record_key ): void {
+		$bytes = $this->stored_bytes( $record_key );
+
+		try {
+			$this->update_index(
+				function ( array $index ) use ( $record_key, $bytes ): array {
+					$entry = $index[ $this->promotion_id ] ?? self::empty_index_entry();
+
+					if ( ! in_array( $record_key, self::entry_record_keys( $entry ), true ) ) {
+						$entry['recordKeys'][]        = $record_key;
+						$entry['bytes']               = (int) $entry['bytes'] + $bytes;
+						$index[ $this->promotion_id ] = $entry;
+					}
+
+					return $index;
+				}
+			);
+		} catch ( PromotionException $exception ) {
+			self::delete_options( $this->record_option_names( $record_key ) );
+
+			throw $exception;
+		}
+	}
+
+	/**
+	 * The number of payload bytes recorded in the meta row of an existing
+	 * backup, or 0 when the meta row is unreadable.
+	 */
+	private function stored_bytes( string $record_key ): int {
+		$meta = get_option( self::option_prefix( $this->promotion_id, $record_key ) . '_meta' );
+
+		return is_array( $meta ) && is_int( $meta['bytes'] ?? null ) ? (int) $meta['bytes'] : 0;
+	}
+
+	/**
+	 * @return list<string> the option names of one record's backup: every
+	 *                      chunk plus the meta row.
+	 */
+	private function record_option_names( string $record_key ): array {
+		$prefix = self::option_prefix( $this->promotion_id, $record_key );
+		$meta   = get_option( $prefix . '_meta' );
+		$names  = array();
+
+		if ( is_array( $meta ) && is_int( $meta['chunks'] ?? null ) ) {
+			for ( $index = 0; $index < (int) $meta['chunks']; $index++ ) {
+				$names[] = $prefix . self::chunk_suffix( $index );
+			}
+		}
+
+		$names[] = $prefix . '_meta';
+
+		return $names;
 	}
 
 	/**
@@ -507,6 +578,7 @@ final class PromotionBackup {
 
 	/**
 	 * @param array<string, array<string, mixed>> $index
+	 * @throws PromotionException Exit 1 when the index write is rejected.
 	 */
 	private static function write_index( array $index ): void {
 		if ( array() === $index ) {
@@ -515,7 +587,21 @@ final class PromotionBackup {
 			return;
 		}
 
-		update_option( self::INDEX_OPTION, $index, false );
+		// MEDIUM 5 (whole-unit review): update_option() returning false was
+		// ignored, so a rejected index write reported success and the index
+		// silently lost the record keys prune needs. False ALSO means "value
+		// unchanged" (wp-includes/option.php), so an identical index is
+		// skipped first: only a write that actually changes the index can
+		// report failure honestly.
+		if ( self::read_index() === $index ) {
+			return;
+		}
+
+		if ( ! update_option( self::INDEX_OPTION, $index, false ) ) {
+			throw PromotionException::hard(
+				'The promotion backup index could not be written; the backup of a promotion may be orphaned.'
+			);
+		}
 	}
 
 	/**
