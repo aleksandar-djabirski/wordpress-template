@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -191,9 +191,32 @@ export function commitPreparedFile( themeRelativePath: string ): string {
 }
 
 /**
+ * Creates the state directory the promotion commands write into.
+ *
+ * `var/agency-state/` is git-ignored by design — it holds bundles and manifests
+ * that must never be committed — so it does NOT exist in a fresh checkout, and
+ * CI failed with
+ *
+ *   Warning: The output directory "/var/www/html/var/agency-state" does not
+ *   exist; create it before exporting.
+ *
+ * It exists on a developer machine only because an earlier unit created it,
+ * which is exactly why this went unnoticed locally. Created from Node against
+ * the repository checkout, which is the same directory the container sees
+ * mounted at /var/www/html.
+ */
+export function ensureStateDir(): void {
+	mkdirSync( join( process.cwd(), 'var', 'agency-state' ), { recursive: true } );
+}
+
+/**
  * Every AGENCY_* value the promotion commands need, resolved from the live site.
+ * Creating the state directory here means every command path gets it, rather
+ * than only whichever one happens to run first.
  */
 export function promotionEnv(): NodeJS.ProcessEnv {
+	ensureStateDir();
+
 	return {
 		AGENCY_PROMOTION_HMAC_KEYS: JSON.stringify( { 'e2e': 'e2e-promotion-key-that-is-long-enough-32+' } ),
 		AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID: 'e2e',
