@@ -174,8 +174,37 @@ final class StateGatewayTest extends IntegrationTestCase {
 		}
 	}
 
-	public function test_strategy_for_returns_null_until_a_strategy_is_registered(): void {
-		self::assertNull( ( new StateGateway() )->strategy_for( 'templates' ), 'The strategy registry ships empty; Task 7 is what registers providers. Asserting null here is asserting the Release 3 boundary still holds.' );
+	/**
+	 * This test FLIPPED DIRECTION when the subsystem was wired into Plugin.php.
+	 *
+	 * It used to assert `strategy_for( 'templates' )` was NULL, which was
+	 * correct while the registry shipped empty and nothing registered it. The
+	 * final commit of this release adds the one sequenced
+	 * `PromotionSubsystem::register()` line, so the strategies are now
+	 * registered on every request — and the old assertion became a test that
+	 * the wiring does NOT work.
+	 *
+	 * The replacement is strictly stronger. It is the only test that proves the
+	 * `Plugin.php` registration line is actually REACHED at runtime: remove that
+	 * one line and this fails. It also still pins the Release 3/Release 4
+	 * boundary, because `global-styles` must stay unregistered until Unit 3B
+	 * adds its strategy.
+	 */
+	public function test_the_plugin_registers_the_release_three_strategies_and_no_more(): void {
+		$gateway = new StateGateway();
+
+		self::assertNotNull(
+			$gateway->strategy_for( 'templates' ),
+			'Plugin.php must register PromotionSubsystem; without it the promotion CLI has no strategies.'
+		);
+		self::assertNotNull(
+			$gateway->strategy_for( 'template-parts' ),
+			'Plugin.php must register PromotionSubsystem; without it the promotion CLI has no strategies.'
+		);
+		self::assertNull(
+			$gateway->strategy_for( 'global-styles' ),
+			'Global Styles stays unregistered until Unit 3B; this is the Release 3/Release 4 boundary.'
+		);
 	}
 
 	/**
