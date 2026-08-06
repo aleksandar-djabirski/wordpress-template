@@ -1,5 +1,5 @@
 import { spawnSync } from 'child_process';
-import { readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 /**
@@ -66,16 +66,37 @@ export function repoIsClean(): boolean {
 }
 
 /**
- * Absolute path of the active theme directory, read from WP-CLI.
+ * Absolute path of the active theme directory AS THIS NODE PROCESS SEES IT.
  *
- * `wp theme path` without an argument returns the themes DIRECTORY, so the
- * active theme's own directory comes from get_stylesheet_directory().
+ * This deliberately does NOT return get_stylesheet_directory(). WP-CLI runs
+ * inside the container, where the theme lives at
+ * /var/www/html/web/app/themes/<stylesheet>, while Playwright runs on the host
+ * or the CI runner, where that path does not exist. Returning the container
+ * path made every read and write in this file fail in CI with
+ *
+ *   ENOENT: no such file or directory, open
+ *     '/var/www/html/web/app/themes/site-theme/parts/site-header.html'
+ *
+ * Only the theme NAME is asked of WP-CLI. The path is built locally against
+ * process.cwd(), which is the repository checkout Playwright was started from,
+ * and the same tree the git helpers above operate on.
+ *
+ * `wp theme path` is not used either: with no argument it returns the themes
+ * directory rather than the active theme's own directory.
  */
 export function themeDir(): string {
-	const dir = wpCli( [ 'eval', 'echo get_stylesheet_directory();' ] ).trim();
+	const stylesheet = wpCli( [ 'eval', 'echo get_stylesheet();' ] ).trim();
 
-	if ( dir === '' ) {
-		throw new Error( 'Could not resolve the active theme directory.' );
+	if ( stylesheet === '' ) {
+		throw new Error( 'Could not resolve the active theme name.' );
+	}
+
+	const dir = join( process.cwd(), 'web', 'app', 'themes', stylesheet );
+
+	if ( ! existsSync( dir ) ) {
+		throw new Error(
+			`The active theme "${ stylesheet }" is not at ${ dir }. Playwright must run from the repository root so it shares a filesystem view with the theme files this spec edits.`
+		);
 	}
 
 	return dir;
