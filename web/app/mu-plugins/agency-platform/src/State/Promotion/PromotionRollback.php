@@ -198,9 +198,18 @@ final class PromotionRollback {
 		if ( 'present' === $state ) {
 			// A present-state record was reset in place: it must still be
 			// exactly the state finalize left it in.
+			//
+			// objectId is compared as well as the content hash and the modified
+			// marker. Content and marker alone can be reproduced exactly by a
+			// client who deletes the row and recreates it, and the identity is
+			// the only field that changes in that case — the same gap a bounded
+			// review found in PromotionFinalizer's concurrency check.
+			$recorded_object_id = isset( $record['objectId'] ) && is_int( $record['objectId'] ) ? $record['objectId'] : null;
+
 			if ( null === $live
 				|| $live->content_hash() !== ( is_string( $record['postFinalizeSemanticHash'] ?? null ) ? $record['postFinalizeSemanticHash'] : '' )
-				|| $live->modified_gmt() !== ( $record['postFinalizeModifiedGmt'] ?? null ) ) {
+				|| $live->modified_gmt() !== ( $record['postFinalizeModifiedGmt'] ?? null )
+				|| ( null !== $recorded_object_id && $live->object_id() !== $recorded_object_id ) ) {
 				return $this->refuse_record(
 					$manifest,
 					$key,

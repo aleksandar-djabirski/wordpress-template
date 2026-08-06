@@ -205,10 +205,32 @@ audit the plan while it runs. Unit 3A did this and lost nothing.
   already carry every ruling you need.
 - **Do not read the plan file whole.** Extract sections by heading. Read a
   section once, when you write its notes, not again at review time.
-- **Do not poll background tasks.** You are notified when they finish. Each poll
-  costs a turn and usually returns nothing. Unit 3A wasted several turns this
-  way. If you must wait, do useful preparation instead — write the NEXT task's
-  notes and pre-generate its brief.
+- **Do not poll background tasks — but make sure they can actually notify you.**
+  This cost more wall-clock than any other process defect in Unit 3A, because
+  the orchestrator kept waiting for signals that could never arrive.
+
+  **The rule: launch EVERYTHING with the tool's own `run_in_background: true`.**
+  Only then does the harness track the process and re-invoke you when it exits.
+
+  The trap: the Unit 3A handoff prescribed launching Codex reviews detached with
+  `nohup … &` so the 600-second tool timeout could not kill them. That works, but
+  the wrapping call returns instantly and **nothing tracks the detached process,
+  so no notification is ever sent**. `run_in_background: true` solves BOTH
+  problems at once — it survives the timeout AND notifies. Use it instead of
+  `nohup`.
+
+  If you have already launched something untracked, wrap it in a tracked waiter
+  rather than polling:
+
+  ```
+  until grep -q "tokens used" /tmp/codex-<name>.out; do sleep 15; done; echo DONE
+  ```
+
+  run with `run_in_background: true`. `tokens used` is Codex's terminal marker.
+  Never grep for verdict strings — they appear in your own brief echoed back.
+
+- While something IS running, do useful preparation rather than waiting: write
+  the NEXT task's notes and pre-generate its brief. Never narrate waiting.
 - **Pre-generate briefs in batches.** Generating four briefs costs one tool call.
 - **Review the diff, not the repository.** Ask for `git show --stat`, then read
   only the files where a defect would actually hide.
