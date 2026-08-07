@@ -35,6 +35,19 @@ final class PromotionStrategyRegistrarTest extends IntegrationTestCase {
 		parent::tear_down();
 	}
 
+	/**
+	 * Release 3's contract, kept explicit in Release 4: the templates and
+	 * template-parts strategies were each registered and preparable, and
+	 * Release 4 must not have broken them.
+	 */
+	public function test_release_three_registers_templates_and_template_parts_as_preparable(): void {
+		PromotionStrategies::reset();
+		( new PromotionStrategyRegistrar() )->register();
+
+		self::assertInstanceOf( PreparablePromotionStrategy::class, PromotionStrategies::for_provider( 'templates' ) );
+		self::assertInstanceOf( PreparablePromotionStrategy::class, PromotionStrategies::for_provider( 'template-parts' ) );
+	}
+
 	public function test_release_four_registers_all_three_strategies(): void {
 		PromotionStrategies::reset();
 		( new PromotionStrategyRegistrar() )->register();

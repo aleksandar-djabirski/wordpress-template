@@ -37,6 +37,8 @@ use AgencyPlatform\State\Promotion\ManifestStore;
 use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionFinalizer;
 use AgencyPlatform\State\Promotion\PromotionManifest;
+use AgencyPlatform\State\Promotion\PromotionOutcome;
+use AgencyPlatform\State\Promotion\PromotionRollback;
 use AgencyPlatform\State\Promotion\PromotionSelector;
 use AgencyPlatform\State\Promotion\PromotionStrategyRegistrar;
 use AgencyPlatform\State\Promotion\StateGateway;
@@ -53,6 +55,7 @@ use Tests\Integration\IntegrationTestCase;
 /**
  * @covers \AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy
  * @covers \AgencyPlatform\State\Promotion\PromotionFinalizer
+ * @covers \AgencyPlatform\State\Promotion\PromotionRollback
  */
 // putenv() is how these tests drive AGENCY_* settings and the HMAC keyring
 // through EnvironmentConfig's process-environment fallback without
@@ -80,6 +83,7 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 	private ThemeJsonAdapter $adapter;
 	private GlobalStylesPromotionStrategy $strategy;
 	private PromotionFinalizer $finalizer;
+	private PromotionRollback $rollback;
 	private PromotionStrategyRegistrar $registrar;
 
 	private string $original_user_origin_hash = '';
@@ -122,6 +126,7 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		$this->adapter   = new ThemeJsonAdapter();
 		$this->strategy  = new GlobalStylesPromotionStrategy( $this->adapter, $this->gateway );
 		$this->finalizer = new PromotionFinalizer( $this->gateway, $this->store );
+		$this->rollback  = new PromotionRollback( $this->gateway, $this->store );
 
 		$this->registrar = new PromotionStrategyRegistrar();
 		$this->registrar->register();
@@ -265,6 +270,151 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		self::assertMatchesRegularExpression( '/^[0-9a-f]{64}$/', (string) $record['preResetResolvedHash'] );
 		self::assertSame( 'present', $record['postFinalizeRecordState'] );
 		self::assertSame( 'promoted', $record['finalizeStatus'] );
+	}
+
+	/**
+	 * CRITICAL 1 (whole-unit review): a successful Global Styles promotion
+	 * must be rollback-able. For a present-state record the rollback
+	 * compares the live record's content hash against the manifest's
+	 * postFinalizeSemanticHash — so that manifest value must BE the live
+	 * record's content hash. When resolve_current_hash() returned the
+	 * resolved-output hash instead, the two quantities could never be equal
+	 * and every rollback refused with changed-since-finalize, leaving the
+	 * customer's user origin reset.
+	 */
+	public function test_a_promoted_global_styles_record_rolls_back_byte_identically(): void {
+		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+		$live_before = $this->live_origin_record();
+
+		$object_id_before = $live_before->object_id();
+
+		self::assertNotNull( $object_id_before, 'The round trip needs a live user origin object id to pin.' );
+
+		$original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$post_before = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_before );
+		self::assertIsString( $post_before['post_content'] ?? null );
+		$original_post_content = $post_before['post_content'];
+
+		$this->deploy_merged_theme_json( $this->live_origin_record() );
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		$finalized = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+		self::assertSame( 0, $finalized['outcome']->exit_code() );
+		self::assertSame( 'promoted', $finalized['manifest']->record( 'global-styles:active' )['finalizeStatus'] );
+
+		// The finalize must have reset the user origin to the empty document.
+		self::assertNotSame(
+			$original_user_origin_hash,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'],
+			'The finalize must reset the user origin before the round trip can be meaningful.'
+		);
+
+		$rolled_back = $this->rollback->rollback( $this->global_styles_manifest_path );
+
+		self::assertSame(
+			0,
+			$rolled_back['outcome']->exit_code(),
+			'The rollback must not refuse: a just-finalized record has not changed since finalization.'
+		);
+		self::assertSame(
+			PromotionOutcome::OUTCOME_RESTORED,
+			$rolled_back['outcome']->outcomes()['global-styles:active'],
+			'The rollback must restore the user origin, never refuse it.'
+		);
+		self::assertSame( 'restored', $rolled_back['manifest']->record( 'global-styles:active' )['rollbackStatus'] );
+		self::assertSame( 'pending', $rolled_back['manifest']->record( 'global-styles:active' )['finalizeStatus'], 'A restored record must be re-finalisable.' );
+
+		// The customer's ORIGINAL user origin must be back: same row, same
+		// content hash, byte-identical post content.
+		self::assertSame(
+			$original_user_origin_hash,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash']
+		);
+		self::assertSame(
+			$object_id_before,
+			$this->live_origin_record()->object_id(),
+			'The rollback must restore the same row; a recreated row with identical content must never pass.'
+		);
+
+		$post_after = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_after );
+		self::assertSame(
+			$original_post_content,
+			$post_after['post_content'] ?? null,
+			'The restored user origin post content must be byte-identical to the original.'
+		);
+	}
+
+	/**
+	 * CRITICAL 2 (whole-unit review): a missing deployed theme.json must
+	 * refuse the record as post-reset-unresolved. assert_deployed_file_matches()
+	 * deliberately skips a missing file — the safety net is the post-reset
+	 * resolution returning null, which only fires when resolve_current_hash()
+	 * actually looks at theme.json. A resolve that never touches the file
+	 * promotes nothing, resets the customer's user origin, and reports
+	 * success.
+	 */
+	public function test_a_missing_deployed_theme_json_is_refused_post_reset_unresolved(): void {
+		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+		$live_before = $this->live_origin_record();
+
+		$object_id_before = $live_before->object_id();
+
+		self::assertNotNull( $object_id_before, 'The missing-file test needs a live user origin object id to pin.' );
+
+		$this->original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$post_before = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_before );
+		self::assertIsString( $post_before['post_content'] ?? null );
+		$original_post_content = $post_before['post_content'];
+
+		$this->deploy_merged_theme_json( $this->live_origin_record() );
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- deleting the deployed theme.json to simulate a deploy that lacks it; the WP_Filesystem credentials context does not exist here.
+		unlink( $this->active_theme_json_path );
+
+		self::assertFileDoesNotExist( $this->active_theme_json_path, 'The missing-file scenario needs the deployed theme.json absent.' );
+
+		$outcome = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame(
+			'post-reset-unresolved',
+			$outcome['manifest']->record( 'global-styles:active' )['finalizeRefusalReason'],
+			'A missing deployed theme.json must refuse the record as post-reset-unresolved, never promote it.'
+		);
+		self::assertSame( 'restored', $outcome['manifest']->record( 'global-styles:active' )['finalizeStatus'] );
+
+		// The user origin must be restored from the backup: same row, same
+		// content hash, byte-identical post content.
+		self::assertSame(
+			$this->original_user_origin_hash,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash']
+		);
+		self::assertSame(
+			$object_id_before,
+			$this->live_origin_record()->object_id(),
+			'The refusal must restore the same row; a recreated row with identical content must never pass.'
+		);
+
+		$post_after = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_after );
+		self::assertSame(
+			$original_post_content,
+			$post_after['post_content'] ?? null,
+			'The restored user origin post content must be byte-identical to the original.'
+		);
 	}
 
 	public function test_theme_json_keeps_its_template_parts_after_promotion(): void {

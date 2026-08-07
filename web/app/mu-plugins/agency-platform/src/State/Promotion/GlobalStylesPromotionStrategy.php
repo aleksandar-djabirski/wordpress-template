@@ -176,19 +176,36 @@ final class GlobalStylesPromotionStrategy implements DeferredHashPromotionStrate
 	}
 
 	/**
-	 * The semantic hash of the state the site resolves to right now, or
-	 * null when the record slug resolves to nothing. The resolved output of
-	 * the active theme always exists, so only an unknown slug is null —
-	 * exactly the contract resolve_current_hash() has for templates.
+	 * The semantic hash of the state the record resolves to right now, or
+	 * null when it cannot be resolved. For Global Styles this is the LIVE
+	 * RECORD's content hash — never the resolved-output hash — because
+	 * PromotionRollback compares postFinalizeSemanticHash against
+	 * $live->content_hash() for a present-state record, and storing any
+	 * other quantity makes every rollback refuse with
+	 * changed-since-finalize. The deployed theme.json is checked FIRST: a
+	 * missing or unreadable file resolves to null, so the finalizer refuses
+	 * the record as post-reset-unresolved and restores the user origin
+	 * instead of silently promoting nothing. An unknown slug or a missing
+	 * live record is null too.
 	 */
 	public function resolve_current_hash( string $record_slug ): ?string {
 		if ( 'active' !== $record_slug ) {
 			return null;
 		}
 
-		$this->adapter->refresh_caches();
+		$deployed_path = get_stylesheet_directory() . '/' . $this->theme_relative_path( $record_slug );
 
-		return $this->resolved_hash( $this->adapter->resolved() );
+		if ( ! is_file( $deployed_path ) || ! is_readable( $deployed_path ) ) {
+			return null;
+		}
+
+		$live = $this->gateway->live_state_record( 'global-styles', $record_slug );
+
+		if ( null === $live ) {
+			return null;
+		}
+
+		return $live->content_hash();
 	}
 
 	/**
