@@ -1,0 +1,654 @@
+<?php
+/**
+ * The Release 4 gate: Global Styles promotion through the Theme JSON
+ * adapter (master spec §7.6, plan Task 23). The strategy stages the
+ * EXPORTED user origin — read from $record->content(), never from the
+ * local database origin — merged into the theme origin by WP_Theme_JSON
+ * itself, and the finalizer's deferred-hash branch captures the fully
+ * resolved output on the TARGET before anything is destroyed, persists
+ * its hash as preResetResolvedHash, resets the user origin, and refuses
+ * with resolved-output-drift (restoring the row from the backup) when the
+ * resolved output changed. expectedPostResetHash stays null for this
+ * record: the expectation is computed on the target host, which is why
+ * defers_expected_hash() exists.
+ *
+ * Equivalence resolution route (CORRECTION D8): the stage() tests operate
+ * on a COPY of the shipped theme in a temp directory, while
+ * capture_pre_reset_state()/verify_resolved_equivalence() resolve through
+ * WP_Theme_JSON_Resolver against the ACTIVE theme — they cannot see a
+ * temp copy. The write-over-and-restore route is used: the prepared
+ * merged bytes are written over the ACTIVE theme.json, and the original
+ * bytes are restored in tear_down() AND from a register_shutdown_function()
+ * safety net, with an assertion that the restore is byte-identical.
+ *
+ * @package Tests\Integration
+ */
+
+declare(strict_types=1);
+
+namespace Tests\Integration\Promotion;
+
+use AgencyPlatform\State\HmacSigner;
+use AgencyPlatform\State\Ownership;
+use AgencyPlatform\State\Promotion\BundleView;
+use AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy;
+use AgencyPlatform\State\Promotion\ManifestStore;
+use AgencyPlatform\State\Promotion\PromotionException;
+use AgencyPlatform\State\Promotion\PromotionFinalizer;
+use AgencyPlatform\State\Promotion\PromotionManifest;
+use AgencyPlatform\State\Promotion\PromotionSelector;
+use AgencyPlatform\State\Promotion\PromotionStrategyRegistrar;
+use AgencyPlatform\State\Promotion\StateGateway;
+use AgencyPlatform\State\Promotion\StagedPromotionEntry;
+use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
+use AgencyPlatform\State\Promotion\TemplatePromotionStrategy;
+use AgencyPlatform\State\Promotion\ThemeDeclaredSlugs;
+use AgencyPlatform\State\Promotion\ThemeJsonAdapter;
+use AgencyPlatform\State\PromotionStrategies;
+use AgencyPlatform\State\PromotionPolicy;
+use AgencyPlatform\State\StateRecord;
+use Tests\Integration\IntegrationTestCase;
+
+/**
+ * @covers \AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy
+ * @covers \AgencyPlatform\State\Promotion\PromotionFinalizer
+ */
+// putenv() is how these tests drive AGENCY_* settings and the HMAC keyring
+// through EnvironmentConfig's process-environment fallback without
+// WordPress or real .env files loaded; WordPress's discouraged-function
+// sniff would otherwise flag every call.
+// phpcs:disable WordPress.PHP.DiscouragedPHPFunctions.runtime_configuration_putenv
+final class GlobalStylesPromotionTest extends IntegrationTestCase {
+
+	/** The key id every fixture in this file signs with. */
+	private const KEY_ID = '2026-01';
+
+	private const PROMOTION_ID  = 'cccccccc-dddd-4eee-8fff-000000000001';
+	private const SITE_UUID     = '11111111-2222-4333-8444-555555555555';
+	private const DEPLOY_COMMIT = 'ffffffffffffffffffffffffffffffffffffffff';
+
+	private string $tmp_dir;
+	private string $state_dir;
+	private string $theme_copy_dir;
+	private string $active_theme_json_path;
+	private string $original_theme_json_bytes;
+	private string $global_styles_manifest_path;
+
+	private StateGateway $gateway;
+	private ManifestStore $store;
+	private ThemeJsonAdapter $adapter;
+	private GlobalStylesPromotionStrategy $strategy;
+	private PromotionFinalizer $finalizer;
+	private PromotionStrategyRegistrar $registrar;
+
+	private string $original_user_origin_hash = '';
+
+	/** @var array<string, \AgencyPlatform\State\PromotionStrategy> */
+	private array $strategies = array();
+
+	public function set_up(): void {
+		parent::set_up();
+
+		$tmp = sys_get_temp_dir() . '/global-styles-promotion-' . uniqid( '', true );
+
+		$this->tmp_dir        = $tmp;
+		$this->state_dir      = $tmp . '/state';
+		$this->theme_copy_dir = $tmp . '/theme-copy';
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- creating integration fixture directories; the WP_Filesystem credentials context does not exist here.
+		mkdir( $this->state_dir, 0755, true );
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- creating integration fixture directories; the WP_Filesystem credentials context does not exist here.
+		mkdir( $this->theme_copy_dir, 0755, true );
+
+		// The stage() tests write into a COPY of the shipped theme; the
+		// equivalence tests write the prepared bytes over the ACTIVE
+		// theme.json (CORRECTION D8) and restore them in tear_down() plus a
+		// shutdown-function safety net.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- copying the shipped theme.json into an integration fixture directory; the WP_Filesystem credentials context does not exist here.
+		copy( get_stylesheet_directory() . '/theme.json', $this->theme_copy_dir . '/theme.json' );
+
+		$this->active_theme_json_path    = get_stylesheet_directory() . '/theme.json';
+		$this->original_theme_json_bytes = (string) file_get_contents( $this->active_theme_json_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading the shipped on-disk artefact under test; the WP_Filesystem credentials context does not exist here.
+
+		register_shutdown_function(
+			function (): void {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- restoring the active theme.json after a fatal test failure; the WP_Filesystem credentials context does not exist here.
+				file_put_contents( $this->active_theme_json_path, $this->original_theme_json_bytes );
+			}
+		);
+
+		$this->gateway   = new StateGateway();
+		$this->store     = new ManifestStore( $this->gateway );
+		$this->adapter   = new ThemeJsonAdapter();
+		$this->strategy  = new GlobalStylesPromotionStrategy( $this->adapter, $this->gateway );
+		$this->finalizer = new PromotionFinalizer( $this->gateway, $this->store );
+
+		$this->registrar = new PromotionStrategyRegistrar();
+		$this->registrar->register();
+		PromotionStrategies::reset();
+
+		$this->global_styles_manifest_path = $this->state_dir . '/global-styles.json';
+
+		putenv( 'AGENCY_REPO_ROOT=' . $tmp . '/repo' );
+		putenv( 'AGENCY_STATE_DIR=' . $this->state_dir );
+		putenv( 'AGENCY_DEPLOY_COMMIT=' . self::DEPLOY_COMMIT );
+		putenv( 'AGENCY_DEPLOYMENT_ID=' . self::PROMOTION_ID );
+
+		update_option( 'agency_platform_site_uuid', self::SITE_UUID );
+
+		$this->set_keyring();
+	}
+
+	public function tear_down(): void {
+		// The write-over-and-restore route (CORRECTION D8): the ACTIVE
+		// theme.json must be back byte-for-byte after every test.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- restoring the active theme.json after an integration test; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->active_theme_json_path, $this->original_theme_json_bytes );
+
+		self::assertSame(
+			$this->original_theme_json_bytes,
+			(string) file_get_contents( $this->active_theme_json_path ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the restored on-disk artefact; the WP_Filesystem credentials context does not exist here.
+			'The active theme.json must be restored byte-identically after every test.'
+		);
+
+		remove_filter( PromotionStrategies::FILTER, array( $this->registrar, 'add_strategies' ) );
+		remove_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
+
+		PromotionStrategies::reset();
+
+		putenv( 'AGENCY_REPO_ROOT' );
+		putenv( 'AGENCY_STATE_DIR' );
+		putenv( 'AGENCY_DEPLOY_COMMIT' );
+		putenv( 'AGENCY_DEPLOYMENT_ID' );
+
+		$this->clear_keyring();
+
+		$this->remove_tree( $this->tmp_dir );
+
+		parent::tear_down();
+	}
+
+	/**
+	 * The bundle carries production's user origin. A different local origin
+	 * must not leak into the promoted theme.json: stage() reads
+	 * $record->content() only, never the adapter's user_origin().
+	 */
+	public function test_prepare_uses_the_exported_user_origin_not_the_local_one(): void {
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#local' ) ) ) );
+
+		$entry = $this->strategy->stage( $this->exported_record_with_background( '#exported' ), $this->theme_copy_dir );
+		$entry->commit();
+
+		$body = (string) file_get_contents( $entry->manifest_fields()['absolutePath'] ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back an integration fixture file; the WP_Filesystem credentials context does not exist here.
+
+		self::assertStringContainsString( '#exported', $body );
+		self::assertStringNotContainsString( '#local', $body );
+	}
+
+	public function test_a_user_style_round_trips_without_changing_resolved_output(): void {
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) ) );
+
+		$this->deploy_merged_theme_json( $this->live_origin_record() );
+
+		$before = $this->strategy->capture_pre_reset_state();
+		$this->strategy->reset( $this->live_origin_record() );
+		$outcome = $this->strategy->verify_resolved_equivalence( $before );
+
+		self::assertTrue( $outcome['equivalent'], (string) $outcome['difference'] );
+	}
+
+	/**
+	 * The negative control, through the real finalizer: the deployed
+	 * theme.json does NOT carry the exported user origin (nothing was
+	 * promoted into it), so after the reset the resolved output loses the
+	 * customisation. The finalizer must restore the user origin row from
+	 * the backup and refuse with resolved-output-drift — a false EQUIVALENT
+	 * verdict here would silently destroy the customer's content.
+	 */
+	public function test_promotion_is_refused_when_resolved_output_changes(): void {
+		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+		$this->original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		$outcome = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'resolved-output-drift', $outcome['manifest']->record( 'global-styles:active' )['finalizeRefusalReason'] );
+		self::assertSame( 'restored', $outcome['manifest']->record( 'global-styles:active' )['finalizeStatus'] );
+		// The user origin must be back exactly as it was.
+		self::assertSame(
+			$this->original_user_origin_hash,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash']
+		);
+	}
+
+	public function test_the_pre_reset_hash_is_recorded_in_the_manifest(): void {
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) ) );
+
+		$this->deploy_merged_theme_json( $this->live_origin_record() );
+
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		$record = $this->finalizer->finalize( $this->global_styles_manifest_path )['manifest']->record( 'global-styles:active' );
+
+		self::assertMatchesRegularExpression( '/^[0-9a-f]{64}$/', (string) $record['preResetResolvedHash'] );
+		self::assertSame( 'present', $record['postFinalizeRecordState'] );
+		self::assertSame( 'promoted', $record['finalizeStatus'] );
+	}
+
+	public function test_theme_json_keeps_its_template_parts_after_promotion(): void {
+		$entry = $this->strategy->stage( $this->exported_record(), $this->theme_copy_dir );
+		$entry->commit();
+
+		$decoded = json_decode( (string) file_get_contents( $entry->manifest_fields()['absolutePath'] ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back an integration fixture file; the WP_Filesystem credentials context does not exist here.
+
+		self::assertIsArray( $decoded );
+		self::assertArrayHasKey( 'templateParts', $decoded );
+	}
+
+	/**
+	 * The Release 3 boundary, from the other side: with the strategy
+	 * registered, the selector accepts what it used to refuse.
+	 */
+	public function test_the_strategy_makes_global_styles_selectable_only_now(): void {
+		PromotionStrategies::reset();
+		( new PromotionStrategyRegistrar() )->register();
+
+		self::assertNotNull( PromotionStrategies::for_provider( 'global-styles' ) );
+
+		$entries = PromotionSelector::parse(
+			'global-styles:active',
+			static fn( string $provider ): bool => null !== PromotionStrategies::for_provider( $provider ),
+			static fn( string $record_key ): bool => 'global-styles:active' === $record_key
+		);
+
+		self::assertCount( 1, $entries );
+		self::assertSame( 'global-styles:active', $entries[0]['key'] );
+	}
+
+	/**
+	 * The shipped-artefact guard: the REAL shipped theme.json, driven
+	 * through the REAL adapter and the REAL strategy, must merge the
+	 * exported origin, keep its templateParts and version, and pass
+	 * validate_theme_json() — which stage() runs internally, so a shipped
+	 * file the guards refuse fails this test.
+	 */
+	public function test_the_shipped_theme_json_promotes_through_the_real_strategy(): void {
+		$raw = file_get_contents( get_stylesheet_directory() . '/theme.json' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading the shipped on-disk artefact under test; the WP_Filesystem credentials context does not exist here.
+
+		self::assertIsString( $raw, 'The shipped theme.json must be readable by the shipped-artefact test.' );
+
+		$shipped = json_decode( $raw, true );
+
+		self::assertIsArray( $shipped );
+
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) ) );
+
+		$entry = $this->strategy->stage( $this->live_origin_record(), $this->theme_copy_dir );
+		$entry->commit();
+
+		$decoded = json_decode( (string) file_get_contents( $entry->manifest_fields()['absolutePath'] ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the staged artefact; the WP_Filesystem credentials context does not exist here.
+
+		self::assertIsArray( $decoded );
+		self::assertSame(
+			array_column( $shipped['templateParts'], 'name' ),
+			array_column( $decoded['templateParts'], 'name' ),
+			'Losing a template part would un-register the theme\'s parts and break the Site Editor.'
+		);
+		self::assertSame(
+			array_column( $shipped['templateParts'], 'area' ),
+			array_column( $decoded['templateParts'], 'area' ),
+			'The template part areas must survive; only object-map keys are sorted by the canonical writer, never list order.'
+		);
+		self::assertSame( $shipped['version'], $decoded['version'] );
+		self::assertSame( '#101010', $decoded['styles']['color']['background'] );
+		self::assertArrayHasKey( 'settings', $decoded );
+		self::assertArrayHasKey( 'styles', $decoded );
+	}
+
+	public function test_prepare_refuses_because_stage_is_the_promotion_entry_point(): void {
+		$exception = $this->assert_exit_code( 1, fn() => $this->strategy->prepare( $this->exported_record(), $this->theme_copy_dir ) );
+
+		self::assertStringContainsString( 'stage()', $exception->getMessage() );
+	}
+
+	public function test_expected_post_reset_hash_throws_for_a_deferred_strategy(): void {
+		$exception = $this->assert_exit_code( 1, fn() => $this->strategy->expected_post_reset_hash( $this->exported_record() ) );
+
+		self::assertStringContainsString( 'capture_pre_reset_state', $exception->getMessage() );
+	}
+
+	/**
+	 * CORRECTION D7: the canonical resolved view is already order-insensitive
+	 * through the recursive key sort, so resolved_hash() must not depend on
+	 * how the resolved document was assembled.
+	 */
+	public function test_resolved_hash_is_order_insensitive(): void {
+		self::assertSame(
+			$this->strategy->resolved_hash(
+				array(
+					'settings' => array(
+						'a' => 1,
+						'b' => array( 'x' => 'y' ),
+					),
+					'styles'   => array( 'color' => array( 'background' => '#101010' ) ),
+				)
+			),
+			$this->strategy->resolved_hash(
+				array(
+					'styles'   => array( 'color' => array( 'background' => '#101010' ) ),
+					'settings' => array(
+						'b' => array( 'x' => 'y' ),
+						'a' => 1,
+					),
+				)
+			)
+		);
+	}
+
+	/**
+	 * CORRECTION D3: a strategy that defers its expected hash WITHOUT the
+	 * target-side equivalence interface must be refused per record, never
+	 * fatal, and never called — nothing may be captured, backed up or reset.
+	 */
+	public function test_a_strategy_that_defers_without_the_interface_is_refused(): void {
+		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+		$origin_hash_before = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		remove_filter( PromotionStrategies::FILTER, array( $this->registrar, 'add_strategies' ) );
+		$this->strategies = array( 'global-styles' => new DefersWithoutInterfaceStrategy() );
+		add_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
+		PromotionStrategies::reset();
+
+		$outcome = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+		self::assertSame( 1, $outcome['outcome']->exit_code() );
+		self::assertSame( 'deferred-hash-unsupported', $outcome['manifest']->record( 'global-styles:active' )['finalizeRefusalReason'] );
+		self::assertSame( 'refused', $outcome['manifest']->record( 'global-styles:active' )['finalizeStatus'] );
+		self::assertSame(
+			$origin_hash_before,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'],
+			'An unsupported deferred-hash strategy must be refused before anything touches the row.'
+		);
+	}
+
+	/**
+	 * Named filter callback — never a closure (master spec §4).
+	 *
+	 * @param array<string, \AgencyPlatform\State\PromotionStrategy> $strategies
+	 * @return array<string, \AgencyPlatform\State\PromotionStrategy>
+	 */
+	public function provide_strategies( array $strategies ): array {
+		return $this->strategies;
+	}
+
+	/**
+	 * The current user origin with the #101010 customisation, as the
+	 * exported record would carry it.
+	 */
+	private function exported_record(): StateRecord {
+		return $this->exported_record_with_background( '#101010' );
+	}
+
+	private function exported_record_with_background( string $background ): StateRecord {
+		return StateRecord::create(
+			'global-styles',
+			'active',
+			null,
+			'publish',
+			null,
+			array( 'styles' => array( 'color' => array( 'background' => $background ) ) ),
+			array(),
+			Ownership::GIT_BASELINE_PLUS_DB_USER_ORIGIN,
+			PromotionPolicy::PROMOTABLE
+		);
+	}
+
+	private function live_origin_record(): StateRecord {
+		$live = $this->gateway->live_state_record( 'global-styles', 'active' );
+
+		self::assertNotNull( $live, 'Expected a live global-styles:active record.' );
+
+		return $live;
+	}
+
+	/**
+	 * Stages the exported origin into the temp theme copy, commits it, and
+	 * writes the prepared bytes over the ACTIVE theme.json — the deployed
+	 * file a finalize would verify and resolve against. The original bytes
+	 * are restored in tear_down().
+	 */
+	private function deploy_merged_theme_json( StateRecord $record ): void {
+		$entry = $this->strategy->stage( $record, $this->theme_copy_dir );
+		$entry->commit();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the staged fixture file; the WP_Filesystem credentials context does not exist here.
+		$merged_bytes = (string) file_get_contents( $entry->manifest_fields()['absolutePath'] );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing the prepared bytes over the active theme.json for the equivalence tests; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->active_theme_json_path, $merged_bytes );
+	}
+
+	/**
+	 * The signed, sealed, single-record manifest every finalize test drives:
+	 * built from the LIVE row (contentHash / modifiedGmt / objectId) and the
+	 * CURRENT deployed theme.json bytes, so a finalize that does not re-read
+	 * the row cannot pass.
+	 */
+	private function build_global_styles_manifest( string $path ): void {
+		$live = $this->live_origin_record();
+
+		$manifest = PromotionManifest::create(
+			self::PROMOTION_ID,
+			'2026-08-01T10:00:00Z',
+			array(
+				'exportId'      => '11111111-2222-4333-8444-555555555555',
+				'exportedAtUtc' => '2026-08-01T09:00:00Z',
+				'siteUrl'       => home_url(),
+				'environment'   => wp_get_environment_type(),
+				'activeTheme'   => array(
+					'stylesheet' => get_stylesheet(),
+					'version'    => (string) wp_get_theme()->get( 'Version' ),
+					'gitCommit'  => null,
+				),
+			),
+			self::SITE_UUID,
+			str_repeat( 'b', 40 ),
+			array( 'npm run test:e2e' )
+		);
+
+		$manifest = $manifest->with_record(
+			'global-styles:active',
+			array(
+				'key'                      => 'global-styles:active',
+				'provider'                 => 'global-styles',
+				'slug'                     => 'active',
+				'objectId'                 => $live->object_id(),
+				'originalContentHash'      => $live->content_hash(),
+				'originalModifiedGmt'      => $live->modified_gmt(),
+				'preparedFilePath'         => 'theme.json',
+				'themeRelativePath'        => 'theme.json',
+				'preparedFileHash'         => $this->active_theme_json_sha256(),
+				'originalFileHash'         => null,
+				'referenceScan'            => array(),
+				'navigationExpectation'    => array(),
+				'expectedPostResetHash'    => null,
+				'preResetResolvedHash'     => null,
+				'postFinalizeRecordState'  => null,
+				'postFinalizeSemanticHash' => null,
+				'postFinalizeModifiedGmt'  => null,
+				'finalizeStatus'           => 'pending',
+				'finalizeRefusalReason'    => null,
+				'rollbackStatus'           => 'not-attempted',
+				'rollbackRefusalReason'    => null,
+				'restoredObjectId'         => null,
+			)
+		);
+
+		$this->store->write( $manifest->with_deploy_commit( self::DEPLOY_COMMIT, '2026-08-01T10:00:00Z' ), $path );
+	}
+
+	private function active_theme_json_sha256(): string {
+		$hash = hash_file( 'sha256', $this->active_theme_json_path );
+
+		return false === $hash ? '' : $hash;
+	}
+
+	/**
+	 * The user origin the deployed file does NOT carry: a plain style
+	 * override that is only in the database. The equivalence gate's job is
+	 * to notice that promoting it (without the file ever gaining it) would
+	 * change the resolved output, so the negative control is exactly "the
+	 * reset changes the resolved output".
+	 *
+	 * @return array<string, mixed>
+	 */
+	private function style_the_merge_cannot_express(): array {
+		return array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) );
+	}
+
+	/**
+	 * Writes a user origin through the REAL adapter — the same path the
+	 * strategy and the finalizer use — so the fixtures and the production
+	 * write path cannot drift apart.
+	 *
+	 * wp-phpunit runs with no current user, so core's on-demand post
+	 * creation cannot attach the wp_theme term: wp_insert_post() applies
+	 * tax_input only when current_user_can( $taxonomy_obj->cap->assign_terms ),
+	 * which is false for user 0. Without the term the resolver's name-field
+	 * tax_query cannot find the row. SeedsStateFixtures attaches the term
+	 * explicitly for the same reason.
+	 *
+	 * @param array<string, mixed> $content
+	 */
+	private function save_user_global_style( array $content ): void {
+		$adapter = new ThemeJsonAdapter();
+		$adapter->refresh_caches();
+		$adapter->write_user_origin( $content );
+
+		$post = $adapter->user_origin_post();
+
+		self::assertNotNull( $post, 'The fixture needs a Global Styles post to attach the theme term to.' );
+
+		wp_set_object_terms( (int) $post['ID'], get_stylesheet(), 'wp_theme' );
+
+		$adapter->refresh_caches();
+	}
+
+	/**
+	 * Asserts that the operation refuses with exactly the expected exit code,
+	 * and returns the exception so the caller can also assert the message.
+	 * Fails when no exception is thrown, when a non-PromotionException
+	 * escapes, or when the code differs.
+	 *
+	 * @param callable():void $operation
+	 */
+	private function assert_exit_code( int $expected, callable $operation ): PromotionException {
+		try {
+			$operation();
+		} catch ( PromotionException $exception ) {
+			self::assertSame(
+				$expected,
+				$exception->exit_code(),
+				sprintf( 'Expected exit code %d, got %d: %s', $expected, $exception->exit_code(), $exception->getMessage() )
+			);
+
+			return $exception;
+		}
+
+		self::fail( sprintf( 'Expected a PromotionException with exit code %d, but no exception was thrown.', $expected ) );
+	}
+
+	/**
+	 * The keyring the gateway's from_environment() signer must find: valid
+	 * JSON, one key id, a 40-char key — the same key the fixtures sign with.
+	 */
+	private function keyring_json(): string {
+		return '{"' . self::KEY_ID . '":"' . str_repeat( 'k', 40 ) . '"}';
+	}
+
+	private function set_keyring(): void {
+		putenv( HmacSigner::SETTING_KEYS . '=' . $this->keyring_json() );
+		putenv( HmacSigner::SETTING_SIGNING_KEY_ID . '=' . self::KEY_ID );
+	}
+
+	private function clear_keyring(): void {
+		putenv( HmacSigner::SETTING_KEYS );
+		putenv( HmacSigner::SETTING_SIGNING_KEY_ID );
+	}
+
+	/**
+	 * Removes an integration fixture directory and everything inside it.
+	 */
+	private function remove_tree( string $directory ): void {
+		if ( ! is_dir( $directory ) ) {
+			return;
+		}
+
+		foreach ( scandir( $directory ) as $entry ) {
+			if ( '.' === $entry || '..' === $entry ) {
+				continue;
+			}
+
+			$path = $directory . '/' . $entry;
+
+			if ( is_dir( $path ) && ! is_link( $path ) ) {
+				$this->remove_tree( $path );
+
+				continue;
+			}
+
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- deleting an integration fixture file; the WP_Filesystem credentials context does not exist here.
+			unlink( $path );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- deleting an integration fixture directory; the WP_Filesystem credentials context does not exist here.
+		rmdir( $directory );
+	}
+}
+
+/**
+ * A PreparablePromotionStrategy that defers its expected hash but does NOT
+ * implement DeferredHashPromotionStrategy — the shape CORRECTION D3 guards
+ * against. The finalizer must refuse the record, never call capture or
+ * verify on it.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this stub to the Global Styles test file so the deferred-hash guard is deterministic.
+final class DefersWithoutInterfaceStrategy extends \AgencyPlatform\State\Promotion\AbstractBlockTemplateStrategy {
+
+	public function provider_slug(): string {
+		return 'global-styles';
+	}
+
+	public function defers_expected_hash(): bool {
+		return true;
+	}
+
+	public function post_finalize_record_state(): string {
+		return 'present';
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return 'active' === $record_slug;
+	}
+
+	/**
+	 * The deployed theme.json always resolves; a 64-hex placeholder is the
+	 * non-null result the finalizer needs to reach the equivalence branch.
+	 */
+	public function resolve_current_hash( string $record_slug ): ?string {
+		return str_repeat( 'a', 64 );
+	}
+
+	protected function post_type(): string {
+		return 'wp_global_styles';
+	}
+
+	protected function theme_subdirectory(): string {
+		return '.';
+	}
+}

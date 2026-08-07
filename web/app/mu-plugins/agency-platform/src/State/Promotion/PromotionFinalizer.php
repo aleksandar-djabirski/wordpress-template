@@ -432,6 +432,42 @@ final class PromotionFinalizer {
 			}
 		}
 
+		// 3b. The deferred-hash branch (master spec §7.6 step 3): a strategy
+		// that defers its expected hash cannot know it at prepare time — the
+		// fully resolved settings/styles depend on the TARGET host, and the
+		// bundle exports the user origin, never a resolved snapshot. The
+		// snapshot is therefore captured here, right after the concurrency
+		// check has proven the live user origin still matches the exported
+		// record, and its hash is persisted as preResetResolvedHash for audit
+		// and rollback. A strategy that defers WITHOUT the target-side
+		// equivalence contract is refused per record, never fatal.
+		$deferred          = $strategy->defers_expected_hash();
+		$expected_resolved = array();
+
+		if ( $deferred ) {
+			if ( ! $strategy instanceof DeferredHashPromotionStrategy ) {
+				return $this->refuse_record(
+					$manifest,
+					$key,
+					$this->deferred_hash_refusal( $key, $provider, $slug ),
+					'refused',
+					$outcomes,
+					$refusals
+				);
+			}
+
+			$expected_resolved = $strategy->capture_pre_reset_state();
+
+			$manifest = $manifest->with_record_changes(
+				$key,
+				// The strategy's own resolved_hash() is the single source of
+				// truth: verify_resolved_equivalence() compares the same
+				// convention, so the audit record and the gate can never
+				// silently disagree.
+				array( 'preResetResolvedHash' => $strategy->resolved_hash( $expected_resolved ) )
+			);
+		}
+
 		// 4. The backup is the ONLY copy of the customer's content once the
 		// reset runs; it is captured before anything is destroyed.
 		$backup->store( $key, $strategy->capture_backup( $live ) );
@@ -522,10 +558,38 @@ final class PromotionFinalizer {
 		}
 
 		// 7. The post-reset semantic comparison: the resolved state must equal
-		// the hash the prepare stage recorded. A mismatch restores the row —
-		// the backup is deliberately NOT deleted.
-		if ( ! $strategy->defers_expected_hash()
-			&& ( is_string( $record['expectedPostResetHash'] ?? null ) ? $record['expectedPostResetHash'] : '' ) !== $actual ) {
+		// what the prepare stage recorded. A deferred-hash strategy compares
+		// against the target-side pre-reset snapshot instead of
+		// expectedPostResetHash (which stays null for it); a mismatch restores
+		// the row — the backup is deliberately NOT deleted.
+		if ( $deferred ) {
+			if ( ! $strategy instanceof DeferredHashPromotionStrategy ) {
+				return $this->refuse_record(
+					$manifest,
+					$key,
+					$this->deferred_hash_refusal( $key, $provider, $slug ),
+					'refused',
+					$outcomes,
+					$refusals
+				);
+			}
+
+			$equivalence = $strategy->verify_resolved_equivalence( $expected_resolved );
+
+			if ( false === $equivalence['equivalent'] ) {
+				return $this->restore_and_refuse(
+					$manifest,
+					$key,
+					$live,
+					$strategy,
+					$backup,
+					'resolved-output-drift',
+					'After the database override was removed, the resolved output differed from the pre-reset snapshot; the database record was restored from the backup. First divergent key: ' . (string) $equivalence['difference'],
+					$outcomes,
+					$refusals
+				);
+			}
+		} elseif ( ( is_string( $record['expectedPostResetHash'] ?? null ) ? $record['expectedPostResetHash'] : '' ) !== $actual ) {
 			return $this->restore_and_refuse(
 				$manifest,
 				$key,
@@ -664,6 +728,23 @@ final class PromotionFinalizer {
 			'restored',
 			$outcomes,
 			$refusals
+		);
+	}
+
+	/**
+	 * The refusal for a strategy that defers its expected hash without
+	 * implementing the target-side equivalence contract: the finalizer could
+	 * neither capture the pre-reset snapshot nor verify the post-reset
+	 * output, so promoting the record would be unverifiable. Refused per
+	 * record, never fatal.
+	 */
+	private function deferred_hash_refusal( string $key, string $provider, string $slug ): RecordRefusal {
+		return new RecordRefusal(
+			$key,
+			$provider,
+			$slug,
+			'deferred-hash-unsupported',
+			'The strategy defers its post-reset hash expectation but does not implement the target-side equivalence contract; refusing the record.'
 		);
 	}
 
