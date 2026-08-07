@@ -466,6 +466,17 @@ final class PromotionFinalizer {
 				// silently disagree.
 				array( 'preResetResolvedHash' => $strategy->resolved_hash( $expected_resolved ) )
 			);
+
+			// CRITICAL B (whole-unit review): the canonical manifest IS the
+			// durable recovery record, and a value computed before a
+			// destructive step must be persisted before that step. The
+			// pre-reset hash is therefore written to the canonical NOW, while
+			// the record is still pending and the row untouched, so a failure
+			// anywhere after the reset can never leave the canonical without
+			// it. Nothing has been destroyed at this point, so a failure of
+			// THIS write aborts the run before anything is reset — exactly
+			// like the pre-loop write.
+			$this->store->write_canonical( $manifest );
 		}
 
 		// 4. The backup is the ONLY copy of the customer's content once the

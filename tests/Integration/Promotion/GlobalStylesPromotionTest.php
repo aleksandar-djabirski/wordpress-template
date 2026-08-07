@@ -29,6 +29,7 @@ declare(strict_types=1);
 namespace Tests\Integration\Promotion;
 
 use AgencyPlatform\State\HmacSigner;
+use AgencyPlatform\State\Normalizer;
 use AgencyPlatform\State\Ownership;
 use AgencyPlatform\State\Promotion\BundleView;
 use AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy;
@@ -207,7 +208,19 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 	public function test_promotion_is_refused_when_resolved_output_changes(): void {
 		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
 
+		$live_before = $this->live_origin_record();
+
 		$this->original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$object_id_before = $live_before->object_id();
+
+		self::assertNotNull( $object_id_before, 'The refusal test needs a live user origin object id to pin.' );
+
+		$post_before = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_before, 'The live user origin must have a post row to pin its content bytes.' );
+		self::assertIsString( $post_before['post_content'] ?? null );
+		self::assertStringContainsString( '#101010', $post_before['post_content'] );
 
 		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
 
@@ -220,6 +233,23 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		self::assertSame(
 			$this->original_user_origin_hash,
 			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash']
+		);
+		// A content hash cannot distinguish a row that was deleted and
+		// recreated with identical content — the engagement's own concurrency
+		// check exists precisely because of that. The refusal must restore
+		// the SAME row: same object id, byte-identical post content.
+		self::assertSame(
+			$object_id_before,
+			$this->live_origin_record()->object_id(),
+			'The refusal must restore the same row; a recreated row with identical content must never pass.'
+		);
+		$post_after = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_after );
+		self::assertSame(
+			$post_before['post_content'],
+			$post_after['post_content'] ?? null,
+			'The restored user origin post content must be byte-identical to the original.'
 		);
 	}
 
@@ -270,9 +300,11 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 	/**
 	 * The shipped-artefact guard: the REAL shipped theme.json, driven
 	 * through the REAL adapter and the REAL strategy, must merge the
-	 * exported origin, keep its templateParts and version, and pass
-	 * validate_theme_json() — which stage() runs internally, so a shipped
-	 * file the guards refuse fails this test.
+	 * exported origin, keep EVERY top-level key other than settings and
+	 * styles (derived from the shipped file at runtime, never hard-coded,
+	 * so keys added later stay covered), and pass validate_theme_json() —
+	 * which stage() runs internally, so a shipped file the guards refuse
+	 * fails this test.
 	 */
 	public function test_the_shipped_theme_json_promotes_through_the_real_strategy(): void {
 		$raw = file_get_contents( get_stylesheet_directory() . '/theme.json' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading the shipped on-disk artefact under test; the WP_Filesystem credentials context does not exist here.
@@ -291,17 +323,28 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		$decoded = json_decode( (string) file_get_contents( $entry->manifest_fields()['absolutePath'] ), true ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the staged artefact; the WP_Filesystem credentials context does not exist here.
 
 		self::assertIsArray( $decoded );
-		self::assertSame(
-			array_column( $shipped['templateParts'], 'name' ),
-			array_column( $decoded['templateParts'], 'name' ),
-			'Losing a template part would un-register the theme\'s parts and break the Site Editor.'
-		);
-		self::assertSame(
-			array_column( $shipped['templateParts'], 'area' ),
-			array_column( $decoded['templateParts'], 'area' ),
-			'The template part areas must survive; only object-map keys are sorted by the canonical writer, never list order.'
-		);
-		self::assertSame( $shipped['version'], $decoded['version'] );
+
+		// Exhaustive, runtime-derived: every top-level key of the shipped
+		// theme.json other than settings and styles must survive, identical
+		// to the shipped value. $schema and version are as load-bearing as
+		// templateParts — losing them is quiet and real. Array values are
+		// compared against their canonical form because the staged writer
+		// recursively key-sorts object maps (never list order), so the
+		// decoded entry keys differ from the shipped file's key order even
+		// though every value is identical.
+		foreach ( array_diff( array_keys( $shipped ), array( 'settings', 'styles' ) ) as $key ) {
+			self::assertArrayHasKey(
+				$key,
+				$decoded,
+				sprintf( 'The shipped top-level theme.json key "%s" must be present in the staged document.', $key )
+			);
+			self::assertSame(
+				is_array( $shipped[ $key ] ) ? Normalizer::sort_recursive( $shipped[ $key ] ) : $shipped[ $key ],
+				$decoded[ $key ],
+				sprintf( 'The shipped top-level theme.json key "%s" must be unchanged by promotion.', $key )
+			);
+		}
+
 		self::assertSame( '#101010', $decoded['styles']['color']['background'] );
 		self::assertArrayHasKey( 'settings', $decoded );
 		self::assertArrayHasKey( 'styles', $decoded );
@@ -348,6 +391,43 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * The counterpart of the object-map test above: preset lists
+	 * (settings.color.palette, settings.spacing.spacingSizes,
+	 * settings.typography.fontSizes) carry PRECEDENCE order — the first
+	 * matching slug wins — so their order is meaningful and must change the
+	 * hash. A refactor that recursively sorted lists too would make this
+	 * test fail, exactly as it must.
+	 */
+	public function test_resolved_hash_is_order_sensitive_for_preset_lists(): void {
+		$palette = array(
+			array(
+				'slug'  => 'base',
+				'color' => '#ffffff',
+			),
+			array(
+				'slug'  => 'accent',
+				'color' => '#d97b29',
+			),
+		);
+
+		self::assertNotSame(
+			$this->strategy->resolved_hash(
+				array(
+					'settings' => array( 'color' => array( 'palette' => $palette ) ),
+					'styles'   => array(),
+				)
+			),
+			$this->strategy->resolved_hash(
+				array(
+					'settings' => array( 'color' => array( 'palette' => array_reverse( $palette ) ) ),
+					'styles'   => array(),
+				)
+			),
+			'A preset list is a precedence list: reversing it must change the resolved hash.'
+		);
+	}
+
+	/**
 	 * CORRECTION D3: a strategy that defers its expected hash WITHOUT the
 	 * target-side equivalence interface must be refused per record, never
 	 * fatal, and never called — nothing may be captured, backed up or reset.
@@ -373,6 +453,45 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 			$origin_hash_before,
 			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'],
 			'An unsupported deferred-hash strategy must be refused before anything touches the row.'
+		);
+	}
+
+	/**
+	 * The durable-recovery guarantee of the deferred-hash branch: the
+	 * canonical manifest IS the recovery record, so the pre-reset resolved
+	 * hash must be persisted to it BEFORE the backup and reset — a value
+	 * computed before a destructive step must never wait for a write that
+	 * happens after it. This test's strategy throws AFTER the reset (the
+	 * equivalence check never runs), and the canonical manifest the run
+	 * leaves behind must still carry the hash computed while the record was
+	 * pending.
+	 */
+	public function test_a_failure_after_the_reset_leaves_the_pre_reset_hash_in_the_canonical(): void {
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) ) );
+
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		remove_filter( PromotionStrategies::FILTER, array( $this->registrar, 'add_strategies' ) );
+		$this->strategies = array( 'global-styles' => new ThrowsAfterResetStrategy() );
+		add_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
+		PromotionStrategies::reset();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->global_styles_manifest_path ) );
+
+		self::assertStringContainsString( 'probe failure after reset', $exception->getMessage() );
+
+		$canonical_record = $this->store->load_canonical( self::PROMOTION_ID )->record( 'global-styles:active' );
+
+		self::assertIsArray( $canonical_record );
+		self::assertMatchesRegularExpression(
+			'/^[0-9a-f]{64}$/',
+			(string) ( $canonical_record['preResetResolvedHash'] ?? '' ),
+			'The canonical manifest must carry a sha256 preResetResolvedHash even when the finalize throws after the reset.'
+		);
+		self::assertSame(
+			'pending',
+			$canonical_record['finalizeStatus'],
+			'The failed record must still read pending in the canonical manifest.'
 		);
 	}
 
@@ -608,6 +727,64 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_rmdir -- deleting an integration fixture directory; the WP_Filesystem credentials context does not exist here.
 		rmdir( $directory );
+	}
+}
+
+/**
+ * A DeferredHashPromotionStrategy whose post-reset equivalence check
+ * throws — the "failure after the reset" whose durable record must carry
+ * the pre-reset resolved hash. capture_pre_reset_state() and
+ * resolved_hash() work normally, so the finalizer reaches the backup, the
+ * reset and the equivalence check before the exception escapes.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this stub to the Global Styles test file so the post-reset failure path is deterministic.
+final class ThrowsAfterResetStrategy extends \AgencyPlatform\State\Promotion\AbstractBlockTemplateStrategy implements \AgencyPlatform\State\Promotion\DeferredHashPromotionStrategy {
+
+	public function provider_slug(): string {
+		return 'global-styles';
+	}
+
+	public function defers_expected_hash(): bool {
+		return true;
+	}
+
+	public function post_finalize_record_state(): string {
+		return 'present';
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return 'active' === $record_slug;
+	}
+
+	/**
+	 * The deployed theme.json always resolves; a 64-hex placeholder is the
+	 * non-null result the finalizer needs to reach the equivalence branch.
+	 */
+	public function resolve_current_hash( string $record_slug ): ?string {
+		return str_repeat( 'a', 64 );
+	}
+
+	public function capture_pre_reset_state(): array {
+		return array(
+			'settings' => array(),
+			'styles'   => array( 'color' => array( 'background' => '#101010' ) ),
+		);
+	}
+
+	public function resolved_hash( array $resolved ): string {
+		return ( new StateGateway() )->hash_content( $resolved );
+	}
+
+	public function verify_resolved_equivalence( array $expected_resolved ): array {
+		throw PromotionException::hard( 'probe failure after reset' );
+	}
+
+	protected function post_type(): string {
+		return 'wp_global_styles';
+	}
+
+	protected function theme_subdirectory(): string {
+		return '.';
 	}
 }
 
