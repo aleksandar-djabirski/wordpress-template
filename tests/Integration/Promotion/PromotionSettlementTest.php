@@ -27,6 +27,7 @@ namespace Tests\Integration\Promotion;
 
 use AgencyPlatform\State\HmacSigner;
 use AgencyPlatform\State\Promotion\BundleView;
+use AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy;
 use AgencyPlatform\State\Promotion\ManifestStore;
 use AgencyPlatform\State\Promotion\PreparablePromotionStrategy;
 use AgencyPlatform\State\Promotion\PromotionBackup;
@@ -34,6 +35,7 @@ use AgencyPlatform\State\Promotion\PromotionConfirmer;
 use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionFinalizer;
 use AgencyPlatform\State\Promotion\PromotionManifest;
+use AgencyPlatform\State\Promotion\PromotionOutcome;
 use AgencyPlatform\State\Promotion\PromotionRollback;
 use AgencyPlatform\State\Promotion\RecordLockManager;
 use AgencyPlatform\State\Promotion\StagedPromotionEntry;
@@ -41,6 +43,7 @@ use AgencyPlatform\State\Promotion\StateGateway;
 use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
 use AgencyPlatform\State\Promotion\TemplatePromotionStrategy;
 use AgencyPlatform\State\Promotion\ThemeDeclaredSlugs;
+use AgencyPlatform\State\Promotion\ThemeJsonAdapter;
 use AgencyPlatform\State\PromotionStrategies;
 use AgencyPlatform\State\PromotionStrategy;
 use AgencyPlatform\State\StateRecord;
@@ -73,6 +76,8 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	private string $state_dir;
 	private string $manifest_path;
 	private string $original_content_hash;
+	private string $real_theme_json_path;
+	private string $original_real_theme_json_bytes;
 	private int $page_override_id;
 
 	private StateGateway $gateway;
@@ -87,7 +92,7 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	/** @var array<string, PreparablePromotionStrategy> the real strategies, kept for wrapping */
 	private array $real_strategies = array();
 
-	/** @var array<string, string> expected post-reset semantic hash per record key */
+	/** @var array<string, string|null> expected post-reset semantic hash per record key (null when the strategy defers it) */
 	private array $expected_hashes = array();
 
 	public function set_up(): void {
@@ -116,6 +121,22 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing integration fixture files; the WP_Filesystem credentials context does not exist here.
 		file_put_contents( $this->theme_dir . '/parts/site-header.html', "<!-- wp:paragraph --><p>Header body</p><!-- /wp:paragraph -->\n" );
 
+		// The REAL theme directory, captured BEFORE the directory filters
+		// point get_stylesheet_directory() at the fixture. The mixed
+		// lifecycle test writes the prepared theme.json bytes over the real
+		// active theme.json (CORRECTION D8: the equivalence resolution reads
+		// it — WP_Theme_JSON_Resolver ignores the directory filter) and
+		// tear_down restores them.
+		$this->real_theme_json_path           = get_stylesheet_directory() . '/theme.json';
+		$this->original_real_theme_json_bytes = (string) file_get_contents( $this->real_theme_json_path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading the shipped on-disk artefact under test; the WP_Filesystem credentials context does not exist here.
+
+		register_shutdown_function(
+			function (): void {
+				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- restoring the real theme.json after a fatal test failure; the WP_Filesystem credentials context does not exist here.
+				file_put_contents( $this->real_theme_json_path, $this->original_real_theme_json_bytes );
+			}
+		);
+
 		add_filter( 'stylesheet_directory', array( $this, 'fixture_stylesheet_directory' ) );
 		// _get_block_template_file() maps BOTH get_stylesheet_directory() and
 		// get_template_directory() — with no child theme the two array keys
@@ -123,12 +144,19 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		// the fixture when both filters point at it.
 		add_filter( 'template_directory', array( $this, 'fixture_stylesheet_directory' ) );
 
+		// The fixture theme.json is the SHIPPED artefact's bytes: the
+		// global-styles record's stage() merges into it and the deployed
+		// file the manifest signs is its canonical, merged form.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_copy -- copying the shipped theme.json into the fixture theme directory; the WP_Filesystem credentials context does not exist here.
+		copy( $this->real_theme_json_path, $this->theme_dir . '/theme.json' );
+
 		$this->gateway = new StateGateway();
 		$this->store   = new ManifestStore( $this->gateway );
 
 		$this->real_strategies = array(
 			'templates'      => new TemplatePromotionStrategy(),
 			'template-parts' => new TemplatePartPromotionStrategy(),
+			'global-styles'  => new GlobalStylesPromotionStrategy( new ThemeJsonAdapter(), $this->gateway ),
 		);
 
 		$this->strategies = $this->real_strategies;
@@ -141,6 +169,7 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		// theme files are the only resolution source (no database rows yet).
 		$this->expected_hashes['templates:page']             = (string) $this->real_strategies['templates']->resolve_current_hash( 'page' );
 		$this->expected_hashes['template-parts:site-header'] = (string) $this->real_strategies['template-parts']->resolve_current_hash( 'site-header' );
+		$this->expected_hashes['global-styles:active']       = null;
 
 		$this->seed_database_rows();
 
@@ -163,6 +192,19 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	}
 
 	public function tear_down(): void {
+		// The mixed-lifecycle test writes the prepared bytes over the REAL
+		// theme.json (the equivalence resolution cannot see the fixture
+		// directory — CORRECTION D8); it must be back byte-for-byte. The
+		// write is harmless for tests that never touched the file.
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- restoring the real theme.json after an integration test; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->real_theme_json_path, $this->original_real_theme_json_bytes );
+
+		self::assertSame(
+			$this->original_real_theme_json_bytes,
+			(string) file_get_contents( $this->real_theme_json_path ), // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the restored on-disk artefact; the WP_Filesystem credentials context does not exist here.
+			'The real theme.json must be restored byte-identically after every test.'
+		);
+
 		remove_filter( 'stylesheet_directory', array( $this, 'fixture_stylesheet_directory' ) );
 		remove_filter( 'template_directory', array( $this, 'fixture_stylesheet_directory' ) );
 		remove_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
@@ -621,6 +663,155 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * Fix 3 (fix-diff review): the mixed-lifecycle gate. No test drove
+	 * global-styles and template-parts through ONE manifest, yet that is
+	 * where interaction defects live: Global Styles is the only strategy
+	 * whose post_finalize_record_state() is 'present' and the only one that
+	 * defers its post-reset hash, and both differ from templates inside the
+	 * SHARED finalize, rollback and confirm paths. The walk is
+	 * finalize → rollback → re-finalize → confirm; every step asserts, for
+	 * BOTH records, the exit code, the per-record outcome, the manifest
+	 * record state, and where the customer's content is.
+	 */
+	public function test_the_mixed_global_styles_and_template_parts_lifecycle(): void {
+		$part_key   = 'template-parts:site-header';
+		$styles_key = 'global-styles:active';
+
+		$this->save_user_global_style( array( 'styles' => array( 'color' => array( 'background' => '#101010' ) ) ) );
+
+		$part_content_before = $this->live_record( 'template-parts', 'site-header' )->content()['markup'];
+
+		self::assertIsString( $part_content_before );
+		self::assertStringContainsString( '<p>DB header body</p>', $part_content_before );
+
+		$styles_object_id_before = $this->live_record( 'global-styles', 'active' )->object_id();
+		$styles_content_before   = get_post( $styles_object_id_before, ARRAY_A )['post_content'];
+
+		self::assertIsString( $styles_content_before );
+		self::assertStringContainsString( '#101010', $styles_content_before );
+
+		// The merged document must be BOTH the deployed fixture file (the
+		// manifest's tamper check and the post-reset resolution read
+		// get_stylesheet_directory()/theme.json — the fixture) AND the real
+		// active theme.json (the equivalence resolution reads it — CORRECTION
+		// D8, WP_Theme_JSON_Resolver ignores the directory filter).
+		$merged = $this->stage_merged_global_styles();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing the prepared bytes over the real active theme.json for the equivalence resolution; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->real_theme_json_path, $merged );
+
+		$path = $this->state_dir . '/mixed.json';
+
+		$this->store->write(
+			$this->build_manifest( array( $part_key, $styles_key ) )->with_deploy_commit( self::DEPLOY_COMMIT, '2026-08-01T10:00:00Z' ),
+			$path
+		);
+
+		// ---- finalize: both records promoted; the part row is gone, the
+		// global-styles row is reset to the empty document.
+		$finalized = $this->finalizer->finalize( $path );
+
+		self::assertSame( 0, $finalized['outcome']->exit_code() );
+		self::assertSame(
+			array(
+				$styles_key => PromotionOutcome::OUTCOME_PROMOTED,
+				$part_key   => PromotionOutcome::OUTCOME_PROMOTED,
+			),
+			$finalized['outcome']->outcomes()
+		);
+		self::assertSame( 'promoted', $finalized['manifest']->record( $part_key )['finalizeStatus'] );
+		self::assertSame( 'absent', $finalized['manifest']->record( $part_key )['postFinalizeRecordState'] );
+		self::assertSame( 'promoted', $finalized['manifest']->record( $styles_key )['finalizeStatus'] );
+		self::assertSame( 'present', $finalized['manifest']->record( $styles_key )['postFinalizeRecordState'] );
+		self::assertSame( 'complete', $finalized['manifest']->finalize_status() );
+		self::assertNull(
+			$this->gateway->live_state_record( 'template-parts', 'site-header' ),
+			'The finalized part row must be gone.'
+		);
+		self::assertNotSame(
+			$styles_content_before,
+			get_post( $styles_object_id_before, ARRAY_A )['post_content'],
+			'The finalized global-styles row must be reset.'
+		);
+
+		// ---- rollback: both records restored; the customer's content is
+		// back exactly where it was, on the same rows.
+		$rolled_back = $this->rollback->rollback( $path );
+
+		self::assertSame( 0, $rolled_back['outcome']->exit_code() );
+		self::assertSame(
+			array(
+				$part_key   => PromotionOutcome::OUTCOME_RESTORED,
+				$styles_key => PromotionOutcome::OUTCOME_RESTORED,
+			),
+			$rolled_back['outcome']->outcomes()
+		);
+		self::assertSame( 'restored', $rolled_back['manifest']->record( $part_key )['rollbackStatus'] );
+		self::assertSame( 'restored', $rolled_back['manifest']->record( $styles_key )['rollbackStatus'] );
+		self::assertSame( 'pending', $rolled_back['manifest']->record( $part_key )['finalizeStatus'] );
+		self::assertSame( 'pending', $rolled_back['manifest']->record( $styles_key )['finalizeStatus'] );
+		self::assertSame( 'pending', $rolled_back['manifest']->finalize_status() );
+		self::assertSame( 'rolled-back', $rolled_back['manifest']->settlement_status() );
+
+		self::assertSame(
+			$part_content_before,
+			$this->live_record( 'template-parts', 'site-header' )->content()['markup'],
+			'The rolled-back part row must carry the original markup.'
+		);
+		self::assertSame(
+			$styles_content_before,
+			get_post( $styles_object_id_before, ARRAY_A )['post_content'],
+			'The rolled-back global-styles row must be byte-identical to the original.'
+		);
+		self::assertSame(
+			$styles_object_id_before,
+			$this->live_record( 'global-styles', 'active' )->object_id(),
+			'The rollback must restore the same global-styles row.'
+		);
+
+		// ---- re-finalize: the restored rows pass the rewritten concurrency
+		// identity, so the SAME manifest finalizes again.
+		$re_finalized = $this->finalizer->finalize( $path );
+
+		self::assertSame( 0, $re_finalized['outcome']->exit_code() );
+		self::assertSame(
+			array(
+				$styles_key => PromotionOutcome::OUTCOME_PROMOTED,
+				$part_key   => PromotionOutcome::OUTCOME_PROMOTED,
+			),
+			$re_finalized['outcome']->outcomes()
+		);
+		self::assertSame( 'promoted', $re_finalized['manifest']->record( $part_key )['finalizeStatus'] );
+		self::assertSame( 'promoted', $re_finalized['manifest']->record( $styles_key )['finalizeStatus'] );
+		self::assertSame( 'complete', $re_finalized['manifest']->finalize_status() );
+		self::assertNull(
+			$this->gateway->live_state_record( 'template-parts', 'site-header' ),
+			'The re-finalize must remove the part row again.'
+		);
+		self::assertNotSame(
+			$styles_content_before,
+			get_post( $styles_object_id_before, ARRAY_A )['post_content'],
+			'The re-finalize must reset the global-styles row again.'
+		);
+
+		// ---- confirm: the point of no return, reached after the full
+		// rollback → re-finalize round trip.
+		$confirmed = $this->confirmer->confirm( $path );
+
+		self::assertSame( 0, $confirmed['outcome']->exit_code() );
+		self::assertSame( 'confirmed', $confirmed['manifest']->settlement_status() );
+		self::assertNull(
+			$this->gateway->live_state_record( 'template-parts', 'site-header' ),
+			'Confirm must not touch the finalized part row.'
+		);
+		self::assertNotSame(
+			$styles_content_before,
+			get_post( $styles_object_id_before, ARRAY_A )['post_content'],
+			'Confirm must not touch the finalized global-styles row.'
+		);
+	}
+
+	/**
 	 * Named filter callback — never a closure (master spec §4). Points
 	 * get_stylesheet_directory() at the fixture theme directory, so the
 	 * deployed prepared files and the file-backed template resolution both
@@ -674,6 +865,45 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 		self::assertSame( 0, $outcome['outcome']->exit_code() );
 
 		return $path;
+	}
+
+	/**
+	 * Stages the LIVE global-styles origin into the fixture theme directory
+	 * (whose theme.json starts as the shipped artefact's bytes) and returns
+	 * the committed merged bytes — the deployed file the mixed manifest
+	 * signs, and the bytes written over the REAL theme.json so the
+	 * equivalence resolution sees them.
+	 */
+	private function stage_merged_global_styles(): string {
+		$strategy = $this->real_strategies['global-styles'];
+		$entry    = $strategy->stage( $this->live_record( 'global-styles', 'active' ), $this->theme_dir );
+		$entry->commit();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading back the staged fixture file; the WP_Filesystem credentials context does not exist here.
+		return (string) file_get_contents( $entry->manifest_fields()['absolutePath'] );
+	}
+
+	/**
+	 * Writes a user origin through the REAL adapter and attaches the theme
+	 * term — the same path the production strategy uses. wp-phpunit runs
+	 * with no current user, so core's on-demand post creation cannot attach
+	 * the wp_theme term itself (see GlobalStylesPromotionTest for the
+	 * rationale).
+	 *
+	 * @param array<string, mixed> $content
+	 */
+	private function save_user_global_style( array $content ): void {
+		$adapter = new ThemeJsonAdapter();
+		$adapter->refresh_caches();
+		$adapter->write_user_origin( $content );
+
+		$post = $adapter->user_origin_post();
+
+		self::assertNotNull( $post, 'The fixture needs a Global Styles post to attach the theme term to.' );
+
+		wp_set_object_terms( (int) $post['ID'], get_stylesheet(), 'wp_theme' );
+
+		$adapter->refresh_caches();
 	}
 
 	/**
@@ -927,6 +1157,10 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	}
 
 	private function relative_prepared_path( string $provider, string $slug ): string {
+		if ( 'global-styles' === $provider ) {
+			return 'theme.json';
+		}
+
 		return ( 'templates' === $provider ? 'templates/' : 'parts/' ) . $slug . '.html';
 	}
 

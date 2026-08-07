@@ -35,12 +35,14 @@ use AgencyPlatform\State\Promotion\BundleView;
 use AgencyPlatform\State\Promotion\GlobalStylesPromotionStrategy;
 use AgencyPlatform\State\Promotion\ManifestStore;
 use AgencyPlatform\State\Promotion\PromotionException;
+use AgencyPlatform\State\Promotion\PromotionConfirmer;
 use AgencyPlatform\State\Promotion\PromotionFinalizer;
 use AgencyPlatform\State\Promotion\PromotionManifest;
 use AgencyPlatform\State\Promotion\PromotionOutcome;
 use AgencyPlatform\State\Promotion\PromotionRollback;
 use AgencyPlatform\State\Promotion\PromotionSelector;
 use AgencyPlatform\State\Promotion\PromotionStrategyRegistrar;
+use AgencyPlatform\State\Promotion\RecordRefusal;
 use AgencyPlatform\State\Promotion\StateGateway;
 use AgencyPlatform\State\Promotion\StagedPromotionEntry;
 use AgencyPlatform\State\Promotion\TemplatePartPromotionStrategy;
@@ -83,6 +85,7 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 	private ThemeJsonAdapter $adapter;
 	private GlobalStylesPromotionStrategy $strategy;
 	private PromotionFinalizer $finalizer;
+	private PromotionConfirmer $confirmer;
 	private PromotionRollback $rollback;
 	private PromotionStrategyRegistrar $registrar;
 
@@ -126,6 +129,7 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		$this->adapter   = new ThemeJsonAdapter();
 		$this->strategy  = new GlobalStylesPromotionStrategy( $this->adapter, $this->gateway );
 		$this->finalizer = new PromotionFinalizer( $this->gateway, $this->store );
+		$this->confirmer = new PromotionConfirmer( $this->store );
 		$this->rollback  = new PromotionRollback( $this->gateway, $this->store );
 
 		$this->registrar = new PromotionStrategyRegistrar();
@@ -349,6 +353,33 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 			$post_after['post_content'] ?? null,
 			'The restored user origin post content must be byte-identical to the original.'
 		);
+
+		// Plan decision 12: a rollback returns its records to a
+		// RE-FINALISABLE state — finalizeStatus=pending is only a proxy for
+		// "the next finalize passes its concurrency check". Prove the
+		// property itself: finalize AGAIN on the same manifest and confirm.
+		$re_finalized = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+		self::assertSame(
+			0,
+			$re_finalized['outcome']->exit_code(),
+			'A rolled-back record must finalize again on the same manifest.'
+		);
+		self::assertSame(
+			'promoted',
+			$re_finalized['manifest']->record( 'global-styles:active' )['finalizeStatus'],
+			'The re-finalize must leave the record promoted.'
+		);
+		self::assertSame( 'complete', $re_finalized['manifest']->finalize_status() );
+
+		$confirmed = $this->confirmer->confirm( $this->global_styles_manifest_path );
+
+		self::assertSame( 0, $confirmed['outcome']->exit_code() );
+		self::assertSame(
+			'confirmed',
+			$confirmed['manifest']->settlement_status(),
+			'A re-finalized rollback must be confirmable — the settlement stage must accept it.'
+		);
 	}
 
 	/**
@@ -415,6 +446,89 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 			$post_after['post_content'] ?? null,
 			'The restored user origin post content must be byte-identical to the original.'
 		);
+	}
+
+	/**
+	 * Fix 1 (fix-diff review): a deployed theme.json that is EMPTY, or
+	 * whose root is a JSON list, must refuse exactly like a missing one.
+	 * The run-level tamper check (assert_deployed_file_matches) hashes
+	 * every deployed file that was present at prepare time, so the residual
+	 * hole is a file that was ABSENT there and appears before the post-reset
+	 * resolution — an empty or list-root file in that window must resolve to
+	 * null, or the promotion reports success while promoting nothing. The
+	 * corrupt bytes are injected by the wrapper's capture_pre_reset_state()
+	 * (after the clean pre-reset snapshot, before resolve_current_hash()
+	 * runs); the file on disk before that is the shipped theme.json, which
+	 * is what the manifest signs and the tamper check verifies.
+	 */
+	public function test_an_empty_or_list_root_deployed_theme_json_is_refused_post_reset_unresolved(): void {
+		foreach ( array(
+			'empty'     => '',
+			'list root' => '[]',
+		) as $label => $content ) {
+			// The previous iteration's wrapper left the corrupt bytes on
+			// disk; the shipped bytes must be back before the manifest is
+			// built and the run-level check runs.
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- resetting the active theme.json to the shipped bytes between fixture iterations; the WP_Filesystem credentials context does not exist here.
+			file_put_contents( $this->active_theme_json_path, $this->original_theme_json_bytes );
+
+			$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+			$live_before = $this->live_origin_record();
+
+			$object_id_before = $live_before->object_id();
+
+			self::assertNotNull( $object_id_before, sprintf( 'The %s fixture needs a live user origin object id to pin.', $label ) );
+
+			$original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+			$post_before = get_post( $object_id_before, ARRAY_A );
+
+			self::assertIsArray( $post_before );
+			self::assertIsString( $post_before['post_content'] ?? null );
+			$original_post_content = $post_before['post_content'];
+
+			$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+			remove_filter( PromotionStrategies::FILTER, array( $this->registrar, 'add_strategies' ) );
+			$this->strategies = array(
+				'global-styles' => new AppearsCorruptAfterCaptureStrategy( $this->strategy, $this->active_theme_json_path, $content ),
+			);
+			add_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
+			PromotionStrategies::reset();
+
+			$outcome = $this->finalizer->finalize( $this->global_styles_manifest_path );
+
+			self::assertSame( 1, $outcome['outcome']->exit_code(), sprintf( 'A %s deployed theme.json must refuse the record.', $label ) );
+			self::assertSame(
+				'post-reset-unresolved',
+				$outcome['manifest']->record( 'global-styles:active' )['finalizeRefusalReason'],
+				sprintf( 'A %s deployed theme.json must refuse the record as post-reset-unresolved, never promote it.', $label )
+			);
+			self::assertSame( 'restored', $outcome['manifest']->record( 'global-styles:active' )['finalizeStatus'] );
+
+			// The user origin must be restored from the backup: same row,
+			// same content hash, byte-identical post content.
+			self::assertSame(
+				$original_user_origin_hash,
+				$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'],
+				sprintf( 'The %s fixture must restore the user origin, never leave it reset.', $label )
+			);
+			self::assertSame(
+				$object_id_before,
+				$this->live_origin_record()->object_id(),
+				sprintf( 'The %s fixture must restore the same row; a recreated row with identical content must never pass.', $label )
+			);
+
+			$post_after = get_post( $object_id_before, ARRAY_A );
+
+			self::assertIsArray( $post_after );
+			self::assertSame(
+				$original_post_content,
+				$post_after['post_content'] ?? null,
+				sprintf( 'The %s fixture must leave the user origin post content byte-identical.', $label )
+			);
+		}
 	}
 
 	public function test_theme_json_keeps_its_template_parts_after_promotion(): void {
@@ -633,15 +747,108 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 		$canonical_record = $this->store->load_canonical( self::PROMOTION_ID )->record( 'global-styles:active' );
 
 		self::assertIsArray( $canonical_record );
-		self::assertMatchesRegularExpression(
-			'/^[0-9a-f]{64}$/',
-			(string) ( $canonical_record['preResetResolvedHash'] ?? '' ),
-			'The canonical manifest must carry a sha256 preResetResolvedHash even when the finalize throws after the reset.'
+
+		// The EXACT value production computed — through the strategy's own
+		// resolved_hash() on the state its capture_pre_reset_state() returns
+		// — never a shape assertion: the old /^[0-9a-f]{64}$/ regex passed
+		// any 64-hex string, including a hash of the wrong thing. The probe
+		// instance returns the same deterministic snapshot the finalizer
+		// captured, so the recorded value must equal it byte for byte.
+		$probe         = new ThrowsAfterResetStrategy();
+		$expected_hash = $probe->resolved_hash( $probe->capture_pre_reset_state() );
+
+		self::assertSame(
+			$expected_hash,
+			$canonical_record['preResetResolvedHash'] ?? null,
+			'The canonical manifest must carry the exact pre-reset resolved hash even when the finalize throws after the reset.'
 		);
 		self::assertSame(
 			'pending',
 			$canonical_record['finalizeStatus'],
 			'The failed record must still read pending in the canonical manifest.'
+		);
+	}
+
+	/**
+	 * Fix 4 (fix-diff review): f76be13 added a pre-reset write_canonical()
+	 * whose whole purpose is that a failure THERE destroys nothing — the
+	 * canonical manifest is the durable recovery record, and the pre-reset
+	 * resolved hash must be persisted BEFORE the backup and reset. The
+	 * failure is injected from capture_pre_reset_state(), the ONLY call
+	 * between the finalizer's PRE-LOOP write_canonical() (which must
+	 * succeed) and the PRE-RESET write_canonical() in the deferred-hash
+	 * branch (which must fail at its atomic rename). The sabotage therefore
+	 * targets the SECOND write_canonical() of the run specifically: had the
+	 * pre-loop write been the one failing, the canonical path would have
+	 * been missing before the strategy ever ran and the sabotage could not
+	 * have found a file to replace.
+	 */
+	public function test_a_failure_of_the_pre_reset_canonical_write_destroys_nothing(): void {
+		$this->save_user_global_style( $this->style_the_merge_cannot_express() );
+
+		$live_before = $this->live_origin_record();
+
+		$object_id_before = $live_before->object_id();
+
+		self::assertNotNull( $object_id_before, 'The write-failure test needs a live user origin object id to pin.' );
+
+		$original_user_origin_hash = (string) $this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'];
+
+		$post_before = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_before );
+		self::assertIsString( $post_before['post_content'] ?? null );
+		$original_post_content = $post_before['post_content'];
+
+		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
+
+		remove_filter( PromotionStrategies::FILTER, array( $this->registrar, 'add_strategies' ) );
+		$this->strategies = array(
+			'global-styles' => new FailsPreResetCanonicalWriteStrategy( $this->store->canonical_path( self::PROMOTION_ID ) ),
+		);
+		add_filter( PromotionStrategies::FILTER, array( $this, 'provide_strategies' ) );
+		PromotionStrategies::reset();
+
+		$exception = $this->assert_exit_code( 1, fn() => $this->finalizer->finalize( $this->global_styles_manifest_path ) );
+
+		// The rename failure proves the PRE-RESET write is the one that
+		// failed: the pre-loop write succeeded (it created the canonical
+		// file the sabotage replaced) and the write_canonical() that throws
+		// is the deferred-hash branch's, which is the second call. The
+		// "Is a directory" verdict is the atomic rename refusing to replace
+		// the sabotage directory at the canonical path.
+		self::assertStringContainsString(
+			'Is a directory',
+			$exception->getMessage(),
+			'The failure must be the pre-reset canonical write\'s atomic rename over the sabotage directory.'
+		);
+		self::assertStringContainsString(
+			$this->store->canonical_path( self::PROMOTION_ID ),
+			$exception->getMessage(),
+			'The failing write must be the canonical manifest path the sabotage replaced.'
+		);
+
+		// The row was never touched: no backup was stored, no reset ran, no
+		// restore was needed — the user origin is byte-identical to before
+		// the run.
+		self::assertSame(
+			$original_user_origin_hash,
+			$this->gateway->read_live_record( 'global-styles', 'active' )['contentHash'],
+			'The pre-reset write failure must leave the user origin hash untouched.'
+		);
+		self::assertSame(
+			$object_id_before,
+			$this->live_origin_record()->object_id(),
+			'The pre-reset write failure must leave the same row in place.'
+		);
+
+		$post_after = get_post( $object_id_before, ARRAY_A );
+
+		self::assertIsArray( $post_after );
+		self::assertSame(
+			$original_post_content,
+			$post_after['post_content'] ?? null,
+			'The pre-reset write failure must leave the user origin post content byte-identical.'
 		);
 	}
 
@@ -935,6 +1142,198 @@ final class ThrowsAfterResetStrategy extends \AgencyPlatform\State\Promotion\Abs
 
 	protected function theme_subdirectory(): string {
 		return '.';
+	}
+}
+
+/**
+ * A DeferredHashPromotionStrategy whose capture_pre_reset_state() replaces
+ * the canonical manifest FILE with a DIRECTORY, so the finalizer's
+ * pre-reset write_canonical() — the SECOND write of the run, in the
+ * deferred-hash branch — fails at its atomic rename and aborts the run
+ * with exit 1. The pre-loop write_canonical() ran before any strategy
+ * call, so the sabotage pins the failure to the pre-reset write: nothing
+ * has been backed up or reset yet, and the abort must leave the customer's
+ * row byte-identical.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this stub to the Global Styles test file so the pre-reset canonical write failure is deterministic.
+final class FailsPreResetCanonicalWriteStrategy extends \AgencyPlatform\State\Promotion\AbstractBlockTemplateStrategy implements \AgencyPlatform\State\Promotion\DeferredHashPromotionStrategy {
+
+	public function __construct( private string $canonical_manifest_path ) {}
+
+	public function provider_slug(): string {
+		return 'global-styles';
+	}
+
+	public function defers_expected_hash(): bool {
+		return true;
+	}
+
+	public function post_finalize_record_state(): string {
+		return 'present';
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return 'active' === $record_slug;
+	}
+
+	/**
+	 * The deployed theme.json always resolves; a 64-hex placeholder is the
+	 * non-null result the finalizer needs to reach the equivalence branch.
+	 */
+	public function resolve_current_hash( string $record_slug ): ?string {
+		return str_repeat( 'a', 64 );
+	}
+
+	/**
+	 * The sabotage point: turn the canonical manifest path into a
+	 * directory, so the very next write_canonical() — the pre-reset one —
+	 * fails at its atomic rename. The pre-loop write already created the
+	 * file this method replaces, which is what pins the failure to the
+	 * SECOND write of the run.
+	 *
+	 * @return array{settings: array<string, mixed>, styles: array<string, mixed>}
+	 */
+	public function capture_pre_reset_state(): array {
+		if ( is_file( $this->canonical_manifest_path ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- removing the canonical file the pre-loop write created so its path can be sabotaged; the WP_Filesystem credentials context does not exist here.
+			unlink( $this->canonical_manifest_path );
+		}
+
+		if ( ! is_dir( $this->canonical_manifest_path ) ) {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_mkdir -- creating the sabotage directory at the canonical manifest path; the WP_Filesystem credentials context does not exist here.
+			mkdir( $this->canonical_manifest_path, 0755, true );
+		}
+
+		return array(
+			'settings' => array(),
+			'styles'   => array( 'color' => array( 'background' => '#101010' ) ),
+		);
+	}
+
+	public function resolved_hash( array $resolved ): string {
+		return ( new StateGateway() )->hash_content( $resolved );
+	}
+
+	public function verify_resolved_equivalence( array $expected_resolved ): array {
+		throw PromotionException::hard( 'unreachable: the pre-reset canonical write fails first' );
+	}
+
+	protected function post_type(): string {
+		return 'wp_global_styles';
+	}
+
+	protected function theme_subdirectory(): string {
+		return '.';
+	}
+}
+
+/**
+ * A DeferredHashPromotionStrategy that delegates every call to the REAL
+ * GlobalStylesPromotionStrategy except capture_pre_reset_state(), which
+ * delegates first (so the pre-reset snapshot resolves against the clean
+ * deployed theme.json) and THEN overwrites the deployed theme.json with the
+ * injected corrupt bytes — the exact seam the Fix 1 guard protects: the
+ * file is absent-to-clean at run level and appears corrupt before the
+ * post-reset resolve_current_hash() runs. A resolve that accepted the
+ * corrupt file would promote nothing while reporting success.
+ */
+// phpcs:ignore Generic.Files.OneObjectStructurePerFile.MultipleFound -- the plan pins this stub to the Global Styles test file so the corrupt-file seam is deterministic.
+final class AppearsCorruptAfterCaptureStrategy implements \AgencyPlatform\State\Promotion\DeferredHashPromotionStrategy {
+
+	public function __construct(
+		private \AgencyPlatform\State\Promotion\DeferredHashPromotionStrategy $inner,
+		private string $deployed_path,
+		private string $corrupt_content
+	) {}
+
+	public function provider_slug(): string {
+		return $this->inner->provider_slug();
+	}
+
+	/**
+	 * @return array{preparedPath: string, preparedHash: string, originalHash: string|null}
+	 */
+	public function prepare( StateRecord $record, string $target_path ): array {
+		return $this->inner->prepare( $record, $target_path );
+	}
+
+	public function reset( StateRecord $record ): void {
+		$this->inner->reset( $record );
+	}
+
+	/**
+	 * @param array<string, mixed> $backup
+	 */
+	public function restore( StateRecord $record, array $backup ): void {
+		$this->inner->restore( $record, $backup );
+	}
+
+	public function stage( StateRecord $record, string $theme_root ): StagedPromotionEntry {
+		return $this->inner->stage( $record, $theme_root );
+	}
+
+	public function theme_relative_path( string $record_slug ): string {
+		return $this->inner->theme_relative_path( $record_slug );
+	}
+
+	public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool {
+		return $this->inner->declares( $declared, $record_slug );
+	}
+
+	public function post_finalize_record_state(): string {
+		return $this->inner->post_finalize_record_state();
+	}
+
+	public function defers_expected_hash(): bool {
+		return $this->inner->defers_expected_hash();
+	}
+
+	public function resolve_current_hash( string $record_slug ): ?string {
+		return $this->inner->resolve_current_hash( $record_slug );
+	}
+
+	/**
+	 * @param array<string, mixed> $bundle_record
+	 * @param list<string>         $selected_keys
+	 * @return list<RecordRefusal>
+	 */
+	public function validate_for_promotion( array $bundle_record, BundleView $bundle, array $selected_keys ): array {
+		return $this->inner->validate_for_promotion( $bundle_record, $bundle, $selected_keys );
+	}
+
+	/**
+	 * @return array<string, mixed>
+	 */
+	public function capture_backup( StateRecord $record ): array {
+		return $this->inner->capture_backup( $record );
+	}
+
+	public function expected_post_reset_hash( StateRecord $record ): string {
+		return $this->inner->expected_post_reset_hash( $record );
+	}
+
+	/**
+	 * Delegate the clean snapshot FIRST, then swap the deployed file for the
+	 * corrupt bytes — the file the post-reset resolve_current_hash() will
+	 * see.
+	 *
+	 * @return array{settings: array<string, mixed>, styles: array<string, mixed>}
+	 */
+	public function capture_pre_reset_state(): array {
+		$snapshot = $this->inner->capture_pre_reset_state();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- writing the corrupt fixture bytes over the deployed theme.json at the capture/resolve seam; the WP_Filesystem credentials context does not exist here.
+		file_put_contents( $this->deployed_path, $this->corrupt_content );
+
+		return $snapshot;
+	}
+
+	public function resolved_hash( array $resolved ): string {
+		return $this->inner->resolved_hash( $resolved );
+	}
+
+	public function verify_resolved_equivalence( array $expected_resolved ): array {
+		return $this->inner->verify_resolved_equivalence( $expected_resolved );
 	}
 }
 

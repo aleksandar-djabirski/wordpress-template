@@ -185,8 +185,17 @@ final class GlobalStylesPromotionStrategy implements DeferredHashPromotionStrate
 	 * changed-since-finalize. The deployed theme.json is checked FIRST: a
 	 * missing or unreadable file resolves to null, so the finalizer refuses
 	 * the record as post-reset-unresolved and restores the user origin
-	 * instead of silently promoting nothing. An unknown slug or a missing
-	 * live record is null too.
+	 * instead of silently promoting nothing. An empty file, or a valid JSON
+	 * document whose root is not an object (a list, a scalar), is treated
+	 * exactly like a missing one — a resolve that accepted it would promote
+	 * nothing while reporting success. The guard deliberately does NOT
+	 * re-verify preparedFileHash: this seam has no access to the manifest,
+	 * and PromotionFinalizer::assert_deployed_file_matches() already hashes
+	 * every deployed file that is present at run level — a file that was
+	 * ABSENT at that check and appears before this method runs is the only
+	 * residual hole, and it is closed by the object-shape check here, not by
+	 * a duplicated hash comparison. An unknown slug or a missing live record
+	 * is null too.
 	 */
 	public function resolve_current_hash( string $record_slug ): ?string {
 		if ( 'active' !== $record_slug ) {
@@ -196,6 +205,23 @@ final class GlobalStylesPromotionStrategy implements DeferredHashPromotionStrate
 		$deployed_path = get_stylesheet_directory() . '/' . $this->theme_relative_path( $record_slug );
 
 		if ( ! is_file( $deployed_path ) || ! is_readable( $deployed_path ) ) {
+			return null;
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading a local on-disk artifact, never a URL.
+		$raw = file_get_contents( $deployed_path );
+
+		if ( false === $raw || '' === $raw ) {
+			return null;
+		}
+
+		$decoded = json_decode( $raw, true );
+
+		// A valid JSON document whose root is not an object (a list, a
+		// scalar) decodes as a list or scalar: a guard that accepted it
+		// would resolve "successfully" against a theme.json that promotes
+		// nothing, so it must fail closed exactly like a missing file.
+		if ( ! is_array( $decoded ) || ! str_starts_with( ltrim( $raw ), '{' ) ) {
 			return null;
 		}
 
