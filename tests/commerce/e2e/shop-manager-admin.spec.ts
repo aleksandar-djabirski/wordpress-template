@@ -157,15 +157,28 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		await expect( page.locator( 'a.row-title', { hasText: /testcoupon/i } ) ).toBeVisible();
 	} );
 
-	test( 'wp-admin lockdown holds: no Plugins or Appearance menus', async ( { page } ) => {
+	test( 'wp-admin lockdown holds: no Plugins menu, and Appearance is replaced by Design', async ( { page } ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		await page.goto( adminUrl() );
-		// Same assertion the base editor-permissions suite makes for client_editor,
-		// reused via tests/e2e/helpers/wp.ts: the agency lockdown that hides
-		// Plugins and Appearance must hold for the shop manager too.
+		// Plugins stays fully hidden: client roles never get activate_plugins.
 		await expectNoAdminMenu( page, 'menu-plugins' );
+
+		// AdminScreenPolicy REMOVES the Appearance menu (its top-level target is
+		// themes.php, a denied screen) and replaces it with a single Design entry
+		// that links straight to the Site Editor. Same contract the base suite
+		// pins in tests/e2e/editor-permissions.spec.ts.
 		await expectNoAdminMenu( page, 'menu-appearance' );
+		await expect(
+			page.locator( '#adminmenu a[href$="site-editor.php"]' ).first()
+		).toBeVisible();
+
+		// No denied design screen is reachable from the menu at all.
+		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php', 'widgets.php', 'nav-menus.php' ] ) {
+			await expect(
+				page.locator( `#adminmenu a[href*="${ denied }"]` )
+			).toHaveCount( 0 );
+		}
 	} );
 
 	test( 'shop-manager CAN reach WooCommerce Settings (documented manage_woocommerce dial)', async ( { page } ) => {
