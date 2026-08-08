@@ -178,8 +178,39 @@ test ! -d web/app/plugins/woocommerce && echo "OK: no WooCommerce on disk" || { 
 ddev wp plugin list --field=name | grep -q '^woocommerce$' && { echo "FAIL: WooCommerce still registered"; exit 1; } || echo "OK: no WooCommerce plugin"
 test -z "$(ddev wp post list --post_type=wp_template_part --post_status=any --field=post_name | tr -d '\r')" && echo "OK: no template-part overrides" || { echo "FAIL: template-part override survived"; exit 1; }
 test -z "$(ddev wp post list --post_type=product --post_status=any --field=ID | tr -d '\r')" && echo "OK: no fixture products" || { echo "FAIL: fixture products survived"; exit 1; }
-test -z "$(git status --porcelain)" && echo "OK: clean tree" || { echo "FAIL: tree dirty"; git status --porcelain; exit 1; }
+test -z "$(git status --porcelain -- composer.json composer.lock)" && echo "OK: Composer files restored" || { echo "FAIL: Composer files still modified"; git status --porcelain -- composer.json composer.lock; exit 1; }
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — assertion 5
+> was RED BY CONSTRUCTION and has been replaced above.**
+>
+> As originally written, assertion 5 was
+> `test -z "$(git status --porcelain)" && echo "OK: clean tree" || { echo "FAIL: tree dirty"; …; exit 1; }`,
+> and this procedure's preamble requires every assertion to hold "before any base
+> gate is allowed to run".
+>
+> That contradicts step 1 of this same procedure, which exists ONLY to PRESERVE
+> the task's uncommitted non-Composer changes and to prove they did not move.
+> Every Phase A task runs `SWITCH TO BASE` immediately BEFORE `verify:fast` and
+> its commit — the exact moment its own new and modified files are uncommitted.
+> So `git status --porcelain` is non-empty BY DESIGN, assertion 5 fails, and the
+> plan then forbids the commit gate from running at all. Task A2 would abort on a
+> single modified spec file; Task A3 on six new templates, two new test files, a
+> deletion and two documentation edits.
+>
+> The property assertion 5 was reaching for is "no commerce artefact and no
+> Composer modification survived", which is what the replacement tests. Step 1's
+> `non-composer-before/after` diff already proves the task's own changes survived
+> unmoved. The pristine-tree check belongs AFTER the commit, where every task
+> already runs `git status --porcelain` and expects empty output.
+>
+> **Verified by execution on 2026-08-08.** After `git restore --source=HEAD --
+> composer.json composer.lock` and `ddev composer install`, all four remaining
+> assertions passed: `OK: no WooCommerce on disk`, `OK: no WooCommerce plugin`,
+> `parts=[]`, `products=[]`. That run also confirms `composer install` really does
+> delete `web/app/plugins/woocommerce/` — Composer logged
+> `Deleting /var/www/html/web/app/plugins/woocommerce/ - deleted` — which is the
+> mechanism assertion 1 depends on.
 
 If `ddev snapshot restore` is unavailable or fails, stop the current proof as
 BLOCKED. Do not delete or rebuild the shared project. Create and verify a named
@@ -247,8 +278,53 @@ This is the base-profile state every base gate must run against. Capture it now,
 
 ```bash
 ddev snapshot --name=base-profile
-ddev snapshot list
+ddev snapshot --list
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the listing
+> form was wrong and is fixed above.** `ddev snapshot list` is not a subcommand.
+> `ddev snapshot --help` on the installed DDEV shows exactly one subcommand,
+> `restore`; listing is the flag `-l, --list`. Passing the bare word `list` is
+> parsed as a PROJECT NAME and fails. The other two forms the plan uses are
+> correct as written: `ddev snapshot --name=<name>` and
+> `ddev snapshot restore <name>` (positional). To replace an existing snapshot,
+> `ddev snapshot --cleanup --name <name> -y` deletes it first.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the
+> orchestrator has already performed Step 1b, and the carried-over database
+> needed a repair before it could succeed. Do not repeat the bootstrap; verify
+> it.**
+>
+> The worktree is bootstrapped (three steps, not two — `ddev composer install`,
+> `ddev exec bash scripts/setup`, then `npx -y npm@10 ci` on the Windows host),
+> `scripts/setup` completed at exit 0, and the plugin list is `site-commerce`,
+> `site-core`, `site-integrations`, `bedrock-autoloader` with `site-theme`
+> active and NO `woocommerce`. Precondition **P4** is satisfied: `scripts/setup`
+> seeds a `wp_navigation` post at its step 9 and contains no `wp menu create`.
+>
+> **The `base-profile` snapshot already exists and was taken from a REPAIRED
+> database.** The first attempt captured a dirty state. The DDEV volume, carried
+> across five units, still held a previous commerce run's fixtures — 2 products,
+> 2 product variations, 9 legacy `shop_order` rows in `wp_posts`, 1 coupon, and
+> 14 rows in `wp_wc_orders`. Two consequences, both blocking:
+>
+> 1. `bash scripts/enable-commerce` ABORTED at its step 3 with
+>    `Warning: [Failed] There are orders pending sync` /
+>    `Error: HPOS pre-checks failed` / `Failed to run wp wc hpos enable: exit status 1`.
+>    `wp wc hpos status` showed HPOS was ALREADY enabled with 5 unsynced orders,
+>    so the script was failing a pre-check for a setting that was already on.
+> 2. `SWITCH TO BASE` assertion 4 ("no fixture products") was unsatisfiable.
+>
+> The orchestrator took a reversible safety snapshot `pre-cleanup-4a`, deleted
+> every commerce post and its postmeta, cleared `wp_wc_orders`,
+> `wp_wc_order_addresses`, `wp_wc_order_operational_data` and `wp_wc_orders_meta`,
+> then re-took `base-profile` from the clean state. Note for any future cleanup:
+> **`wp post delete --force` is NOT sufficient for legacy `shop_order` rows** —
+> with HPOS enabled and compatibility mode off, WooCommerce intercepts the
+> deletion and the `wp_posts` rows survive; direct SQL was required.
+>
+> Do not take a new `base-profile` snapshot. Run `ddev snapshot --list` and
+> confirm both `base-profile` and `pre-cleanup-4a` are present.
 
 **From here on, every task states which profile it runs in, and crossing the boundary means running `SWITCH TO COMMERCE` or `SWITCH TO BASE` in full, assertions included.**
 
@@ -287,6 +363,43 @@ rg -n "'php' !== strtolower" tests/support/BlockIndexGenerator.php
 ```
 
 If `files_containing( $theme . '/templates', … )` still filters to `.php`, record it as **precondition P3, unsatisfied** in the ground-truth file. Do **not** edit the generator (Task 1 owns it). STOP and return the defect to the orchestrator. Unit 4A must not continue from a failed Unit 1 prerequisite.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — ALL FOUR
+> preconditions are SATISFIED. Steps 3, 4 and 5 confirm; they do not escalate.**
+>
+> Each was verified against the merged source, not against the plan text. Record
+> these citations in the ground-truth file and do not re-derive them:
+>
+> - **P1 satisfied.** `tests/Architecture/BlockThemeStructureTest.php` —
+>   `test_every_template_file_matches_the_naming_and_format_contract()` is
+>   documented as "Deliberately an ALLOW-PATTERN, not an enumeration", and the
+>   `BASE_PROFILE_TEMPLATES` docblock names the commerce slugs as expected
+>   additions: "This is a MINIMUM, never a closed set." Each base slug is checked
+>   with its own `assertFileExists`, never as a membership test. Its filename
+>   contract is `/^[a-z0-9]+(?:[-_][a-z0-9]+)*\.html$/`, which accepts
+>   `taxonomy-product_attribute.html`.
+> - **P2 satisfied.** `tests/Integration/Theme/BlockTemplateIntegrityTest.php`
+>   declares `FOREIGN_PROFILE_NAMESPACES = array( 'woocommerce' )` and skips a
+>   file only when it references that namespace AND the namespace has zero
+>   registered blocks in the run. The test is named
+>   `test_every_referenced_block_is_registered_for_this_profile()`, which is
+>   §11.12's wording.
+> - **P3 satisfied.** `tests/support/BlockIndexGenerator.php` filters with
+>   `if ( 'php' !== $extension && 'html' !== $extension ) { continue; }`, so it
+>   indexes HTML block templates.
+> - **P4 satisfied.** `scripts/setup` step 9 seeds a `wp_navigation` post and
+>   contains no `wp menu create`; `.github/workflows/ci.yml` does the same in all
+>   three of its WordPress jobs.
+>
+> **One documentation inaccuracy, recorded so no worker acts on it.** `AGENTS.md`
+> states that Git-owned templates carry "no hard-coded `ref` and no inline `style`
+> attribute (`BlockThemeStructureTest`)". The `ref` half is real
+> (`test_no_hardcoded_database_refs_in_git_owned_markup` matches
+> `/"ref"\s*:\s*\d+/`). **There is no inline-`style` assertion anywhere in the
+> test suite.** Upstream WooCommerce templates may carry inline styles and that is
+> NOT a violation — do not hand-edit upstream markup for it, which decision 2
+> forbids anyway. `AGENTS.md` prose is Unit 1/4B-owned; leave it alone and let the
+> orchestrator carry it forward.
 
 - [ ] **Step 6: Run `SWITCH TO COMMERCE`**
 
@@ -331,12 +444,28 @@ done
 ```bash
 ddev wp eval '
 $names = array_keys( WP_Block_Type_Registry::get_instance()->get_all_registered() );
-$hits  = array_values( array_filter( $names, static fn( $n ) => str_contains( $n, "mini-cart" ) && ! str_contains( $n, "-contents" ) ) );
+$hits  = array_values( array_filter( $names, static fn( $n ) => 1 === preg_match( "#/mini-cart$#", $n ) ) );
 sort( $hits );
 echo implode( "\n", $hits ), "\n";'
 ```
 
-Expected: exactly one name (the Mini-Cart parent block). Record it as `MINI_CART_BLOCK`. If the command prints more than one line, record every candidate and pick the parent block — the one whose name has no further path segment after `mini-cart`; the inner `*-contents` blocks are already filtered out. If it prints nothing, STOP: the Mini-Cart block is not registered and decision 5 cannot be implemented as planned.
+Expected: exactly one name (the Mini-Cart parent block). Record it as `MINI_CART_BLOCK`. If it prints nothing, STOP: the Mini-Cart block is not registered and decision 5 cannot be implemented as planned.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the filter
+> above is the corrected one; the original returned ten names.**
+>
+> The original used `str_contains( $n, "mini-cart" ) && ! str_contains( $n, "-contents" )`.
+> WooCommerce 11.0.0 names the inner blocks `woocommerce/mini-cart-*-block`, not
+> `*-contents`, so that filter returns the parent plus nine children. The anchored
+> `#/mini-cart$#` implements the rule this step's prose already described and
+> returns exactly one: **`woocommerce/mini-cart`**. Task A5 Step 4 uses the same
+> anchored filter behind a hard `-eq 1` check that the original would have aborted
+> — see the correction there.
+>
+> **While you are on the live store, also record the Mini-Cart BUTTON's accessible
+> name.** That is a different fact from the block name, and Task A7's `miniCart`
+> Playwright locator depends on it. Read it from the rendered storefront rather
+> than guessing.
 
 - [ ] **Step 8: Record which templates WordPress actually resolves, and their origin** *(commerce profile)*
 
@@ -452,6 +581,30 @@ grep -n "customize" tests/commerce/Integration/Permissions/ShopManagerCapabiliti
 
 If Task 1 already asserts it, **add nothing to this file** and record that in the ground-truth file. A duplicate assertion is a merge conflict waiting to happen, not extra safety.
 
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — Steps 2 and
+> 3 both resolve to "verified, nothing to add". This task's PHP file does not
+> change.**
+>
+> Task 1 already ships the whole matrix in
+> `tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php`, inside
+> `test_shop_manager_inherits_site_editor_access()`:
+>
+> ```php
+> self::assertTrue( current_user_can( 'edit_theme_options' ) );
+> self::assertFalse( current_user_can( 'edit_css' ) );
+> self::assertFalse( current_user_can( 'customize' ) );
+> ```
+>
+> and `unfiltered_html` is covered by
+> `test_shop_manager_cannot_reach_the_keys_to_the_kingdom()`, which loops over
+> `array( 'install_plugins', 'switch_themes', 'manage_options', 'unfiltered_html' )`.
+>
+> So Step 2's verification passes, and Step 3's
+> `test_shop_manager_cannot_reach_the_customizer()` **must NOT be added** — it
+> would duplicate line 125 of a Task 1-owned file. Confirm the three assertions
+> are present, record it, and move to Step 5. Only
+> `tests/commerce/e2e/shop-manager-admin.spec.ts` changes in this task.
+
 - [ ] **Step 4: Run the commerce integration suite** *(commerce profile — active since Task A1)*
 
 ```bash
@@ -465,25 +618,62 @@ Expected: all tests pass, including the added `test_shop_manager_cannot_reach_th
 In `tests/commerce/e2e/shop-manager-admin.spec.ts`, replace the body of the test named `'wp-admin lockdown holds: no Plugins or Appearance menus'` with the post-migration truth, and rename it:
 
 ```ts
-	test( 'wp-admin lockdown holds: no Plugins menu, and Appearance exposes only the Editor', async ( { page } ) => {
+	test( 'wp-admin lockdown holds: no Plugins menu, and Appearance is replaced by Design', async ( { page } ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		await page.goto( adminUrl() );
 		// Plugins stays fully hidden: client roles never get activate_plugins.
 		await expectNoAdminMenu( page, 'menu-plugins' );
 
-		// Appearance now exists because the block-theme migration grants
-		// edit_theme_options for Site Editor access — but the admin-screen
-		// boundary keeps its dangerous children out (see the theme/customizer
-		// deny-list in the agency-platform admin-screen policy).
-		await expect( page.locator( '#adminmenu li#menu-appearance' ) ).toHaveCount( 1 );
+		// AdminScreenPolicy REMOVES the Appearance menu (its top-level target is
+		// themes.php, a denied screen) and replaces it with a single Design entry
+		// that links straight to the Site Editor. Same contract the base suite
+		// pins in tests/e2e/editor-permissions.spec.ts.
+		await expectNoAdminMenu( page, 'menu-appearance' );
+		await expect(
+			page.locator( '#adminmenu a[href$="site-editor.php"]' ).first()
+		).toBeVisible();
+
+		// No denied design screen is reachable from the menu at all.
 		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php', 'widgets.php', 'nav-menus.php' ] ) {
 			await expect(
-				page.locator( `#adminmenu li#menu-appearance a[href*="${ denied }"]` )
+				page.locator( `#adminmenu a[href*="${ denied }"]` )
 			).toHaveCount( 0 );
 		}
 	} );
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the original
+> Step 5 was RED BY CONSTRUCTION. The block above replaces it.**
+>
+> The original asserted
+> `await expect( page.locator( '#adminmenu li#menu-appearance' ) ).toHaveCount( 1 );`
+> and reasoned that "Appearance now exists because the block-theme migration
+> grants edit_theme_options". That is factually wrong about the shipped boundary.
+>
+> `AgencyPlatform\Security\AdminScreenPolicy::replace_appearance_menu()` runs on
+> `admin_menu` at priority 999 for every user without `manage_options` and does:
+>
+> ```php
+> remove_menu_page( 'themes.php' );
+> add_menu_page( __( 'Design', … ), __( 'Design', … ), 'edit_theme_options', self::SITE_EDITOR_SCREEN, '', 'dashicons-admin-appearance', 60 );
+> ```
+>
+> Its own docblock says so: "Removes the Appearance menu (whose top-level target
+> is themes.php, a denied screen) and replaces it with one Design entry that links
+> straight to the Site Editor." So `li#menu-appearance` has count **0**, and the
+> original assertion could never pass.
+>
+> The assertion the original Step 5 wanted DELETED —
+> `expectNoAdminMenu( page, 'menu-appearance' )`, already at
+> `tests/commerce/e2e/shop-manager-admin.spec.ts:168` — is the correct one and is
+> kept. Unit 1's own CI-green base spec asserts exactly this pair at
+> `tests/e2e/editor-permissions.spec.ts:43-47`, and the replacement mirrors it.
+>
+> Note the denied-screen loop is no longer scoped to `li#menu-appearance`: with
+> that menu gone, scoping to it would make the loop VACUOUS — five assertions over
+> an element that does not exist all pass trivially. Scoping to `#adminmenu`
+> instead is the assertion that can actually fail.
 
 - [ ] **Step 6: Run the commerce E2E** *(commerce profile)*
 
@@ -491,7 +681,62 @@ In `tests/commerce/e2e/shop-manager-admin.spec.ts`, replace the body of the test
 COMMERCE=1 npm run test:e2e:commerce
 ```
 
-Expected: `shop-manager-admin.spec.ts` passes in full. `commerce-journey.spec.ts` still passes here because `scripts/enable-commerce` has not changed yet. If the Appearance assertion fails, read Task 1's admin-screen policy and align this test with the *implemented* boundary; do not weaken it to "menu absent" unless the policy really hides the whole menu.
+If the menu assertion fails, read Task 1's admin-screen policy and align this test with the *implemented* boundary; never weaken it.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — BOTH halves
+> of the original expectation ("`shop-manager-admin.spec.ts` passes in full" and
+> "`commerce-journey.spec.ts` still passes here") are FALSE, and chasing either
+> would send this task far outside its grant.**
+>
+> The orchestrator measured the commerce e2e baseline on 2026-08-08, before any
+> Phase A code was written, with the store freshly seeded by the UNCHANGED
+> `scripts/enable-commerce`. `COMMERCE=1 npm run test:e2e:commerce`:
+>
+>     8 failed, 4 passed, 10 skipped — exit 1
+>
+> Every failure, classified:
+>
+> | # | test | cause |
+> |---|---|---|
+> | 1 | journey: product archive lists the fixture products | `.woocommerce-loop-product__title` not found — classic archive markup |
+> | 2 | journey: simple product PDP | `p.price` not found — classic PDP markup |
+> | 3 | journey: cart quantity + TESTCOUPON | `.cart-subtotal` not found |
+> | 4 | journey: guest COD checkout (desktop) | `.woocommerce-order` not found |
+> | 5 | journey: account order history | `.woocommerce-order` not found |
+> | 6 | admin: orders screen + private note | 90 s timeout inside `placeGuestCodOrder()` on `.woocommerce-order-overview__order strong` |
+> | 7 | admin: WooCommerce Settings reachable | `reauth=1`, 14 retries — ENVIRONMENTAL |
+> | 8 | journey: guest COD checkout (mobile) | `.woocommerce-order` not found |
+>
+> Failure 4 is the exact `.woocommerce-order` failure the tracking file records as
+> the documented cause of the `commerce-e2e` exemption, still at
+> `commerce-journey.spec.ts:81`.
+>
+> **Failure 7 is concurrency, not code.** Re-running the file alone with
+> `--workers=1` made it pass: `1 failed, 4 passed`. Two shop-manager logins racing
+> across parallel workers produce the documented `reauth=1` bounce. Use
+> `--workers=1` for your inner loop.
+>
+> **Failure 6 is real and is NOT yours to fix.** It fails inside this file's own
+> local `placeGuestCodOrder()` helper, which drives the CLASSIC checkout and reads
+> classic order-received markup the block storefront no longer emits. **Task A7
+> Step 4 rewrites that helper** to call `addSimpleProductToCart` /
+> `fillBlockCheckoutWithCod` / `placeOrderAndReadNumber`, and it can only work once
+> **Task A6** seeds the native block cart and checkout. So the "passes in full"
+> target is unreachable at A2 by construction.
+>
+> **Your actual success condition, and the only one:**
+>
+> 1. The one test you edit passes on BOTH projects.
+> 2. Nothing that passed at baseline regresses.
+>
+> The serial baseline for your file is **4 passed, 1 failed**, the single failure
+> being #6 above. Reproduce that number before you change anything, quote it, and
+> quote it again afterwards.
+>
+> **Do not touch `commerce-journey.spec.ts` (Task A7), `scripts/enable-commerce`
+> (Task A6), or the shared `npm run test:e2e:commerce` script.** Five failing
+> journey tests are the expected state of the branch at this point; they are what
+> Phase A exists to fix, task by task.
 
 - [ ] **Step 7: Run `SWITCH TO BASE`, then verify and commit**
 
@@ -506,14 +751,27 @@ git status --porcelain
 Expected: `verify:fast` green. The status lists `tests/commerce/e2e/shop-manager-admin.spec.ts`, plus `tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php` **only if Step 3 added the Customizer method**. If Task 1 already asserted `customize`, the PHP file is untouched and must not appear.
 
 ```bash
-git add tests/commerce/e2e/shop-manager-admin.spec.ts
-# Add the PHP file ONLY if Step 3 changed it.
-git add -- tests/commerce/Integration/Permissions/ShopManagerCapabilitiesTest.php
+git add -- tests/commerce/e2e/shop-manager-admin.spec.ts
+git diff --cached --name-only
 git diff --cached --check
 ddev composer verify:fast
-git commit -m "test(commerce): cover the shop-manager Customizer denial and the new Appearance menu boundary"
+git commit -m "test(commerce): pin the shop-manager Design menu boundary on the block theme"
 git status --porcelain
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the staging
+> and the commit message are fixed above.**
+>
+> Per the Step 3 correction, `ShopManagerCapabilitiesTest.php` does NOT change in
+> this task, so it must not be staged; the conditional `git add` invited a worker
+> to stage an unmodified Task 1-owned file. The original message
+> `"test(commerce): cover the shop-manager Customizer denial and the new
+> Appearance menu boundary"` named two things the commit does not contain — no
+> Customizer assertion is added (Task 1 already has it) and there is no Appearance
+> menu (it is replaced by Design).
+>
+> `git status --porcelain` before staging must list exactly one path:
+> `tests/commerce/e2e/shop-manager-admin.spec.ts`.
 
 Expected: empty output after the commit.
 
@@ -589,16 +847,146 @@ return array(
 		'archive-product',
 		'order-confirmation',
 		'page-cart',
-		'page-checkout',
 		'product-search-results',
 		'single-product',
 		'taxonomy-product_attribute',
-		'taxonomy-product_cat',
-		'taxonomy-product_tag',
 	),
-	'excluded'  => array(),
+	'excluded'  => array(
+		'coming-soon'   => 'Shipped upstream but references no template part, so there is no missing-part rewrite to justify an override.',
+		'page-checkout' => 'References the checkout-header part that the commerce plugin ships and explicitly scopes with "theme":"woocommerce/woocommerce", so no part of this theme is missing. Removing that theme attribute — which the derivation would do — repoints the reference at a part this theme does not have.',
+	),
 );
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the sample
+> above has been replaced with the DERIVED answer, verified by execution against
+> the installed WooCommerce 11.0.0. Six overrides, not nine.**
+>
+> `WC_TEMPLATE_DIR_REL = web/app/plugins/woocommerce/templates/templates` — note
+> the doubled segment; the classic PHP templates are one level up and `parts/`
+> sits beside them.
+>
+> `WC_SHIPPED_SLUGS` is EIGHT files: `archive-product`, `coming-soon`,
+> `order-confirmation`, `page-cart`, `page-checkout`, `product-search-results`,
+> `single-product`, `taxonomy-product_attribute`.
+>
+> Template-part references, read from the shipped files:
+>
+> | slug | parts referenced |
+> |---|---|
+> | archive-product | `header` (tagName header), `footer` (tagName footer) |
+> | coming-soon | none |
+> | order-confirmation | `header`, `footer` (no tagName) |
+> | page-cart | `header` (tagName header), `footer` (tagName footer) |
+> | page-checkout | `checkout-header` with `"theme":"woocommerce/woocommerce"`, and NO footer |
+> | product-search-results | `header`, `footer` |
+> | single-product | `header`, `footer` |
+> | taxonomy-product_attribute | `header`, `footer` |
+>
+> **`taxonomy-product_cat` and `taxonomy-product_tag` are not shipped as `.html`
+> templates at all.** They were in the candidate list and are simply absent
+> upstream, so they get no file and no `excluded` entry — `excluded` exists for
+> slugs the plugin DOES ship. Record both as SKIP in the ground-truth file with
+> "not shipped upstream" as the reason.
+>
+> **`page-checkout` must NOT be derived, and this is the release-blocking finding
+> of the audit.** Three independent gates agree:
+>
+> 1. WooCommerce ships `templates/parts/checkout-header.html` itself, and the
+>    reference carries `"theme":"woocommerce/woocommerce"`, so it resolves against
+>    the PLUGIN. This theme is missing nothing, so decision 2's sole justification
+>    for an override does not apply.
+> 2. Step 4's `s/,"theme":"[^"]*"//g` would strip that attribute and repoint
+>    `checkout-header` at the active theme, which has no such part — turning a
+>    working distraction-free checkout header into a missing one.
+> 3. A derived `page-checkout.html` would turn the BASE architecture suite RED.
+>    `BlockThemeStructureTest::test_every_referenced_template_part_exists_and_is_declared()`
+>    matches `"slug"\s*:\s*"([a-z0-9-]+)"` **unscoped** over every file in
+>    `templates/`, so `checkout-header` matches and the test would demand
+>    `parts/checkout-header.html` (absent) and a `theme.json.templateParts` entry
+>    (absent). That test and `theme.json` are both Unit 1-owned, so Unit 4A has no
+>    in-scope repair. Not creating the file is the only correct action.
+>
+>    The Step 4 sed rewrites `"slug":"header"`, and does NOT touch
+>    `"slug":"checkout-header"`, because the pattern includes the opening quote.
+>
+> `page-checkout` also has no footer part, so
+> `CommerceBoundaryTest::test_declared_commerce_templates_render_the_theme_chrome()`
+> would fail on it too.
+>
+> **The unscoped-`"slug"` hazard, audited in full.** Across all eight shipped
+> templates the `"slug"` values are:
+>
+>     6  "slug":"footer"                                     -> rewritten to site-footer
+>     6  "slug":"header"                                     -> rewritten to site-header
+>     1  "slug":"checkout-header"                            -> the ONLY hazard, page-checkout only
+>     1  "slug":"woocommerce/coming-soon"                    -> safe, contains "/"
+>     5  "slug":"woocommerce/order-confirmation-*-heading"   -> safe, all contain "/"
+>
+> Every namespaced value is safe because `/` falls outside the regex's
+> `[a-z0-9-]` class. So with `page-checkout` excluded, the six derived templates
+> introduce no `"slug"` value beyond `site-header` and `site-footer`, both of
+> which exist as part files and are declared in `theme.json`, and the base
+> architecture suite stays green.
+>
+> **This must be re-derived, never trusted, on any WooCommerce upgrade.** After
+> Step 4, run this and confirm the only values are `site-header` and
+> `site-footer`:
+>
+> ```bash
+> grep -rho '"slug"[[:space:]]*:[[:space:]]*"[a-z0-9-]*"' web/app/themes/site-theme/templates/*.html | sort | uniq -c
+> ```
+>
+> You must still re-derive the whole table from the live install rather than
+> copying it — the values above are the orchestrator's verified answer to check
+> your derivation against, and a mismatch is a finding worth reporting.
+>
+> ---
+>
+> **THE GATE WAS PROVEN CAPABLE OF PASSING BEFORE ANY CODE WAS WRITTEN, and the
+> defect was proven by executing it.** The orchestrator ran Step 4's derivation
+> verbatim against WooCommerce 11.0.0 and then ran the base architecture suite.
+>
+> *With the six OVERRIDE slugs derived, GREEN:*
+>
+> ```
+> ............................................                      44 / 44 (100%)
+> OK (44 tests, 456 assertions)
+> ```
+>
+> Assertions rose from the unit baseline's 408 to 456 as the six new files flowed
+> through the existing per-file loops, and the slug audit over the whole
+> `templates/` directory reported exactly two values and nothing else:
+>
+> ```
+>      12 "slug":"site-footer"
+>      12 "slug":"site-header"
+> ```
+>
+> No unrewritten `header`/`footer` slug survived, and no `"ref":<digits>` appeared
+> in any derived file.
+>
+> *Then `page-checkout` was derived as well, and the SAME suite went RED:*
+>
+> ```
+> ........F...................................                      44 / 44 (100%)
+>
+> 1) Tests\Architecture\BlockThemeStructureTest::test_every_referenced_template_part_exists_and_is_declared
+> Architecture rule broken: Referenced template part does not exist
+> Offending file:           web/app/themes/site-theme/templates/page-checkout.html
+> Failed asserting that file ".../web/app/themes/site-theme/parts/checkout-header.html" exists.
+>
+> Tests: 44, Assertions: 437, Failures: 1.
+> ```
+>
+> The derived first line was
+> `<!-- wp:template-part {"slug":"checkout-header","tagName":"header"} /-->` — the
+> `"theme":"woocommerce/woocommerce"` attribute stripped by the sed, exactly as
+> predicted. All seven probe files were then deleted and the worktree returned to
+> a clean state.
+>
+> So the six-slug list is proven to keep the base suite green, and the seventh is
+> proven to break it. Do not re-litigate either half.
 
 - [ ] **Step 2: Write the failing boundary test**
 
@@ -1127,14 +1515,20 @@ final class CommerceBlockTemplatesTest extends IntegrationTestCase {
 	}
 
 	public function test_the_theme_template_wins_over_the_plugin_default(): void {
+		self::assertNotSame( array(), $this->declared()['templates'], 'The declared list must not be empty, or this check passes vacuously.' );
+
 		foreach ( $this->declared()['templates'] as $slug ) {
 			$template = get_block_template( get_stylesheet() . '//' . $slug, 'wp_template' );
 
 			self::assertNotNull( $template, "WordPress must resolve a block template for '{$slug}'." );
 			self::assertSame(
-				get_stylesheet(),
-				$template->theme,
-				"The theme's templates/{$slug}.html must win over the commerce plugin's default template."
+				'theme',
+				$template->source,
+				"The theme's templates/{$slug}.html must win over the commerce plugin's default template; source is still '{$template->source}'."
+			);
+			self::assertNull(
+				$template->origin,
+				"A theme-owned template has a null origin; '{$slug}' still reports origin '" . var_export( $template->origin, true ) . "'."
 			);
 		}
 	}
@@ -1248,6 +1642,36 @@ final class CommerceBlockTemplatesTest extends IntegrationTestCase {
 
 The same two constraints as Task A3 Step 2 apply: `phpcs` scans this file, so every `file_get_contents()` call needs the inline `WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents` suppression with a reason, and `ddev composer lint:php` must be clean before the task ends.
 
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) —
+> `test_the_theme_template_wins_over_the_plugin_default()` was VACUOUS. It is the
+> only test in the whole unit that proves an override actually takes effect, and
+> as written it passed with NO override present. Fixed in the code above.**
+>
+> The original asserted `assertSame( get_stylesheet(), $template->theme, … )`.
+> `$template->theme` is filled with the ACTIVE STYLESHEET for plugin-provided
+> templates too, so it equals `site-theme` whether or not the theme owns the file.
+>
+> **Proven by execution on 2026-08-08.** With `archive-product.html` derived into
+> the theme and `single-product.html` deliberately left to the plugin:
+>
+> ```
+> archive-product | origin=NULL     | source=theme  | theme=site-theme | theme===stylesheet? YES
+> single-product  | origin='plugin' | source=plugin | theme=site-theme | theme===stylesheet? YES
+> ```
+>
+> The original assertion answers YES in both rows. `source` and `origin` are the
+> fields that discriminate: a theme-owned template is `source='theme'` with a NULL
+> origin, and a plugin default is `source='plugin'` with `origin='plugin'`. Both
+> are now asserted.
+>
+> An empty-list guard was added for the same reason the `upstream_slugs()` guard
+> exists: a `foreach` over an accidentally empty declared list passes without
+> asserting anything.
+>
+> Before the derivation, all eight upstream slugs resolve as
+> `origin=plugin | source=plugin`, which is Task A1 Step 8's "before" reading.
+> That is the state this test must flip for the six declared slugs.
+
 - [ ] **Step 2: Run it** *(commerce profile)*
 
 ```bash
@@ -1263,6 +1687,31 @@ Every failure here is a real defect in Task A3's derivation, and each has exactl
 | `test_the_theme_template_wins_over_the_plugin_default` | A stray `"theme":"…"` attribute or a wrong filename. Fix the template. |
 | `test_no_upstream_commerce_template_slug_is_unaccounted_for` | Add the slug to `commerce-template-list.php` as owned (and derive it) or as excluded with a reason. |
 | `test_every_owned_slug_still_exists_upstream` | Remove the unjustified override and its list entry. |
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — `excluded`
+> is NOT empty, and two of these tests would fail if it were.**
+>
+> Per the Task A3 Step 1 correction, WooCommerce 11.0.0 ships eight block
+> template slugs and this theme owns six. The other two must appear in
+> `excluded`, or `test_no_upstream_commerce_template_slug_is_unaccounted_for`
+> fails with `coming-soon` and `page-checkout` listed as undecided:
+>
+> - `coming-soon` — shipped, references no template part, nothing to rewrite.
+> - `page-checkout` — references `checkout-header`, which the plugin ships and
+>   scopes to itself; deriving it would break the reference AND turn the base
+>   architecture suite red. Proven by execution; see the Task A3 correction.
+>
+> `taxonomy-product_cat` and `taxonomy-product_tag` need NO entry in either
+> array: `excluded` exists for slugs the plugin DOES ship, and it ships neither.
+> Adding them would make `test_no_upstream_commerce_template_slug_is_unaccounted_for`
+> pass just the same (it only walks upstream slugs) but would misdescribe the
+> repository. Record them as SKIP in the ground-truth file instead.
+>
+> One further point about `upstream_slugs()`: its
+> `self::assertNotSame( array(), $slugs, … )` guard is the right shape and must be
+> kept. Without it, a plugin that relocated its templates would empty the list and
+> make BOTH direction checks pass vacuously — the dominant defect family of this
+> engagement.
 
 - [ ] **Step 3: Confirm the storefront actually renders the theme chrome** *(commerce profile)*
 
@@ -1457,9 +1906,13 @@ ARCHIVE_TPL="web/app/themes/site-theme/templates/archive-product.html"
 mkdir -p "${PATTERN_DIR}"
 
 # 1. Mini-Cart block name — discovered, never typed. Fails if it is not unique.
+#    The filter selects the PARENT block: a name that ENDS in /mini-cart. The
+#    inner blocks are named woocommerce/mini-cart-*-block, so a substring match
+#    returns ten names and the uniqueness check below aborts. See the CORRECTION
+#    under this step.
 MINI_CART_BLOCK="$(ddev wp eval '
 $names = array_keys( WP_Block_Type_Registry::get_instance()->get_all_registered() );
-$hits  = array_values( array_filter( $names, static fn( $n ) => str_contains( $n, "mini-cart" ) && ! str_contains( $n, "-contents" ) ) );
+$hits  = array_values( array_filter( $names, static fn( $n ) => 1 === preg_match( "#/mini-cart$#", $n ) ) );
 sort( $hits );
 echo implode( "\n", $hits );' | tr -d '\r')"
 
@@ -1483,6 +1936,46 @@ done
 ```
 
 Read both generated files. `product-grid.html` must still be well-formed block markup after the `grep -v` — if upstream wrapped the listing in a group whose opening or closing comment shared a line with a template part, hand-fix the file now and note it in the ground-truth file.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the
+> Mini-Cart discovery filter was wrong and this generation command ABORTED BY
+> CONSTRUCTION. Fixed in the code above.**
+>
+> The original filter was
+> `str_contains( $n, "mini-cart" ) && ! str_contains( $n, "-contents" )`. Against
+> WooCommerce 11.0.0 that returns TEN names, because the inner blocks are suffixed
+> `-block`, not `-contents`:
+>
+> ```
+> woocommerce/mini-cart
+> woocommerce/mini-cart-cart-button-block
+> woocommerce/mini-cart-checkout-button-block
+> woocommerce/mini-cart-footer-block
+> woocommerce/mini-cart-items-block
+> woocommerce/mini-cart-products-table-block
+> woocommerce/mini-cart-shopping-button-block
+> woocommerce/mini-cart-title-block
+> woocommerce/mini-cart-title-items-counter-block
+> woocommerce/mini-cart-title-label-block
+> ```
+>
+> The very next line, `test "$(… | wc -l)" -eq 1 || { echo "FAILED: expected
+> exactly one mini-cart block name…"; exit 1; }`, would then abort the whole step.
+> Task A1 Step 7b's prose hedges for this ("If the command prints more than one
+> line … pick the parent block — the one whose name has no further path segment
+> after `mini-cart`"), but Step 4's command has no such tolerance.
+>
+> The corrected filter anchors on `#/mini-cart$#`, which implements exactly the
+> rule A1 Step 7b describes and returns exactly one name:
+> **`woocommerce/mini-cart`**. Apply the same anchored filter in Task A1 Step 7b
+> so both steps agree.
+>
+> Keep the `-eq 1` uniqueness check. It is the right guard; only the filter feeding
+> it was wrong.
+>
+> **This is the block NAME, not the Mini-Cart button's accessible name.** Task A7's
+> `miniCart` Playwright locator needs the latter, which is a separate fact to read
+> off the live store and record in the ground-truth file.
 
 - [ ] **Step 5: Implement the provider**
 
@@ -1907,7 +2400,7 @@ export const checkoutLocators = {
 	placeOrder: ( page: Page ): Locator =>
 		page.getByRole( 'button', { name: /place order/i } ),
 	miniCart: ( page: Page ): Locator =>
-		page.getByRole( 'button', { name: /cart/i } ).first(),
+		page.locator( 'header' ).getByRole( 'button', { name: /cart/i } ).first(),
 } as const;
 
 /**
@@ -1987,6 +2480,46 @@ export async function placeOrderAndReadNumber( page: Page ): Promise<string> {
 	return ( match as RegExpMatchArray )[ 1 ];
 }
 ```
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — two defects
+> in the helper above. The `miniCart` locator is already fixed in the code;
+> `verifyBlockCheckoutLocators()` needs the change described here.**
+>
+> **1. The `miniCart` locator was VACUOUS, and it guards this unit's headline
+> claim.** It read
+> `page.getByRole( 'button', { name: /cart/i } ).first()`, and `/cart/i` matches
+> **"Add to cart"**. So on a product page it resolves to the add-to-cart button.
+> `addSimpleProductToCart()` asserts `miniCart` is visible immediately after
+> clicking add-to-cart, on the product page — which passes whether or not a
+> Mini-Cart exists anywhere on the site. That would let Task A5's pattern and
+> Task A6's template-part override both ship BROKEN behind a green commerce
+> suite, and the Mini-Cart is the entire point of fixed decision 5.
+>
+> It is now scoped to the `<header>` element. The derived commerce templates
+> render the header part with `"tagName":"header"`, so a real `<header>` is
+> present on every storefront page. **Prove the scoping rather than assuming it:**
+> the contract spec must exercise this locator on a page that ALSO carries an
+> add-to-cart button, so a regression back to the unscoped form fails there.
+> Read the Mini-Cart button's real accessible name off the live store (Task A5
+> Step 1 discovers the block name; the button's name is a separate fact) and
+> record it in the ground-truth file rather than guessing it.
+>
+> **2. The contract spec proves visibility but never interaction.**
+> `verifyBlockCheckoutLocators()` asserts only `toBeVisible()`, yet
+> `fillBlockCheckoutWithCod()` calls `selectOption( 'US' )` on `country` and
+> `selectOption( 'CA' )` on `state`. `selectOption` requires a native `<select>`;
+> recent WooCommerce releases render those two as comboboxes, which are visible
+> while `selectOption` throws. A spec the plan calls a "permanent contract check"
+> would therefore stay green while every journey failed, and Step 2's "re-run
+> until green" gate would be satisfied by a contract that skips the two riskiest
+> calls.
+>
+> **Extend `verifyBlockCheckoutLocators()` to perform the interaction** for
+> anything the journeys do more than read — at minimum the two `selectOption`
+> calls, or whichever form the live DOM actually needs. Read the live DOM in
+> Step 2 to decide; do not assume either form. A control that is
+> visible-but-not-selectable must fail in the contract spec, with its locator
+> name, not inside a journey.
 
 - [ ] **Step 2: Prove every locator resolves on the live store** *(commerce profile)*
 
@@ -2088,15 +2621,34 @@ In `tests/commerce/e2e/shop-manager-admin.spec.ts`: replace the local `placeGues
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php' ] ) {
-			await page.goto( adminUrl( denied ) );
+			const response = await page.goto( adminUrl( denied ) );
+			expect( response?.status(), denied ).toBe( 403 );
 			await expect(
-				page.getByText( /you do not have sufficient permissions|not allowed to access this page|do not have permission/i ).first()
+				page.getByText( /higher level of permission|not allowed/i ).first()
 			).toBeVisible();
 		}
 	} );
 ```
 
-If Task 1's admin-screen policy redirects rather than rendering a `wp_die()` message, assert the redirect target instead — read the merged policy first and match its actual behaviour.
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the
+> denied-screen assertion was RED BY CONSTRUCTION and is fixed above.**
+>
+> The original matched
+> `/you do not have sufficient permissions|not allowed to access this page|do not have permission/i`.
+> `AdminScreenPolicy::block_denied_screens()` intercepts on `admin_init`, BEFORE
+> the screen's own capability check, and always renders ITS OWN message with HTTP
+> 403:
+>
+>     You need a higher level of permission.
+>     This screen is not part of the editing model for your role. Design changes belong in the Site Editor.
+>
+> None of the three original alternatives appears in that text. The plan hedged
+> only for a redirect, which is not what the policy does — it calls `wp_die()`.
+>
+> The replacement is the shipped, CI-green form Unit 1 already uses at
+> `tests/e2e/forbidden-admin-screens.spec.ts:32-33`. It also adds the **403 status
+> assertion**, which the original omitted and which is the stronger half: a text
+> match alone would pass on any page that happened to contain the phrase.
 
 The Site Editor test deliberately claims only **access**, not a save: saving a template part from the Site Editor UI is covered by Task 1's own client-role Playwright suite, and §11.14's commerce item is "Shop Manager Site Editor access when commerce is active". Do not rename this test to claim more than it asserts.
 
@@ -2122,7 +2674,41 @@ npm run test:e2e
 npm run test:accessibility
 ```
 
-Expected: PASS. These MUST run on the base profile: on a commerce-enabled site the seeded `site-header` override changes the header on every page, so a base run there would be a false green.
+These MUST run on the base profile: on a commerce-enabled site the seeded `site-header` override changes the header on every page, so a base run there would be a false green.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — "Expected:
+> PASS" is wrong for `test:e2e` on this host, and it invites the worst possible
+> response.**
+>
+> The full base `e2e` suite shows **10 to 13 `reauth=1` login failures** on this
+> machine. That band is environmental, was reproduced on pure HEAD in a previous
+> unit, and CI on a fresh database is the authority. A worker told to expect zero
+> failures will either stop on a false blocker or, far worse, "fix" a spec to make
+> an environmental failure disappear.
+>
+> Compare against the band, not against zero. Report the exact count. A count
+> OUTSIDE 10–13, or any failure whose message is not `reauth=1`, is a real
+> finding — report it and stop.
+>
+> `npm run lint:js` must be clean, with no tolerance.
+>
+> `npm run test:accessibility` should be **6 passed**. Before attributing any
+> accessibility failure to code, dump the dev site's Global Styles row — a
+> previous unit lost a cycle to a leftover background colour there that produced
+> contrast violations naming that colour. The orchestrator verified it is clean at
+> the start of Unit 4A (`{"version":3,"isGlobalStylesUserThemeJSON":true}`), but
+> e2e runs mutate it:
+>
+> ```bash
+> ddev wp post list --post_type=wp_global_styles --post_status=any --field=ID
+> ddev wp post get <id> --field=post_content
+> ```
+>
+> **Do NOT run `npm run test:visual` as a gate here.** The carried-over database
+> has drifted from the committed baselines (the demo page renders 1521px against
+> an 1899px baseline). That divergence was CONFIRMED environmental in the previous
+> unit, because the same baselines passed in CI. Only a `ci-capture/visual-baselines`
+> ref may regenerate baselines, and never from a local run.
 
 - [ ] **Step 7: Verify and commit**
 
@@ -2164,7 +2750,7 @@ In `tests/commerce/README.md`:
    - `Integration/Theme/CommerceBlockTemplatesTest.php` — every commerce block template parses, names only registered blocks, resolves its `site-header`/`site-footer` parts, wins over the store plugin's default template, and no upstream template slug is left undecided.
    - `Integration/Theme/CommercePatternsTest.php` — the commerce pattern category and the `header-mini-cart` / `product-grid` patterns register when the profile boots.
 2. Rewrite the `e2e/commerce-journey.spec.ts` bullet: the journeys now drive the **native block** cart and checkout (seeded by `scripts/enable-commerce`), plus the theme-chrome assertion on the shop archive and the header Mini-Cart.
-3. Rewrite the `e2e/shop-manager-admin.spec.ts` bullet: add Site Editor access and the theme-installer/file-editor refusals; correct the Appearance-menu sentence (the menu now exists and exposes only the Editor).
+3. Rewrite the `e2e/shop-manager-admin.spec.ts` bullet: add Site Editor access and the theme-installer/file-editor refusals; correct the Appearance-menu sentence — **the Appearance menu is REMOVED and replaced by a single Design entry that links to the Site Editor** (`AdminScreenPolicy::replace_appearance_menu()` calls `remove_menu_page( 'themes.php' )`). See the Task A2 Step 5 correction; the plan's earlier wording, "the menu now exists and exposes only the Editor", is wrong and must not be copied into the README.
 4. In "Gates", add: `tests/Architecture/CommerceBoundaryTest` runs in the BASE architecture suite and keeps commerce block markup inside the declared commerce templates — it is the block-markup half of `WooCommerceIsolationTest`'s PHP-symbol rule.
 
 - [ ] **Step 2: Update the enable-commerce description in the commerce guide**
@@ -2208,15 +2794,38 @@ Run `SWITCH TO BASE` first (all five assertions must pass), then the base matrix
 ```bash
 ddev composer verify:fast
 ddev composer verify
-npm ci
-npm run lint
+npx -y npm@10 ci
+npm run lint > lint.log 2>&1; echo "EXIT=$?"; tail -25 lint.log
 npm run build
 git status --porcelain
 npm run test:e2e
 npm run test:accessibility
 ```
 
-Expected: all green. `git status --porcelain` after `npm run build` must show no build drift and, critically, **no `composer.json` / `composer.lock` modification** — if either appears, the WooCommerce require was not reverted and `SWITCH TO BASE` was not run properly.
+`git status --porcelain` after `npm run build` must show no build drift and, critically, **no `composer.json` / `composer.lock` modification** — if either appears, the WooCommerce require was not reverted and `SWITCH TO BASE` was not run properly.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — three fixes
+> applied to the command list above.**
+>
+> **1. `npm ci` FAILS on this host and is replaced by `npx -y npm@10 ci`.** Local
+> npm is 11.x while the committed lock was written by npm 10, so npm 11 reads the
+> lock as out of sync on optional platform packages
+> (`Missing: @parcel/watcher-android-arm64@2.5.6 from lock file`) and refuses with
+> EUSAGE. `npm ci` never writes the lock, so the npm 10 route is safe and leaves
+> `package-lock.json` untouched. This is also the third bootstrap step the worktree
+> needs, because `scripts/setup` installs `node_modules` INSIDE the Linux container
+> and leaves no Windows `.cmd` shims.
+>
+> **2. `npm run lint` must never be chained behind a pipe.** `npm run lint | tail`
+> reports exit 0 even when lint fails, because the pipeline's status is `tail`'s.
+> That masked a real lint failure twice in one previous session. Redirect and
+> capture the code, as written above. Delete `lint.log` before committing.
+>
+> **3. "Expected: all green" is wrong for `npm run test:e2e`.** See the Task A7
+> Step 6 correction: 10 to 13 `reauth=1` failures are environmental on this host
+> and CI is the authority. Compare against that band and report the exact count.
+> `verify`, `verify:fast`, `lint` and `build` have no such tolerance and must be
+> clean.
 
 Then run `SWITCH TO COMMERCE` and the commerce matrix:
 
@@ -2238,15 +2847,32 @@ git status --porcelain
 Expected: `verify:fast` GREEN; the status lists exactly `tests/commerce/README.md`, `docs/adding-commerce-behaviour.md`, and (if it changed) `docs/generated-block-index.md`.
 
 ```bash
-git add tests/commerce/README.md docs/adding-commerce-behaviour.md docs/generated-block-index.md
+git add -- tests/commerce/README.md docs/adding-commerce-behaviour.md docs/generated-block-index.md
+git diff --cached --name-only
 git diff --cached --check
 ddev composer verify:fast
 git commit -m "docs(commerce): document the block-theme commerce profile"
 git status --porcelain
-git push -u origin feat/bt-task-4-commerce-hardening
 ```
 
 Expected: empty status after the commit.
+
+> **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — the push has
+> been REMOVED, and Step 7 below cannot work as written.**
+>
+> **Workers never push.** The orchestrator owns every remote operation in this
+> engagement. Stop after the commit and report.
+>
+> Step 7's `gh run list --branch feat/bt-task-4-commerce-hardening` would find
+> nothing, because **CI triggers only on `main` and `ci-capture/**`**. Pushing a
+> feature branch runs no workflow at all. The orchestrator verifies CI by pushing
+> a `ci-capture/<name>` ref, reading **step-level outcomes rather than the job
+> conclusion**, and deleting the ref afterwards. Reading the job conclusion instead
+> of the steps has given the wrong answer three times in this engagement — most
+> recently when a run reported "failure" while every required job was green,
+> because the exempt commerce job failed.
+>
+> Treat Step 7 as the orchestrator's, not yours.
 
 Report the Phase A commit range, gate results, and P1/P2/P3/P4 precondition status to the orchestrator. The orchestrator owns and updates `docs/superpowers/plans/2026-08-02-block-theme-tracking.md` after it reviews and merges this phase.
 
