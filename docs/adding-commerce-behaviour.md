@@ -194,7 +194,7 @@ ephemerally; the base jobs never install it.
 ## Verify
 
 ```sh
-ddev composer test:architecture         # WooCommerceIsolationTest, allowlist checks
+ddev composer test:architecture         # CommerceBoundaryTest, isolation + allow-list checks
 ddev composer test:unit
 bash scripts/enable-commerce            # once, to set up the store + fixtures
 ddev composer test:integration:commerce

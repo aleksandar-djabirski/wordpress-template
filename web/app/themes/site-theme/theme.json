@@ -47,7 +47,6 @@
       ]
     },
     "spacing": {
-      "custom": true,
       "defaultSpacingSizes": false,
       "blockGap": true,
       "units": [ "px", "rem", "em", "%" ],

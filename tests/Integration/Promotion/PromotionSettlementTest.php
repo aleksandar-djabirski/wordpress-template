@@ -591,6 +591,36 @@ final class PromotionSettlementTest extends IntegrationTestCase {
 	}
 
 	/**
+	 * Hardening gap: the hash-mismatch refusal must be as durable as every
+	 * other refusal. refuse_record() writes BOTH rollbackStatus and
+	 * rollbackRefusalReason; the restored-hash-mismatch path only wrote the
+	 * status, so the manifest record an operator inspects afterwards — and
+	 * the one a later run reads — carried a null reason while the outcome
+	 * and the report said refused with restored-hash-mismatch.
+	 */
+	public function test_a_restored_row_with_a_hash_mismatch_records_the_refusal_reason(): void {
+		$this->finalize_fixture();
+
+		// Corrupt the recorded original hash in the canonical manifest: the
+		// restore itself reproduces the real row byte-exactly, so only the
+		// post-restore verification can catch the discrepancy.
+		$canonical = $this->store->load_canonical( $this->promotion_id() );
+
+		$this->store->write_canonical(
+			$canonical->with_record_changes( 'templates:page', array( 'originalContentHash' => str_repeat( '0', 64 ) ) )
+		);
+
+		$record = $this->rollback->rollback( $this->manifest_path )['manifest']->record( 'templates:page' );
+
+		self::assertSame( 'restored-hash-mismatch', $record['rollbackStatus'] );
+		self::assertSame(
+			'restored-hash-mismatch',
+			$record['rollbackRefusalReason'],
+			'The manifest record must carry the refusal reason on the hash-mismatch path.'
+		);
+	}
+
+	/**
 	 * Bounded-review gap: a PARTIAL rollback — at least one restored record
 	 * and at least one refused — must settle as partially-rolled-back, never
 	 * as a clean rolled-back.

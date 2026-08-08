@@ -67,12 +67,16 @@ parts, and templates. Patterns provide sanctioned starting compositions.
   compositions, unlocked by default. `reference-landing-section.php` is the
   documented locked example.
 
-Commerce markup overrides remain a separate profile boundary:
-`site-theme/woocommerce/` is an escape hatch where
-`wc_locate_template()` prefers a theme file over WooCommerce's own. It is
-empty by design (see `woocommerce/README.md`'s override log) — a
-`woocommerce_*` hook must be ruled out first, and any override must be logged
-there.
+Commerce markup overrides are the commerce profile's boundary: the theme
+ships one declared block template per commerce request type, each a derived
+copy of the upstream template with only the header/footer template-part
+slugs rewritten. The ground truth is `tests/Architecture/commerce-template-list.php`:
+six owned templates (`archive-product`, `order-confirmation`, `page-cart`,
+`product-search-results`, `single-product`, `taxonomy-product_attribute`)
+plus two deliberately excluded upstream slugs (`coming-soon`, `page-checkout`).
+`CommerceBoundaryTest` fails whenever commerce block markup appears outside
+those declared templates, and the classic `site-theme/woocommerce/` PHP
+override directory is retired — a block theme has one rendering path.
 
 ## Source of truth
 
@@ -88,14 +92,16 @@ product/order data live in the database. Database structural overrides are
 `wp agency check-overrides` reports them and exits zero; `--fail-on-drift` is
 the opt-in gate.
 
+State ownership, in one paragraph: templates and template parts are a Git
+baseline plus database overrides, both promotable; Global Styles is the same
+plus the client's user-origin customisation, also promotable; navigation,
+synced patterns, page content, media references and fonts are database-owned
+and export/diff only. The full table — the single copy — lives at
+[`docs/state-reconciliation.md`](state-reconciliation.md#ownership-table).
+
 | Thing | Owned by | Notes |
 | --- | --- | --- |
-| Templates (`templates/*.html`) | Git baseline + DB overrides | `BlockThemeStructureTest` + `BlockTemplateIntegrityTest`; promotable through the state workflow |
-| Template parts (`parts/*.html`) | Git baseline + DB overrides | declared in `theme.json.templateParts`; editable in the Site Editor |
 | Blocks (`blocks/*/`) | Git (definition) + Database (`post_content` usage) | The block's code ships in Git; where/how it's placed on a page lives in post content |
-| Design tokens (`theme.json`) | Git baseline + DB user origin | a `wp_global_styles` row is a client customisation, reported not rejected |
-| Content (pages, posts, testimonials) | Database | Authored by editors; not versioned |
-| Navigation | Database | `core/navigation` resolves it at render time; Git-owned markup carries no `ref` |
 | Products (WooCommerce) | Database (behavior in Git) | Product data lives in `wp_posts`/`wp_postmeta`; the *rules* governing it live in `site-commerce/` |
 | Secrets (API keys, webhook URLs) | Environment variables / host secret store | Never Git, never the database — see `.env.example` and `AGENTS.md`'s environment-safety section |
 

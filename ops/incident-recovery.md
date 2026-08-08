@@ -61,7 +61,30 @@ production or exposing PII to whoever's debugging:
    restore-test cadence) — don't let a one-off debug copy become an
    unmonitored, unpatched, forgotten install.
 
-## 5. After the incident
+## 5. A promotion made the site wrong
+
+1. Do not hand-edit the database. Run
+   `wp agency promote-overrides --rollback --manifest=<path>` — it restores the
+   original records in dependency-safe order and verifies hashes afterwards.
+2. **Confirm is the point of no return.** `--rollback` after `--confirm` is
+   refused with `Promotion <id> is already confirmed; rollback is refused after
+   confirm.` and exits 1. That is safety, not an oversight: retention may prune
+   the backups at any moment after confirm, so a rollback that appeared to work
+   could silently restore nothing. Roll back BEFORE confirming — between
+   `--finalize` and `--confirm` is the window in which a promotion can still be
+   undone; after confirm the recovery path is a database restore
+   (`ops/restore.md`), not a rollback. The backups themselves do survive
+   confirm (`wp agency promotion-backups list` still shows them) — it is the
+   rollback that is refused, not the backup that is gone.
+3. Rollback REFUSES any record that a newer promotion or a client edit has
+   changed since finalisation, and any deleted record that has since been
+   re-created. Those refusals protect newer work — resolve each one by
+   decision, never by forcing the restore.
+4. A partial rollback exits non-zero and names every record it could not
+   restore. Treat that as an open incident until each named record is resolved.
+5. Full procedure and command lines: `docs/state-reconciliation.md`.
+
+## 6. After the incident
 
 Write down what happened, when, the trigger, the fix, and one concrete
 prevention step (a new architecture test, a new monitor, a process change)

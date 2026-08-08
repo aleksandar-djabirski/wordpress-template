@@ -22,11 +22,12 @@ Composition of blocks → pattern (`site-theme/patterns/`)
 Business rule → `site-core`
 External service → `site-integrations`
 WooCommerce behavior → `site-commerce`
-WooCommerce markup override → `site-theme/templates/<commerce-slug>.html` (block template; the classic `woocommerce/` directory is retired)
+WooCommerce markup override → `site-theme/templates/<commerce-slug>.html` (declared block template; the classic `woocommerce/` directory is retired)
+State export / promotion → `agency-platform/src/State/` (never business logic)
 
 ## Layer ownership
 
-- `agency-platform` (mu-plugin): guardrails only — roles, editor block policy, server-side save validation, admin-screen boundary, app-password lockdown, file-mod guard, database-override detection, `wp agency *` WP-CLI commands. Never business logic, never WooCommerce, never a dependency on any other project layer.
+- `agency-platform` (mu-plugin): guardrails only — roles, editor block policy, server-side save validation, admin-screen boundary, app-password lockdown, file-mod guard, database-override detection, state export/diff, promotion lifecycle, promotion backups, `wp agency *` WP-CLI commands. Never business logic, never WooCommerce, never a dependency on any other project layer.
 - `site-core`: business rules plus the public `SiteCore\Contracts\*` API — the ONLY site-core namespace other layers may reference. Never renders markup, never makes network calls, never references WooCommerce or the theme.
 - `site-integrations`: implementations of `SiteCore\Contracts\*` that talk outward (webhooks, APIs). The base profile's only outbound-HTTP home. Never referenced by site-core.
 - `site-commerce`: WooCommerce-only behavior; activates only when WooCommerce is present (`Requires Plugins` header). Its `src/Integrations/` is the commerce profile's outbound-HTTP home. Never referenced by the base profile.
@@ -42,11 +43,11 @@ WooCommerce markup override → `site-theme/templates/<commerce-slug>.html` (blo
 - `functions.php` stays ≤50 lines and only calls `ThemeBootstrap::boot()`; the theme contains no root-level PHP templates and no `templates/*.php` (`ThemeBootstrapTest`, `BlockThemeStructureTest`).
 - No `components/`, `layouts/`, `inc/`, `includes/`, `helpers/`, `misc/`, `common/`, `lib/`, or `utils/` directories in the theme or any plugin (`DirectoryRulesTest`).
 - Every block needs a valid `block.json`: name `agency/<folder>`, integer `apiVersion`, `file:` asset references that resolve inside the block (`BlockManifestTest`).
-- WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) may only appear in `site-commerce/`, `site-theme/woocommerce/`, `tests/commerce/`, or a reviewed entry in `tests/Architecture/woocommerce-allowlist.php` (`WooCommerceIsolationTest`).
+- WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) may only appear in `site-commerce/`, the declared commerce block templates (`site-theme/templates/<commerce-slug>.html`, enforced by `CommerceBoundaryTest`), `tests/commerce/`, or a reviewed entry in `tests/Architecture/woocommerce-allowlist.php` (`WooCommerceIsolationTest`).
 - Outbound HTTP (`wp_remote_*`, cURL, Guzzle, `file_get_contents('http...')`) only inside `site-integrations/` or `site-commerce/src/Integrations/` (`IntegrationBoundaryTest`).
 - CSS colors must be design tokens (`var(--wp--preset--color--*)` / `var(--wp--custom--*)`), never raw hex/rgb (stylelint `declaration-strict-value`).
 - `assets/global/` holds exactly `frontend-reset.css` + `shared.css` + `editor.css`; `frontend-reset.css` is never loaded into the editor.
-- Git-owned templates and parts carry no hard-coded `ref` and no inline `style` attribute — colours and spacing live in `theme.json` and `assets/global/shared.css` (`BlockThemeStructureTest`).
+- Git-owned templates and parts carry no hard-coded `ref` — colours and spacing live in `theme.json` and `assets/global/shared.css` (`BlockThemeStructureTest`).
 - `docs/generated-block-index.md` must match `php scripts/generate-block-index`'s output — run it after any block/pattern change and commit the result (`GeneratedIndexFreshnessTest`).
 
 ## Block decision order
@@ -68,20 +69,24 @@ When changing npm dependencies, regenerate the lock with `npx -y npm@10 install`
 
 - `ddev composer verify:fast` — validate, audit, phpcs, phpstan, deptrac, architecture + unit tests. No database. Run before every commit.
 - `ddev composer verify` — `verify:fast` + `test:integration` (needs the DDEV database).
-- `ddev composer test:architecture` / `test:unit` / `test:integration` / `lint:php` / `analyse` / `deptrac` / `audit` — individual steps.
+- `ddev composer test:architecture` / `test:unit` / `test:integration` / `test:integration:cli` / `lint:php` / `analyse` / `deptrac` / `audit` — individual steps.
+- `wp agency state-export` / `state-diff` — export and diff Site Editor state against the Git baseline; see `docs/state-reconciliation.md`.
+- `wp agency promote-overrides --prepare|--seal|--finalize|--confirm|--rollback|--heartbeat` — the promotion lifecycle; see `docs/state-reconciliation.md`.
+- `wp agency promotion-backups list|prune` — inspect and prune the protected promotion backups; see `docs/state-reconciliation.md`.
+- `scripts/promote-overrides` — deployment-side wrapper (finalize → verify → confirm/rollback); never run on the WordPress host; see `docs/state-reconciliation.md`.
 - `npm run build` / `npm run start` — production/watch block build (wp-scripts).
 - `npm run lint` (`lint:js` + `lint:css`) — ESLint + Stylelint.
 - `npm run test:e2e` / `test:visual` / `test:accessibility` — Playwright; needs a running site (`WP_BASE_URL`, defaults to the DDEV URL).
 - `npm run test:parity` — migration + editing parity; needs a running site.
 - `npm run capture:migration-baseline` — one-off pre-migration capture.
-- Commerce profile (optional; WooCommerce stays OUT of the base template): `bash scripts/enable-commerce` installs WooCommerce (ephemeral `composer require` — commit it only for a real commerce client), configures a deterministic store + fixtures. Then `ddev composer test:integration:commerce` (WooCommerce-backed PHPUnit, incl. the HPOS sanitize step) and `COMMERCE=1 npm run test:e2e:commerce` (storefront journeys). Neither runs in base `verify`/`test:integration`; CI's `commerce-e2e` job runs both.
+- Commerce profile (optional; WooCommerce stays OUT of the base template): `bash scripts/enable-commerce` installs WooCommerce (ephemeral `composer require` — commit it only for a real commerce client), configures a deterministic store + fixtures (native block cart/checkout, and a site-header template-part override carrying the Mini-Cart block). Then `ddev composer test:integration:commerce` (WooCommerce-backed PHPUnit, incl. the HPOS sanitize step) and `COMMERCE=1 npm run test:e2e:commerce` (storefront journeys). Neither runs in base `verify`/`test:integration`; CI's `commerce-e2e` job runs both.
 - `scripts/setup` — full bootstrap from a fresh clone (composer install, `.env` + salts, WP core install, theme/plugin activation, `npm ci && npm run build`, client-editor test user). Run inside DDEV.
 - `scripts/verify` — mirrors CI: `composer verify`, `npm run lint`, `npm run build`.
 - `scripts/generate-block-index`, `scripts/check-database-overrides`, `scripts/sanitize-database`, `scripts/verify-environment`, `scripts/rename-project`, `scripts/enable-commerce` — the sanitize/check/verify-env three are thin wrappers around `wp agency check-overrides|sanitize|verify-env`.
 
 ## Environment safety
 
-Environment is read via core `wp_get_environment_type()`, never `WP_ENV` directly — Bedrock sets `WP_ENVIRONMENT_TYPE` from `WP_ENV`. Lead delivery resolves to `SiteIntegrations\LeadDelivery\FakeLeadDelivery` everywhere except when the environment is `production`, `AGENCY_DISABLE_OUTBOUND_WEBHOOKS` is not `true`, and `LEAD_WEBHOOK_URL` is set — only then does `WebhookLeadDelivery` fire. `AgencyPlatform\Security\MailGuard` suppresses outbound `wp_mail()` email outside production (via `pre_wp_mail`, returning `false`; a plugin calling an SMTP/API directly bypasses `wp_mail()` and is out of scope) unless `AGENCY_ALLOW_OUTBOUND_EMAIL` is defined true (a deliberate opt-out surface for a safe test mailbox; `verify-env` warns but does not fail on it). Run `scripts/sanitize-database` on any database imported from production before using it locally or in staging — it is a step-based, idempotent **baseline** scrub (users: email/URL/display name/author slug/profile meta; comments: email/URL/author/IP/agent; sessions; application passwords; `blog_public`), extensible via the `agency_platform_sanitize_steps` filter (site-commerce adds WooCommerce order + registered-customer PII scrubbing when Woo is active), with a `--include-admins` flag. It covers this starter's core (and, with commerce active, known WooCommerce) PII only — audit third-party plugins for their own PII tables before sharing any dump (see `ops/launch-checklist.md`). Never commit secrets — use environment variables (`.env`, untracked) or the host's secret store.
+Environment is read via core `wp_get_environment_type()`, never `WP_ENV` directly — Bedrock sets `WP_ENVIRONMENT_TYPE` from `WP_ENV`. Lead delivery resolves to `SiteIntegrations\LeadDelivery\FakeLeadDelivery` everywhere except when the environment is `production`, `AGENCY_DISABLE_OUTBOUND_WEBHOOKS` is not `true`, and `LEAD_WEBHOOK_URL` is set — only then does `WebhookLeadDelivery` fire. `AgencyPlatform\Security\MailGuard` suppresses outbound `wp_mail()` email outside production (via `pre_wp_mail`, returning `false`; a plugin calling an SMTP/API directly bypasses `wp_mail()` and is out of scope) unless `AGENCY_ALLOW_OUTBOUND_EMAIL` is defined true (a deliberate opt-out surface for a safe test mailbox; `verify-env` warns but does not fail on it). Run `scripts/sanitize-database` on any database imported from production before using it locally or in staging — it is a step-based, idempotent **baseline** scrub (users: email/URL/display name/author slug/profile meta; comments: email/URL/author/IP/agent; sessions; application passwords; `blog_public`), extensible via the `agency_platform_sanitize_steps` filter (site-commerce adds WooCommerce order + registered-customer PII scrubbing when Woo is active), with a `--include-admins` flag. It covers this starter's core (and, with commerce active, known WooCommerce) PII only — audit third-party plugins for their own PII tables before sharing any dump (see `ops/launch-checklist.md`). Never commit secrets — use environment variables (`.env`, untracked) or the host's secret store. State bundles and promotion manifests are signed with the HMAC keyring `AGENCY_PROMOTION_HMAC_KEYS` (a JSON keyring) plus `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID` (`.env` carries both commented out, lines 62-63); a missing keyring is a hard failure — every export/prepare/seal/finalize exits 1, with no WordPress-salt fallback.
 
 ## Editing model
 
@@ -93,4 +98,4 @@ Run `ddev composer verify:fast` before every commit; run `ddev composer test:int
 
 ## Where docs live
 
-`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/editing-strictness.md` (per-project editing-lockdown dials), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/block-theme-migration-baseline.md` (the Phase 0 record), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `launch-checklist.md`, `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.
+`docs/architecture.md` (layers, dependency rules, source of truth), `docs/ownership-rules.md` (task → owning layer), `docs/editing-strictness.md` (per-project editing-lockdown dials), `docs/adding-a-block.md`, `docs/adding-an-integration.md`, `docs/adding-commerce-behaviour.md`, `docs/validation-scenarios.md` (guardrail test scenarios), `docs/state-reconciliation.md` (state export, promotion, rollback, recovery), `docs/block-theme-migration-baseline.md` (the Phase 0 record), `docs/mcp.md` (MCP policy). `ops/` holds hosting-agnostic operational contracts: `launch-checklist.md`, `backup.md`, `restore.md`, `update-process.md`, `monitoring.md`, `incident-recovery.md`.

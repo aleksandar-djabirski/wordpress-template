@@ -5,6 +5,61 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The block-theme migration. `site-theme` becomes a native block theme, client
+roles gain full visual Site Editor control within the approved block system,
+and a state export / promotion subsystem lets Site Editor changes be reviewed
+and promoted back into Git.
+
+### Added
+
+- **State export and diff** (`wp agency state-export`, `wp agency state-diff`):
+  nine providers covering templates, template parts, Global Styles, navigation,
+  synced patterns, content, media references, fonts and Additional CSS. Bundles
+  are HMAC-signed and default to the gitignored `var/agency-state/`.
+- **Promotion lifecycle** (`wp agency promote-overrides`): `--prepare`,
+  `--seal`, `--finalize`, `--confirm`, `--rollback` and `--heartbeat`, with
+  per-record locks, protected backups, reference refusal, and a deployment-side
+  wrapper at `scripts/promote-overrides`. Templates, template parts and Global
+  Styles are promotable; the other six providers are export-and-diff only.
+- **Promotion backups** (`wp agency promotion-backups list|prune`), retained 30
+  days by default.
+- **The commerce profile on the block theme**: six declared commerce block
+  templates derived from upstream, a `site-commerce/header-mini-cart` pattern,
+  and native block Cart/Checkout seeding in `scripts/enable-commerce`.
+- **`docs/state-reconciliation.md`** — the state runbook, including the
+  revision-history trade-off clients must be told about before the first
+  promotion.
+- Architecture guardrails: `CommerceBoundaryTest`, `BlockThemeStructureTest`,
+  and the commerce template ground truth in
+  `tests/Architecture/commerce-template-list.php`.
+
+### Changed
+
+- **`site-theme` is a native block theme.** `templates/*.html` are the only
+  rendering path, `parts/*.html` hold the chrome and are declared in
+  `theme.json.templateParts`, and `functions.php` only calls
+  `ThemeBootstrap::boot()`.
+- **The editing model.** `client_editor` and `client_shop_manager` gain
+  `edit_theme_options` and full Site Editor access, while `edit_css` and
+  `customize` map to `do_not_allow`. `AdminScreenPolicy` refuses the theme,
+  file-editor, Customizer, widget and nav-menu screens outright, and the block
+  policy is re-applied server side on save.
+- `ops/backup.md`, `ops/restore.md`, `ops/update-process.md`,
+  `ops/incident-recovery.md`, `ops/monitoring.md` and `ops/launch-checklist.md`
+  now cover state bundles, promotion backups, promotion locks and the Site
+  Editor posture.
+
+### Removed
+
+- Every classic theme path: root template delegates, `header.php` / `footer.php`,
+  `templates/*.php`, and `SiteTheme\Support\Parts`.
+- `AgencyPlatform\Editor\SiteEditorLockdown`, replaced by `CapabilityPolicy`,
+  `AdminScreenPolicy`, `BlockPolicy` and `SaveValidation`.
+- The classic `site-theme/woocommerce/` PHP override directory. Commerce markup
+  overrides are block templates under `templates/`.
+
 ## [0.1.0] - 2026-07-18
 
 Initial release of the agency starter.

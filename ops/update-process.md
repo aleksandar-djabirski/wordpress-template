@@ -46,6 +46,35 @@ this weekly schedule — enable it per project.
    major bump — a manual admin-area check) before considering the update
    complete.
 
+## WordPress core updates and the Theme JSON adapter
+
+Global Styles promotion reads and writes WordPress's theme.json origins through
+a single adapter that fails closed when it does not recognise the core API
+shape. A WordPress update can therefore break promotion silently if the adapter
+is not re-verified.
+
+On every WordPress dependency update (including a Dependabot PR):
+
+1. Run the full base gate (`ddev composer verify`).
+2. Run the adapter's compatibility tests (they are part of the integration
+   suite; see `docs/state-reconciliation.md`).
+3. If the adapter fails closed, do NOT merge the update until the adapter is
+   updated — a passing site with a broken adapter means promotion silently
+   stops working.
+
+This repository targets exactly one WordPress version — the one `composer.lock`
+resolves. Do not add a version matrix.
+
+## Deploying while a promotion is in flight
+
+A promotion holds per-record locks from `--finalize` until `--confirm` or
+`--rollback` — for the records it actually PROMOTED. Records that `--finalize`
+refused or self-restored have their locks released in its own teardown. Do not start a second deployment that promotes overlapping
+records while the first is unresolved: it exits `3` (lock conflict) by design.
+If a deployment was abandoned mid-promotion, its locks expire after their TTL
+and become reclaimable; confirm the abandoned promotion's state with
+`wp agency promotion-backups list` before reclaiming.
+
 ## Scheduled maintenance (`.github/workflows/scheduled-maintenance.yml`)
 
 Runs weekly independent of any push/PR: a `composer audit` +

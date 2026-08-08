@@ -12,8 +12,7 @@ table. This expands each common task.
 - **May change**: the block markup and the `.site-header` / `.site-footer`
   rules in `shared.css`.
 - **Must not change**: nothing at the theme root — a block theme has no
-  `header.php`/`footer.php`. Do not add an inline `style` attribute to the
-  Git-owned markup.
+  `header.php`/`footer.php`.
 - **Checks**: `ddev composer test:architecture`
   (`BlockThemeStructureTest`, `GlobalAssetRulesTest`),
   `ddev composer test:integration` (`BlockTemplateIntegrityTest`),
@@ -34,12 +33,15 @@ table. This expands each common task.
 
 ## Change a product card / product listing
 
-- **Owns it**: `site-commerce` (behavior) + `site-theme/woocommerce/`
-  (markup override, last resort) or a `woocommerce_*` hook from
-  `site-commerce/src/Products/`.
-- **May change**: `site-commerce/src/Products/*`; a new, logged override
-  under `site-theme/woocommerce/` only after ruling out a hook (see
-  `docs/adding-commerce-behaviour.md`).
+- **Owns it**: `site-commerce` (behavior) + a declared commerce block
+  template (`site-theme/templates/<commerce-slug>.html`, the block theme's
+  only commerce markup override surface) or a `woocommerce_*` hook from
+  `site-commerce/src/Products/`. The declared list is ground-truthed by
+  `tests/Architecture/commerce-template-list.php` and enforced by
+  `CommerceBoundaryTest`.
+- **May change**: `site-commerce/src/Products/*`; a declared commerce
+  template at `site-theme/templates/<slug>.html` only after ruling out a
+  hook (see `docs/adding-commerce-behaviour.md`).
 - **Must not change**: anything under `site-core`, `site-integrations`, or
   the base theme templates — commerce logic never leaks into the base
   profile.
@@ -92,9 +94,30 @@ table. This expands each common task.
 - **Owns it**: `site-commerce/src/`. See
   `docs/adding-commerce-behaviour.md`.
 - **Must not do**: reference a `WC_*`/`wc_*`/`woocommerce_*` symbol
-  anywhere outside `site-commerce/`, `site-theme/woocommerce/`,
-  `tests/commerce/`, or a reviewed `tests/Architecture/woocommerce-allowlist.php`
-  entry.
+  anywhere outside `site-commerce/`, the declared commerce block templates
+  (`site-theme/templates/*.html`), `tests/commerce/`, or a reviewed
+  `tests/Architecture/woocommerce-allowlist.php` entry.
+
+## Promote a Site Editor override into Git
+
+- **Owns it**: the state subsystem in `agency-platform/src/State/` —
+  export, diff, the promotion lifecycle and the backup retention — never a
+  project layer.
+- **May change**: a state provider at
+  `agency-platform/src/State/Providers/`; a project plugin may ADD providers
+  by returning `StateProvider` instances from a named class on the
+  `agency_platform_state_providers` filter.
+- **See**: `docs/state-reconciliation.md` for the commands, the exit codes
+  and the ownership table.
+
+## Add a commerce pattern clients can insert
+
+- **Owns it**: `site-commerce` — register the pattern from
+  `SiteCommerce\Theme\CommercePatterns`. Never a theme pattern: commerce
+  block markup in a theme pattern renders as a broken block without
+  WooCommerce (`CommerceBoundaryTest`).
+- **Must not do**: put commerce block markup in a base template, a template
+  part, or a theme pattern.
 
 ## Tighten how much customers can edit
 

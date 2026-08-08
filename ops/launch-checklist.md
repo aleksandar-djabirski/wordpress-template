@@ -7,18 +7,51 @@ the outcome (who, when, and the choice made) in the project's change log;
 
 ## Editing model
 
-- [ ] **Editing-strictness dial explicitly chosen and recorded.** The default
-      is loose: customers compose pages from the block allow-list freely. Decide
-      per project whether to tighten it (trim the allow-list, `templateLock` a
-      post type, or drop page capabilities) and write down which dial you picked
-      and why — see `docs/editing-strictness.md`. Not choosing is itself a
-      choice; make it on purpose.
+- [ ] **Site Editor posture understood and recorded.** Client roles have full
+      visual Site Editor control within the approved block system: templates,
+      template parts, navigation, Global Styles, and page composition. They
+      cannot switch or install themes/plugins, edit files, use the code editor,
+      insert HTML or Shortcode blocks, or edit Additional CSS. Confirm the
+      client has been told what they can and cannot change, and record any
+      per-project tightening (`docs/editing-strictness.md`).
+- [ ] **Revision-history trade-off communicated.** Promotion resets the database
+      override it promotes, so Site Editor revision history for that record may
+      become unreachable in the editor afterwards. Confirm the client knows this
+      before the first promotion — see
+      `docs/state-reconciliation.md#revision-history-trade-off`.
 - [ ] **Commerce clients: shop-manager scope reviewed.** `client_shop_manager`
       carries `manage_woocommerce`, which grants access to WooCommerce settings
       (core parity, not a starter decision). Confirm that scope is acceptable
       for this client, or trim it per project. See
       `docs/editing-strictness.md#commerce-role-dial` for the exact cap to drop
       and what it does (and does not) cost.
+
+## State reconciliation
+
+- [ ] **HMAC keyring provisioned in every environment that signs or verifies.**
+      `AGENCY_PROMOTION_HMAC_KEYS` (a JSON keyring) and
+      `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID` must be set in local/CI
+      preparation and on the production host. **The starter ships neither** —
+      `.env.example` carries both commented out — so this is work to do, not a
+      default to confirm. Until they are set, `wp agency state-export` exits 1
+      with `AGENCY_PROMOTION_HMAC_KEYS is not set: no HMAC key is available.`
+      A missing or empty keyring is a hard failure by design — there is no
+      fallback to WordPress salts, which differ per environment. Record where
+      the keys live and who can rotate them.
+- [ ] **`AGENCY_TARGET_SITE_UUID` recorded for production**, and a rotation plan
+      exists (add the new key, advance the signing key id, keep the old key
+      until outstanding manifests and backups expire).
+- [ ] **Promotion rehearsed once on staging.** Run the full proof in
+      `docs/state-reconciliation.md#verification-proofs` end to end —
+      export → diff → prepare → commit → seal → deploy → finalise → verify →
+      confirm, plus one deliberate verification failure that auto-rolls back.
+      A promotion system that has never been rehearsed is not a launch-ready
+      system.
+- [ ] **Promotion backup retention decided.** Confirm the retention window and
+      that `wp agency promotion-backups prune` is scheduled or owned by a named
+      person.
+- [ ] **`var/agency-state/` is not served by the web server** and is excluded
+      from any deployment artifact that leaves the host.
 
 ## Data safety
 
@@ -40,10 +73,11 @@ the outcome (who, when, and the choice made) in the project's change log;
       deterministic, publicly-known accounts (`admin`, `client-editor`,
       `shop-manager`, `test-customer` — each with its username as its password),
       fixture products ("Test Simple Product", "Test Variable Product"), and
-      coupon `TESTCOUPON`. These land in production only if someone ran a local
-      script against the wrong database; the scripts now refuse to run outside
-      `development`/`local`, so getting them there is an explicit act. Confirm
-      none are present before go-live, and remove any that are.
+      coupon `TESTCOUPON`, and a site-header template-part database override
+      carrying the Mini-Cart block. These land in production only if someone
+      ran a local script against the wrong database; the scripts now refuse to
+      run outside `development`/`local`, so getting them there is an explicit
+      act. Confirm none are present before go-live, and remove any that are.
 
 ## Environment
 
