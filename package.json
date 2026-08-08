@@ -35,12 +35,15 @@
     "stylelint-config-standard": "^40.0.0",
     "stylelint-declaration-strict-value": "^1.11.1"
   },
-  "//overrides": "Dev-only security overrides for advisories in @wordpress/scripts' transitive tree. Production audit (npm audit --omit=dev) is already clean; these force patched versions of build-tooling deps that process repo/PR content. Every override here is verified to keep `npm ci` lock-sync, lint, and a byte-identical block build green (webpack-dev-server + uuid additionally verified by booting `npm run start`). Regenerate the lock with `npx -y npm@10 install` (see AGENTS.md). DROPPED, not fixable safely: minimatch — the only vulnerable copy (3.0.8) is pinned by markdownlint-cli via `~3.0.5`, and npm@10 refuses to force it to a patched 3.1.x (both nested and `minimatch@<3.1.4` version-selector overrides leave it 'invalid' at 3.0.8), while a bare tree-wide `minimatch` override would destructively downgrade the 9.x/10.x minimatch that eslint and webpack tooling require. The 3 residual highs (minimatch, markdownlint-cli, @wordpress/scripts) all chain to that single dev-only, never-invoked minimatch.",
+  "//overrides": "Dev-only security overrides for advisories in @wordpress/scripts' transitive tree. Production audit (npm audit --omit=dev) is already clean; these force patched versions of build-tooling deps that process repo/PR content. Every override here is verified to keep `npm ci` lock-sync, lint, and a byte-identical block build green (webpack-dev-server + uuid additionally verified by booting `npm run start`). Regenerate the lock with `npx -y npm@10 install` (see AGENTS.md). fast-uri and ip-address are tree-wide patches — each has exactly one copy in the tree and every consumer range accepts the patch. minimatch uses a version selector so only the vulnerable 3.x copy (markdownlint-cli's `~3.0.5`) is bumped; the 9.x and 10.x copies eslint and webpack tooling require are never forced backwards.",
   "overrides": {
     "adm-zip": "^0.6.0",
     "serialize-javascript": "^7.0.5",
     "uuid": "^11.1.1",
     "webpack-dev-server": "^5.2.5",
-    "markdown-it": "^14.2.0"
+    "markdown-it": "^14.2.0",
+    "fast-uri": "^3.1.5",
+    "ip-address": "^10.3.1",
+    "minimatch@<3.1.4": "^3.1.3"
   }
 }
