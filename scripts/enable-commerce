@@ -182,11 +182,36 @@ echo "==> [2/11] Activating woocommerce + site-commerce"
 # Enable HPOS so orders live in the wc_orders / wc_order_addresses tables — the
 # storage backend CommerceSanitizeStep's HPOS branch scrubs and the commerce
 # integration suite exercises. `wp wc hpos enable` is the current command
-# (`wp wc cot enable` is deprecated since WooCommerce 8.9) and is idempotent:
-# it warns (exit 0) when HPOS is already on. Safe on a fresh store because no
-# orders exist yet, so there is nothing to migrate.
+# (`wp wc cot enable` is deprecated since WooCommerce 8.9).
+#
+# `wp wc hpos enable` is NOT idempotent, whatever its name suggests. Measured
+# against WooCommerce 11.0.0 on a freshly seeded store with ZERO orders:
+#
+#     Running pre-enable checks...
+#     Warning: HPOS is already enabled.        -> exit 1
+#
+# and `wp wc hpos status` at that moment reports enabled yes, compatibility
+# mode no, 0 unsynced orders, 0 orders subject to cleanup. So the failure is
+# purely "the setting is already correct", not a migration problem. WooCommerce
+# turns HPOS on during activation on a fresh install, so under `set -e` step 3
+# aborted the whole script on the FIRST run, not merely on a re-run.
+#
+# So: skip when it is already on, enable when it is not, and VERIFY either way.
+# The verification is the load-bearing part — the commerce integration suite
+# and CommerceSanitizeStep's HPOS branch both depend on HPOS actually being on,
+# and a silent skip that left it off would produce a green suite against the
+# wrong storage backend.
 echo "==> [3/11] Enabling High-Performance Order Storage (HPOS)"
-"${WP[@]}" wc hpos enable
+if [ "$("${WP[@]}" option get woocommerce_custom_orders_table_enabled 2>/dev/null || true)" = "yes" ]; then
+  echo "    HPOS is already enabled — skipping."
+else
+  "${WP[@]}" wc hpos enable
+fi
+
+if [ "$("${WP[@]}" option get woocommerce_custom_orders_table_enabled 2>/dev/null || true)" != "yes" ]; then
+  echo "FAILED: HPOS is not enabled after step 3; the commerce suites would run against the wrong order storage." >&2
+  exit 1
+fi
 
 # --- 4. Shop / cart / checkout / my-account pages ----------------------------
 # WooCommerce creates these on activation; running the install_pages tool again
