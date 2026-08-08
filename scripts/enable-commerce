@@ -4,6 +4,9 @@
 # WooCommerce, activates it alongside site-commerce, configures a minimal
 # deterministic store, and creates the fixtures the commerce test suites
 # (tests/commerce/) assert against.
+# Cart and Checkout keep WooCommerce's native BLOCK content (verified, never
+# hand-written), and the site-header template part gets a database override
+# carrying the Mini-Cart block.
 #
 # DOCUMENTATION-GRADE: this script is meant to be read top to bottom. It is
 # the canonical description of how the commerce profile is switched on, so
@@ -120,7 +123,7 @@ fi
 # resolves from is already declared in composer.json; only the `require` is
 # added here. EPHEMERAL for the template, COMMITTED for a real client (see the
 # header). Skipped when WooCommerce is already required, so re-runs are no-ops.
-echo "==> [1/10] Requiring WooCommerce via Composer (LOCAL edit to composer.json/lock)"
+echo "==> [1/11] Requiring WooCommerce via Composer (LOCAL edit to composer.json/lock)"
 if "${COMPOSER[@]}" show wpackagist-plugin/woocommerce >/dev/null 2>&1; then
   echo "    wpackagist-plugin/woocommerce already installed — skipping require."
 else
@@ -132,7 +135,7 @@ fi
 # booted branch (class_exists('WooCommerce') is now true), wiring
 # ExampleProductRules and CommerceSanitizeStep. `wp plugin activate` is
 # idempotent.
-echo "==> [2/10] Activating woocommerce + site-commerce"
+echo "==> [2/11] Activating woocommerce + site-commerce"
 "${WP[@]}" plugin activate woocommerce site-commerce
 
 # --- 3. High-Performance Order Storage (HPOS) --------------------------------
@@ -142,31 +145,49 @@ echo "==> [2/10] Activating woocommerce + site-commerce"
 # (`wp wc cot enable` is deprecated since WooCommerce 8.9) and is idempotent:
 # it warns (exit 0) when HPOS is already on. Safe on a fresh store because no
 # orders exist yet, so there is nothing to migrate.
-echo "==> [3/10] Enabling High-Performance Order Storage (HPOS)"
+echo "==> [3/11] Enabling High-Performance Order Storage (HPOS)"
 "${WP[@]}" wc hpos enable
 
 # --- 4. Shop / cart / checkout / my-account pages ----------------------------
 # WooCommerce creates these on activation; running the install_pages tool again
 # re-creates any that are missing and is idempotent otherwise.
 #
-# CLASSIC cart/checkout: WooCommerce 8+ ships the block-based Cart/Checkout
-# pages by default, whose form fields hydrate client-side (they are absent from
-# the server-rendered HTML). The commerce e2e journey drives stable,
-# server-rendered selectors, so the cart/checkout pages are switched to the
-# classic shortcodes ([woocommerce_cart] / [woocommerce_checkout]) — a
-# fully-supported WooCommerce configuration that makes the automated checkout
-# deterministic. Idempotent: skipped once the page already holds the shortcode.
-echo "==> [4/10] Ensuring shop/cart/checkout/my-account pages exist (classic cart/checkout)"
-"${WP[@]}" wc tool run install_pages --user=admin >/dev/null
+# NATIVE BLOCK cart/checkout: this script used to swap both pages to the
+# classic [woocommerce_cart] / [woocommerce_checkout] shortcodes because the
+# block Cart/Checkout hydrate client-side and the old server-rendered selectors
+# were easier to automate. On a block theme that would prove the wrong thing —
+# the commerce suite must exercise the block workflow the client actually gets.
+# So the pages now keep WooCommerce's own default BLOCK content.
+#
+# The markup is never hand-written here (it changes between WooCommerce
+# releases). Instead: any page still holding the legacy shortcode is force
+# deleted, and install_pages recreates it with the CURRENT default block
+# content. Then both pages are verified — a store whose checkout silently fell
+# back to a shortcode must fail loudly, not run a green test suite against the
+# wrong rendering path.
+echo "==> [4/11] Ensuring shop/cart/checkout/my-account pages exist (native block cart/checkout)"
 for page in cart checkout; do
   page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r')"
   if [ -n "${page_id}" ] \
-      && ! "${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | grep -q "\[woocommerce_${page}\]"; then
-    "${WP[@]}" post update "${page_id}" --post_content="[woocommerce_${page}]" >/dev/null
-    echo "    set ${page} page (#${page_id}) to the classic [woocommerce_${page}] shortcode."
-  else
-    echo "    ${page} page already uses the classic shortcode — skipping."
+      && "${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | grep -q "\[woocommerce_${page}\]"; then
+    "${WP[@]}" post delete "${page_id}" --force >/dev/null
+    echo "    removed the legacy shortcode ${page} page (#${page_id}); it will be recreated with block content."
   fi
+done
+
+"${WP[@]}" wc tool run install_pages --user=admin >/dev/null
+
+for page in cart checkout; do
+  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r')"
+  if [ -z "${page_id}" ] \
+      || ! "${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | grep -q "wp:woocommerce/${page}"; then
+    echo "" >&2
+    echo "FAILED: the ${page} page does not hold the native block content." >&2
+    echo "  Expected a 'wp:woocommerce/${page}' block in page #${page_id:-<none>}." >&2
+    echo "  The commerce suites must exercise the block checkout, not a shortcode fallback." >&2
+    exit 1
+  fi
+  echo "    ${page} page (#${page_id}) holds the native block content."
 done
 
 # --- 5. Store basics ---------------------------------------------------------
@@ -181,7 +202,7 @@ done
 # shop/product/cart/checkout pages behind a coming-soon screen until a store
 # owner launches. That screen would make every storefront e2e journey fail, so
 # the store is explicitly taken live here.
-echo "==> [5/10] Configuring store basics (live store, country/address, guest checkout; currency stays USD)"
+echo "==> [5/11] Configuring store basics (live store, country/address, guest checkout; currency stays USD)"
 "${WP[@]}" option update woocommerce_coming_soon "no" >/dev/null
 "${WP[@]}" option update woocommerce_store_pages_only "no" >/dev/null
 "${WP[@]}" option update woocommerce_default_country "US:CA" >/dev/null
@@ -197,7 +218,7 @@ echo "    store live (coming-soon off), base country US:CA, guest checkout enabl
 # woocommerce_cod_settings option; setting the whole array (WC merges any
 # missing keys with the gateway's field defaults) enables it. Idempotent —
 # re-running reports the value as unchanged.
-echo "==> [6/10] Enabling the Cash on Delivery (COD) payment gateway"
+echo "==> [6/11] Enabling the Cash on Delivery (COD) payment gateway"
 "${WP[@]}" option update woocommerce_cod_settings --format=json \
   '{"enabled":"yes","title":"Cash on delivery"}' >/dev/null
 echo "    COD enabled."
@@ -207,7 +228,7 @@ echo "    COD enabled."
 # WooCommerce blocks the order. Add a single Free Shipping method to the
 # built-in "Locations not covered by your other zones" zone (id 0) so shipping
 # always resolves for any address, keeping the e2e checkout deterministic.
-echo "==> [7/10] Ensuring a Free Shipping method on the default zone"
+echo "==> [7/11] Ensuring a Free Shipping method on the default zone"
 if "${WP[@]}" wc shipping_zone_method list 0 --user=admin --field=method_id 2>/dev/null \
     | grep -q 'free_shipping'; then
   echo "    a shipping method already exists on the default zone — skipping."
@@ -221,7 +242,7 @@ fi
 # fixtures. Each is created only when absent (looked up by slug), so re-running
 # never duplicates them. `wp wc` product/coupon commands go through the REST
 # controller, so they need --user=admin.
-echo "==> [8/10] Creating fixture products and coupon (idempotent)"
+echo "==> [8/11] Creating fixture products and coupon (idempotent)"
 
 if [ -z "$("${WP[@]}" post list --post_type=product --name=test-simple-product --field=ID 2>/dev/null | tr -d '\r')" ]; then
   "${WP[@]}" wc product create --name="Test Simple Product" --type=simple \
@@ -258,7 +279,7 @@ fi
 # starter's restricted shop role (AgencyPlatform\Roles\ShopRole, registered
 # only when WooCommerce is active); the `customer` role is WooCommerce's own,
 # used by the e2e account-history journey to place an order tied to an account.
-echo "==> [9/10] Ensuring commerce test users exist (LOCAL-ONLY credentials)"
+echo "==> [9/11] Ensuring commerce test users exist (LOCAL-ONLY credentials)"
 if "${WP[@]}" user get shop-manager >/dev/null 2>&1; then
   echo "    user 'shop-manager' already exists — skipping."
 else
@@ -277,12 +298,64 @@ else
   echo "    created 'test-customer' (role: customer, LOCAL-ONLY password: test-customer)."
 fi
 
-# --- 10. Permalinks ----------------------------------------------------------
+# --- 10. Header Mini-Cart (database template-part override) ------------------
+# The base theme's parts/site-header.html stays commerce-free: it ships in every
+# project built from this starter, and a commerce block there would render as a
+# broken block on a site with no store. The supported composition is the
+# `site-commerce/header-mini-cart` pattern a client inserts through the Site
+# Editor.
+#
+# For a deterministic test store, that client action is performed here as a
+# DATABASE OVERRIDE of the site-header template part: the Git baseline part plus
+# the Mini-Cart block appended. This is a legitimate, expected override under the
+# project's source-of-truth model (`wp agency check-overrides` reports it; it is
+# never automatically promoted back into Git). Idempotent: an existing override
+# that already carries the Mini-Cart is left alone.
+echo "==> [10/11] Seeding the header Mini-Cart as a template-part override"
+HEADER_PART_SOURCE="web/app/themes/site-theme/parts/site-header.html"
+MINI_CART_PATTERN="web/app/plugins/site-commerce/patterns/header-mini-cart.html"
+for required in "${HEADER_PART_SOURCE}" "${MINI_CART_PATTERN}"; do
+  if [ ! -f "${required}" ]; then
+    echo "error: ${required} is missing; cannot seed the header Mini-Cart override." >&2
+    exit 1
+  fi
+done
+
+header_part_id="$("${WP[@]}" post list --post_type=wp_template_part --name=site-header \
+  --post_status=any --field=ID --format=ids 2>/dev/null | tr -d '\r' | awk '{print $1}')"
+
+if [ -n "${header_part_id}" ] \
+    && "${WP[@]}" post get "${header_part_id}" --field=post_content 2>/dev/null | grep -q 'mini-cart'; then
+  echo "    site-header override already carries the Mini-Cart — skipping."
+else
+  header_part_file="$(mktemp)"
+  cat "${HEADER_PART_SOURCE}" > "${header_part_file}"
+  printf '\n' >> "${header_part_file}"
+  # The same composition site-commerce registers as its header pattern, read
+  # from disk so this script never names a commerce block itself.
+  cat "${MINI_CART_PATTERN}" >> "${header_part_file}"
+
+  if [ -n "${header_part_id}" ]; then
+    "${WP[@]}" post update "${header_part_id}" "${header_part_file}" >/dev/null
+    echo "    updated the existing site-header override (#${header_part_id}) with the Mini-Cart."
+  else
+    header_part_id="$("${WP[@]}" post create "${header_part_file}" \
+      --post_type=wp_template_part --post_title="Site Header" --post_name=site-header \
+      --post_status=publish --porcelain 2>/dev/null | tr -d '\r')"
+    echo "    created the site-header override (#${header_part_id}) with the Mini-Cart."
+  fi
+
+  "${WP[@]}" post term set "${header_part_id}" wp_theme site-theme >/dev/null
+  "${WP[@]}" post term set "${header_part_id}" wp_template_part_area header >/dev/null
+  rm -f "${header_part_file}"
+fi
+
+# --- 11. Permalinks ----------------------------------------------------------
 # WooCommerce product/shop URLs (/product/..., /shop/) need a non-default
 # permalink structure; flush after registering WooCommerce's rewrite rules so
 # the storefront the e2e specs navigate resolves. Mirrors scripts/setup and the
 # e2e CI job's permalink step.
-echo "==> [10/10] Setting pretty permalinks and flushing rewrite rules"
+echo "==> [11/11] Setting pretty permalinks and flushing rewrite rules"
 "${WP[@]}" rewrite structure '/%postname%/' --hard >/dev/null
 "${WP[@]}" rewrite flush --hard >/dev/null
 echo "    permalinks set to /%postname%/ and rules flushed."
@@ -294,3 +367,4 @@ echo "    Test customer login (LOCAL ONLY): test-customer / test-customer"
 echo "    Run the commerce suites:"
 echo "      ddev composer test:integration:commerce"
 echo "      COMMERCE=1 npx playwright test tests/commerce/e2e"
+echo "    Cart/Checkout use the native blocks; the site-header override carries the Mini-Cart."
