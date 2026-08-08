@@ -299,6 +299,7 @@ final class PromotionRollback {
 				'postFinalizeSemanticHash' => null,
 				'postFinalizeModifiedGmt'  => null,
 				'rollbackStatus'           => $matches ? 'restored' : 'restored-hash-mismatch',
+				'rollbackRefusalReason'    => $matches ? null : 'restored-hash-mismatch',
 			)
 		);
 
