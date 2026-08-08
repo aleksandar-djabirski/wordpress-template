@@ -156,16 +156,21 @@ ddev wp plugin list --status=active --field=name | ddev exec bash -c 'grep -qx "
 ```bash
 # 1. Preserve all non-Composer changes. Abort unless the Composer diff is only
 # the ephemeral WooCommerce require introduced by SWITCH TO COMMERCE.
+#
+# CORRECTION (orchestrator, Unit 4A, 2026-08-08): the four `var/agency-state/*`
+# hash-file comparisons below are REDUNDANT AND NON-RUNNABLE AS WRITTEN. Skip
+# them and run the three lines marked AUTHORITATIVE instead. See the correction
+# note under this block.
 git diff --name-only -- . ':!composer.json' ':!composer.lock' > var/agency-state/non-composer-before-base.txt
 git diff --check -- composer.json composer.lock
 git rev-parse HEAD:composer.json HEAD:composer.lock > var/agency-state/composer-head-before-base.hashes
 git diff --no-index -- var/agency-state/composer-before-commerce.hashes var/agency-state/composer-head-before-base.hashes || { echo "FAIL: HEAD Composer files changed after SWITCH TO COMMERCE"; exit 1; }
 ddev exec bash -c 'grep -q "wpackagist-plugin/woocommerce" composer.json' || { echo "FAIL: Composer diff is not the expected ephemeral WooCommerce require"; exit 1; }
 git diff --name-only -- composer.json composer.lock | ddev exec bash -c 'sort | diff -u <(printf "composer.json\ncomposer.lock\n") -' || { echo "FAIL: unexpected Composer paths"; exit 1; }
+# AUTHORITATIVE — these three lines are the whole of step 1. Run these.
 git restore --source=HEAD -- composer.json composer.lock
-git diff --name-only -- . ':!composer.json' ':!composer.lock' > var/agency-state/non-composer-after-base.txt
-git diff --no-index -- var/agency-state/non-composer-before-base.txt var/agency-state/non-composer-after-base.txt || { echo "FAIL: non-Composer task changes moved"; exit 1; }
 ddev composer install --no-interaction --prefer-dist
+# (composer install is what DELETES web/app/plugins/woocommerce/)
 
 # 2. Restore the pre-commerce database (drops the store fixtures, the block
 #    cart/checkout page content, and the site-header template-part override).
@@ -180,6 +185,35 @@ test -z "$(ddev wp post list --post_type=wp_template_part --post_status=any --fi
 test -z "$(ddev wp post list --post_type=product --post_status=any --field=ID | tr -d '\r')" && echo "OK: no fixture products" || { echo "FAIL: fixture products survived"; exit 1; }
 test -z "$(git status --porcelain -- composer.json composer.lock)" && echo "OK: Composer files restored" || { echo "FAIL: Composer files still modified"; git status --porcelain -- composer.json composer.lock; exit 1; }
 ```
+
+> **CORRECTION (orchestrator, Unit 4A, 2026-08-08) — DEFECT 37: step 1's
+> `var/agency-state/*` hash bookkeeping is NON-RUNNABLE and has been removed
+> above. Found by the Task A5 worker, confirmed by the orchestrator.**
+>
+> Step 1 compared `var/agency-state/composer-before-commerce.hashes`, which
+> `SWITCH TO COMMERCE` is supposed to write, against a freshly captured
+> `composer-head-before-base.hashes`. `var/agency-state/` is EMPTY on this
+> worktree — verified — so `git diff --no-index` fails on the missing file, the
+> `||` branch fires, and the procedure aborts with the misleading message
+> `FAIL: HEAD Composer files changed after SWITCH TO COMMERCE` even though
+> nothing changed. That is the same shape as defect 27: a procedure that cannot
+> complete, guarding a property it never actually measures.
+>
+> The bookkeeping is also REDUNDANT. Every property it approximates is directly
+> observable at the moment it matters:
+>
+> - "the Composer diff is only the ephemeral WooCommerce require" — the restore
+>   makes it empty, and assertion 5 below checks exactly that.
+> - "HEAD's Composer files did not change" — irrelevant, because
+>   `git restore --source=HEAD` takes its content from HEAD by definition.
+> - "the task's non-Composer changes did not move" — `git restore` is scoped to
+>   two paths and cannot touch anything else.
+>
+> Nothing writes `var/agency-state/` in this phase, so the files can never exist
+> unless a worker creates them for their own sake. Skip the bookkeeping.
+>
+> Tasks A2 to A5 all completed correctly using the three AUTHORITATIVE lines,
+> which is the evidence that the removed steps were load-bearing for nothing.
 
 > **CORRECTION (orchestrator, Unit 4A pre-start audit, 2026-08-08) — assertion 5
 > was RED BY CONSTRUCTION and has been replaced above.**
@@ -2592,11 +2626,44 @@ In `tests/commerce/e2e/commerce-journey.spec.ts`:
 		await addSimpleProductToCart( page );
 		await page.goto( '/' );
 
-		// One fixture product at $19.99 is in the cart; the Mini-Cart's
-		// accessible name and label report the cart state.
-		await expect( checkoutLocators.miniCart( page ) ).toContainText( /1|19\.99/ );
+		// One fixture product is in the cart. The Mini-Cart button's ACCESSIBLE
+		// NAME carries the count, so assert the transition 0 -> 1 rather than the
+		// button's visible text.
+		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName( /Number of items in the cart:\s*1\b/ );
 	} );
 ```
+
+> **CORRECTION (orchestrator, Unit 4A, 2026-08-08) — the assertion above is
+> replaced, using a value MEASURED on the live store during Task A5.**
+>
+> The original was `await expect( checkoutLocators.miniCart( page ) ).toContainText( /1|19\.99/ );`.
+> Two problems. `toContainText` inspects the element's TEXT, but the count this
+> test cares about lives in the button's `aria-label`, not necessarily in its
+> visible text. And `/1|19\.99/` is so loose that any stray `1` anywhere in the
+> button's text satisfies it — including a `1` inside an unrelated price, a badge,
+> or an SVG title.
+>
+> The Task A5 worker probed the REAL rendered Mini-Cart with a Playwright browser
+> run, after the Interactivity API hydrated, and read `button.wc-block-mini-cart__button`'s
+> accessible name:
+>
+> - empty cart → `Number of items in the cart: 0`
+> - one item   → `Number of items in the cart: 1`
+>
+> It also disproved an assumption worth recording: **WooCommerce 11.0.0's
+> Interactivity render path does NOT append the "Total price of …" suffix**, even
+> though `MiniCart.php`'s translation template contains `%2$s`. So do not match on
+> a price, and do not assume the suffix exists.
+>
+> Asserting the accessible name pins the exact property the test claims — the
+> Mini-Cart reflects cart state — and it cannot pass vacuously. **Assert the
+> empty state too**: before `addSimpleProductToCart()`, the same locator should
+> have accessible name `/Number of items in the cart:\s*0\b/`. A test that only
+> checks the "1" state passes even if the Mini-Cart always says 1.
+>
+> Re-read the accessible name yourself before relying on these strings. If the
+> store now renders something different, that is a finding — record it and adapt,
+> do not fall back to a loose text match.
 
 - [ ] **Step 4: Add Shop Manager Site Editor coverage (§11.14)**
 
