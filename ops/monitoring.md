@@ -34,8 +34,9 @@ per-project/per-host setup this contract defines the requirements for.
 
 ## Cron
 
-- WordPress's pseudo-cron (`DISABLE_WP_CRON` is not set by this starter,
-  so wp-cron runs on request traffic by default) is unreliable on
+- WordPress's pseudo-cron (`DISABLE_WP_CRON` is set by the base config from
+  `env('DISABLE_WP_CRON') ?: false`; it is false when the environment variable
+  is absent, so wp-cron runs on request traffic by default) is unreliable on
   low-traffic sites. Every project must run real cron —
   `wp cron event run --due-now` on a system crontab, or the host's
   managed WP-cron equivalent — and monitor that it actually executed

@@ -87,12 +87,15 @@ upstream changes; an override silently stops.
 
 When markup really must change, the block theme has exactly one override
 surface: a block template at
-`web/app/themes/site-theme/templates/<slug>.html`. The theme ships one per
-commerce request type (product, product archive, product taxonomies, product
-search, cart, checkout, order confirmation), and each is a **derived copy of
-the template WooCommerce ships for that slug with only the header/footer
-template-part slugs rewritten** to this theme's `site-header` / `site-footer`
-and any environment-specific template-part `theme` attribute removed.
+`web/app/themes/site-theme/templates/<slug>.html`. The theme owns six commerce
+templates: `single-product`, `archive-product`, `taxonomy-product_attribute`,
+`product-search-results`, `page-cart`, and `order-confirmation`. It does not
+override `page-checkout` or `coming-soon`; see
+`tests/Architecture/commerce-template-list.php` for the ground truth. Each
+owned template is a **derived copy of the template WooCommerce ships for that
+slug with only the header/footer template-part slugs rewritten** to this
+theme's `site-header` / `site-footer` and any environment-specific
+template-part `theme` attribute removed.
 That missing-part rewrite is the whole justification for the override: WooCommerce's
 templates reference `header` / `footer` parts this theme does not have, so
 without it the storefront renders with no header and no footer.

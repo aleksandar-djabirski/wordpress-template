@@ -173,7 +173,9 @@ Git baseline. Its five stages, in order:
    `promotion-backups prune` removes them). Rollback restores the
    pre-finalize rows from the protected backups in dependency-safe order
    (template-parts, then templates, then global-styles) and refuses rather
-   than overwrites when anything changed after finalisation.
+   than overwrites when anything changed after finalisation. If rollback
+   restores some records and refuses others, it writes
+   `settlementStatus=partially-rolled-back` and returns exit 2.
 
 Between finalize and confirm the per-record locks must be kept alive with
 `--heartbeat --manifest=<path>`; `scripts/promote-overrides` runs it
@@ -190,7 +192,7 @@ Exit codes, identical across the lifecycle:
 | --- | --- |
 | 0 | Success: every record prepared/promoted/restored/skipped, no refusals |
 | 1 | Hard error: any refusal with zero successes, missing options, guard failures, unexpected Throwable |
-| 2 | Partial success: at least one success AND at least one refusal; the refusal report is written into the manifest, and already-succeeded records are not reprocessed on re-run (idempotent) |
+| 2 | Partial success: at least one success AND at least one refusal; the refusal report is written into the manifest, and already-succeeded records are not reprocessed on re-run (idempotent). A partial rollback stores `settlementStatus=partially-rolled-back`. |
 | 3 | Lock conflict: another promotion owns a record, the prepare lock is held, or the core lock API is unavailable |
 | 4 | Tamper: manifest signature or stateHash verification failure |
 
@@ -360,6 +362,22 @@ first, then roll back deliberately or keep the promotion. When a rollback
 cannot restore content, or manual intervention is required, escalate to
 `ops/incident-recovery.md`.
 
+### Partially rolled back
+
+`partially-rolled-back` means that one rollback run restored at least one
+record and refused at least one other record. The run returns exit 2. The
+signed manifest stores the settlement status and each refusal reason.
+
+An operator reaches this state by running `--rollback` on a finalized,
+unconfirmed promotion with more than one record when a record has changed,
+was recreated, was claimed by a newer promotion, or has no backup.
+
+Do not run `--confirm` while this state has unresolved refusals. Resolve each
+named refusal, then run the same `--rollback --manifest=<path>` command again.
+The rollback skips records already restored and retries the unresolved records.
+When all records restore, the status becomes `rolled-back`. If a refusal
+remains, keep the incident open and follow `ops/incident-recovery.md`.
+
 ## Revision-history trade-off
 
 Promotion converts a saved database override into the Git baseline and then
@@ -470,7 +488,7 @@ signed command with exit 1 until the keyring is provided.
     its signed payload, then finalize:
 
     ```
-    ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha> wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
+    ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha> AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
     ```
 
     Expected exit 4: the signature no longer verifies and nothing is
@@ -479,7 +497,7 @@ signed command with exit 1 until the keyring is provided.
 11. **Deploy-commit-mismatch drill.** Finalize with the wrong deploy commit:
 
     ```
-    ddev exec env AGENCY_DEPLOY_COMMIT=<other-sha> wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
+    ddev exec env AGENCY_DEPLOY_COMMIT=<other-sha> AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
     ```
 
     Expected exit 1: the configured deploy commit does not match the
@@ -490,7 +508,7 @@ signed command with exit 1 until the keyring is provided.
     the superseded-record drill in step 14 can run:
 
     ```
-    ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha> AGENCY_PROMOTION_LOCK_TTL=60 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
+    ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha> AGENCY_PROMOTION_LOCK_TTL=60 AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
     ```
 
     Expected exit 0. The `templates:page` row is reset and the site now
@@ -507,7 +525,7 @@ signed command with exit 1 until the keyring is provided.
     Git baseline. Keep promotion A's locks alive during verification:
 
     ```
-    ddev exec wp agency promote-overrides --heartbeat --manifest=var/agency-state/proof-manifest.json
+    ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --heartbeat --manifest=var/agency-state/proof-manifest.json
     ```
 
     Expected exit 0 (with the step-12 TTL of 60 seconds, these locks expire
@@ -540,7 +558,7 @@ signed command with exit 1 until the keyring is provided.
     back:
 
     ```
-    ddev exec wp agency promote-overrides --rollback --manifest=var/agency-state/proof-manifest.json
+    ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --rollback --manifest=var/agency-state/proof-manifest.json
     ```
 
     Expected exit 1 with a refusal report naming
@@ -548,14 +566,14 @@ signed command with exit 1 until the keyring is provided.
     tool refuses rather than clobbering. Confirm promotion C:
 
     ```
-    ddev exec wp agency promote-overrides --confirm --manifest=var/agency-state/proof-c-manifest.json
+    ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --confirm --manifest=var/agency-state/proof-c-manifest.json
     ```
 
     Expected exit 0: confirmed, locks released, backups kept. A rollback of
     C now refuses:
 
     ```
-    ddev exec wp agency promote-overrides --rollback --manifest=var/agency-state/proof-c-manifest.json
+    ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --rollback --manifest=var/agency-state/proof-c-manifest.json
     ```
 
     Expected exit 1: rollback after confirm is refused — confirm is the

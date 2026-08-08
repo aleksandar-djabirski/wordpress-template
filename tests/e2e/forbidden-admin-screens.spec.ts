@@ -21,20 +21,28 @@ const DENIED = [
 ];
 
 const DESKTOP_ONLY = 'wp-admin is not a mobile target';
+const POLICY_DENIAL =
+	'This screen is not part of the editing model for your role. Design changes belong in the Site Editor.';
 
 for ( const screen of DENIED ) {
-	test( `client_editor cannot reach ${ screen }`, async ( { page }, testInfo ) => {
+	test( `client_editor cannot reach ${ screen }`, async ( {
+		page,
+	}, testInfo ) => {
 		test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
 
 		await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 		const response = await page.goto( adminUrl( screen ) );
 
 		expect( response?.status(), screen ).toBe( 403 );
-		await expect( page.getByText( /higher level of permission|not allowed/i ).first() ).toBeVisible();
+		await expect(
+			page.getByText( POLICY_DENIAL, { exact: true } )
+		).toBeVisible();
 	} );
 }
 
-test( 'client_editor can reach the Site Editor', async ( { page }, testInfo ) => {
+test( 'client_editor can reach the Site Editor', async ( {
+	page,
+}, testInfo ) => {
 	test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
 
 	await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
@@ -43,7 +51,9 @@ test( 'client_editor can reach the Site Editor', async ( { page }, testInfo ) =>
 	expect( response?.status() ).toBe( 200 );
 } );
 
-test( 'control: an administrator reaches themes.php normally', async ( { page }, testInfo ) => {
+test( 'control: an administrator reaches themes.php normally', async ( {
+	page,
+}, testInfo ) => {
 	test.skip( testInfo.project.name !== 'chromium-desktop', DESKTOP_ONLY );
 
 	await loginAs( page, CREDS.admin.u, CREDS.admin.p );

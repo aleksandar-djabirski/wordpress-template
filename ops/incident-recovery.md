@@ -25,8 +25,10 @@ For a bad deploy (the common case after `ops/update-process.md`'s step 8):
 3. Re-run `ddev composer verify:fast` (or the project's CI) against the
    reverted state before it goes live again, even under time pressure —
    a rushed rollback that's also broken doubles the incident.
-4. Confirm the rollback in production the same way you'd confirm any
-   deploy (smoke test, `wp agency verify-env`).
+4. Confirm the rollback in production with a smoke test and the host's
+   production health checks. Do not use `wp agency verify-env` as a production
+   check. It only checks non-production safety invariants. In production it
+   warns and exits successfully without checking those invariants.
 
 ## 3. Database restore
 

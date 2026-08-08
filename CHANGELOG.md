@@ -17,7 +17,8 @@ and promoted back into Git.
 - **State export and diff** (`wp agency state-export`, `wp agency state-diff`):
   nine providers covering templates, template parts, Global Styles, navigation,
   synced patterns, content, media references, fonts and Additional CSS. Bundles
-  are HMAC-signed and default to the gitignored `var/agency-state/`.
+  are HMAC-signed and require an explicit `--output=<path>`; there is no default
+  output path.
 - **Promotion lifecycle** (`wp agency promote-overrides`): `--prepare`,
   `--seal`, `--finalize`, `--confirm`, `--rollback` and `--heartbeat`, with
   per-record locks, protected backups, reference refusal, and a deployment-side

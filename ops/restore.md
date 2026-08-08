@@ -58,9 +58,15 @@ Run this after every restore — scheduled test or real incident:
       It is INFORMATIONAL by default — legitimate database overrides are normal
       and do not fail it. Use `--fail-on-drift` only where a non-zero exit is
       genuinely wanted (for example a CI gate).
-- [ ] `ddev wp agency state-export --output=-` succeeds and the bundle's
-      signature verifies (proves the HMAC keyring is configured in this
-      environment).
+- [ ] Create the ignored state directory, then export a smoke-test bundle:
+      `mkdir -p var/agency-state` followed by
+      `ddev wp agency state-export --output=var/agency-state/restore-smoke-bundle.json`.
+      The command writes a signed bundle and prints only its export envelope.
+- [ ] Verify that bundle with
+      `ddev wp agency state-diff --source=var/agency-state/restore-smoke-bundle.json --format=json`.
+      Run this immediately after export. Exit `0` means no drift. Exit `2`
+      means that state changed after export. The command verifies the bundle's
+      signature and state hash before it reads the bundle.
 - [ ] `ddev wp agency promotion-backups list` runs and shows only backups you
       expect for this environment.
 - [ ] Media referenced by recent content actually resolves (proves the
