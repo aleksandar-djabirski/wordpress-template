@@ -141,6 +141,8 @@ final class BlockPolicy {
 
 			if ( '' === $name && '' !== trim( $html ) ) {
 				$violations[] = trim( $html );
+			} elseif ( '' !== $name && self::has_disallowed_markup( $html ) ) {
+				$violations[] = trim( $html );
 			}
 
 			foreach ( self::raw_html_violations( (array) ( $block['innerBlocks'] ?? array() ) ) as $nested ) {
@@ -149,6 +151,13 @@ final class BlockPolicy {
 		}
 
 		return $violations;
+	}
+
+	private static function has_disallowed_markup( string $html ): bool {
+		return 1 === preg_match(
+			'/<\s*(?:script|style|iframe|object|embed)\b|<[^>]+\s+(?:style|on[a-z][\w-]*)\s*=|<[^>]+\s+(?:href|src)\s*=\s*["\']\s*javascript:/i',
+			$html
+		);
 	}
 
 	/**
