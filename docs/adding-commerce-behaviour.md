@@ -13,10 +13,13 @@ bash scripts/enable-commerce
 ```
 
 It installs WooCommerce via Composer, activates it alongside site-commerce,
-configures a deterministic store (HPOS on, classic cart/checkout, COD, free
-shipping, guest checkout, store taken out of "coming soon"), and creates the
-fixtures the commerce test suites assert against. It is idempotent and, like
-`scripts/setup`, is written to be read top to bottom.
+configures a deterministic store (HPOS on, native block cart/checkout
+(verified, never hand-written), COD, free shipping, guest checkout, store
+taken out of "coming soon"), and creates the fixtures the commerce test
+suites assert against. It also seeds a site-header template-part database
+override carrying the Mini-Cart block — the store-side composition the base
+theme deliberately does not ship. It is idempotent and, like `scripts/setup`,
+is written to be read top to bottom.
 
 Under the hood it does what a real project does by hand. WooCommerce is
 installed through Composer — the required path for any real project: a
@@ -94,6 +97,14 @@ That missing-part rewrite is the whole justification for the override: WooCommer
 templates reference `header` / `footer` parts this theme does not have, so
 without it the storefront renders with no header and no footer.
 
+One byte in that derivation is deliberate. `templates/order-confirmation.html`
+carries a single trailing LF that the upstream file does not — upstream ships
+it without a trailing newline, the other five overrides end in LF (as does
+every other file in the theme), and the derivation rules require a single
+trailing newline. A re-derivation with `sed … > file` does NOT append a
+trailing newline, so it drops that byte again and produces a spurious one-line
+diff; re-add it after a re-derivation.
+
 Rules when you change one:
 
 1. Keep the divergence minimal and reviewable — inherit as much upstream
@@ -169,8 +180,9 @@ WooCommerce installed.
   ddev composer test:integration:commerce
   ```
 
-- **e2e** (`COMMERCE=1`): the full storefront journey — archive → PDP (simple +
-  variable) → cart + `TESTCOUPON` → guest COD checkout → order history:
+- **e2e** (`COMMERCE=1`): the full storefront journey — archive (inside the
+  theme header/footer) → PDP (simple + variable) → block cart + `TESTCOUPON`
+  → guest COD block checkout → order history, plus the header Mini-Cart:
 
   ```sh
   COMMERCE=1 npm run test:e2e:commerce
