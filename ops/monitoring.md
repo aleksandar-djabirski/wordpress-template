@@ -45,8 +45,10 @@ per-project/per-host setup this contract defines the requirements for.
   registration) needs its own last-run/last-success signal, not just
   reliance on cron running in general.
 - **Unresolved promotions.** A promotion that reached `--finalize` but never
-  reached `--confirm` or `--rollback` holds record locks and keeps a backup
-  alive. Check `wp agency promotion-backups list` on a schedule and alert on
+  reached `--confirm` or `--rollback` holds the record locks for the records it
+  actually PROMOTED, and keeps a backup alive. Records it refused or
+  self-restored release their locks in `--finalize`'s own teardown, so a
+  partially-refused promotion holds fewer locks than it names. Check `wp agency promotion-backups list` on a schedule and alert on
   any promotion older than one deployment cycle. An unconfirmed promotion is
   the only state from which a rollback is still possible — an operator who
   lets one age out is losing the recovery path, not just leaking a lock.

@@ -678,7 +678,7 @@ bash scripts/enable-commerce
 ```
 
 Expected failure — the script's own step 4 verification
-(`scripts/enable-commerce:236-240`), exit 1 before the store is configured
+(`scripts/enable-commerce:257-266`), exit 1 before the store is configured
 further:
 ```
 FAILED: the checkout page does not hold the native block content.

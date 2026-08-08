@@ -17,9 +17,14 @@ import { test, expect } from '@playwright/test';
  *   `tests/parity/` and `tests/e2e/promotion-lifecycle.spec.ts`. It is
  *   reported as skipped in that case, not run — the `test.skip()` guard
  *   below fires because AGENCY_PROMOTION_FAILURE_DRILL is unset.
- * - The promotion wrapper runs it on purpose, with
- *   AGENCY_PROMOTION_FAILURE_DRILL=1 and AGENCY_PLAYWRIGHT_TESTS pointing
- *   at this file, so the single test collects and fails exactly once.
+ * - An OPERATOR runs it on purpose by exporting
+ *   AGENCY_PROMOTION_FAILURE_DRILL=1, AGENCY_PLAYWRIGHT_TESTS pointing at this
+ *   file, and AGENCY_PLAYWRIGHT_PROJECT naming ONE project, then invoking
+ *   scripts/promote-overrides. The wrapper does not set those itself: it reads
+ *   them from the environment and passes them through
+ *   (`--project="$AGENCY_PLAYWRIGHT_PROJECT" "${AGENCY_PLAYWRIGHT_TESTS:-tests/e2e}"`).
+ *   With one project pinned the single test collects and fails exactly once;
+ *   without a project pin Playwright would collect it once per project.
  */
 test.describe( 'promotion verification drill', () => {
 	test.skip(

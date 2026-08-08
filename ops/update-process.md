@@ -68,7 +68,8 @@ resolves. Do not add a version matrix.
 ## Deploying while a promotion is in flight
 
 A promotion holds per-record locks from `--finalize` until `--confirm` or
-`--rollback`. Do not start a second deployment that promotes overlapping
+`--rollback` — for the records it actually PROMOTED. Records that `--finalize`
+refused or self-restored have their locks released in its own teardown. Do not start a second deployment that promotes overlapping
 records while the first is unresolved: it exits `3` (lock conflict) by design.
 If a deployment was abandoned mid-promotion, its locks expire after their TTL
 and become reclaimable; confirm the abandoned promotion's state with
