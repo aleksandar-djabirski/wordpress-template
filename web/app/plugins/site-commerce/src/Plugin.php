@@ -6,6 +6,7 @@ namespace SiteCommerce;
 
 use SiteCommerce\Health\CommerceSanitizeStep;
 use SiteCommerce\Products\ExampleProductRules;
+use SiteCommerce\Theme\CommercePatterns;
 use SiteCommerce\Theme\ThemeSupport;
 
 /**
@@ -48,6 +49,7 @@ final class Plugin {
 	private static function boot(): void {
 		$providers = array(
 			new ThemeSupport(),
+			new CommercePatterns(),
 			new ExampleProductRules(),
 			new CommerceSanitizeStep(),
 		);
