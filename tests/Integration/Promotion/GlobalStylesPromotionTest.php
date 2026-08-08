@@ -267,11 +267,20 @@ final class GlobalStylesPromotionTest extends IntegrationTestCase {
 
 		$this->deploy_merged_theme_json( $this->live_origin_record() );
 
+		// The EXACT value production records, captured through the same
+		// seam the finalizer's deferred-hash branch uses (PromotionFinalizer
+		// §7.6 step 3b): the strategy's own resolved_hash() over the
+		// snapshot its capture_pre_reset_state() returns, taken BEFORE
+		// finalize while the user origin is still live. A shape assertion
+		// cannot distinguish this value from a hash of the post-reset state
+		// or of an unrelated record; the value assertion must.
+		$expected_hash = $this->strategy->resolved_hash( $this->strategy->capture_pre_reset_state() );
+
 		$this->build_global_styles_manifest( $this->global_styles_manifest_path );
 
 		$record = $this->finalizer->finalize( $this->global_styles_manifest_path )['manifest']->record( 'global-styles:active' );
 
-		self::assertMatchesRegularExpression( '/^[0-9a-f]{64}$/', (string) $record['preResetResolvedHash'] );
+		self::assertSame( $expected_hash, $record['preResetResolvedHash'] );
 		self::assertSame( 'present', $record['postFinalizeRecordState'] );
 		self::assertSame( 'promoted', $record['finalizeStatus'] );
 	}
