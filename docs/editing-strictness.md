@@ -121,7 +121,17 @@ Only relevant with the commerce profile active.
 WooCommerce is present — is `client_editor` plus a workflow-complete set of
 WooCommerce catalogue/order/coupon capabilities (the full product lifecycle
 including editing/deleting published products, product-term assignment, orders,
-and coupons). One of them is `manage_woocommerce`, which (matching core's own
+and coupons). Because it builds on the `client_editor` baseline
+(`ShopRole::capabilities()` starts from
+`RolesProvider::client_editor_capabilities()`), it inherits `edit_theme_options`
+and with it the same Site Editor access — templates, template parts,
+navigation and Global Styles — bounded by the same block policy and
+admin-screen boundary. Dropping the Site Editor for shop managers is a
+per-project dial with a named cost: `edit_theme_options` is granted in
+`RolesProvider::ALWAYS_GRANT`, which both roles share, so removing it strips
+the Site Editor from that role wholesale (there is no per-role lever today),
+and both roles are re-synced from their computed sets on every `init`. One of
+them is `manage_woocommerce`, which (matching core's own
 `shop_manager`) grants access to **WooCommerce → Settings** and **Status**; a
 shop manager reaching Settings is pinned live by
 `tests/commerce/e2e/shop-manager-admin.spec.ts`. To lock Settings down for a
