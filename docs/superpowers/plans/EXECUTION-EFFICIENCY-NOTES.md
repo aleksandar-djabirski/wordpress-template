@@ -398,3 +398,124 @@ the seam rather than recomputing it.
 - CI round trips are about twelve minutes. Fix the environment locally rather
   than iterating through CI. Unit 1 lost hours to this before installing DejaVu
   fonts locally.
+
+---
+
+## 11. Added by Unit 3B
+
+### 11.1 Bootstrapping a worktree takes THREE steps, not two
+
+The handoff prompts for Units 2, 3A and 3B all listed `ddev composer install`
+then `ddev exec bash scripts/setup`. That is incomplete. `scripts/setup` runs
+`npm ci` INSIDE the Linux container, which creates `node_modules/.bin` as Unix
+symlinks with **zero Windows `.cmd` shims**. `npm run build` still works because
+it invokes `node` directly, but `npm run lint` and every Playwright script die
+with `'wp-scripts' is not recognized as an internal or external command`.
+
+Add a third step, and use npm 10 explicitly:
+
+```
+cd <worktree> && npx -y npm@10 ci
+```
+
+**Plain `npm ci` FAILS on this host.** Local npm is 11.x; the committed lock was
+written by npm 10, and npm 11 reads it as out of sync on optional
+platform-specific packages (`Missing: @parcel/watcher-android-arm64@2.5.6 from
+lock file`) and refuses with EUSAGE. `AGENTS.md` warns about the forward
+direction — a lock written by a newer npm breaking CI's npm 10 — this is the
+same hazard pointed backwards. `npm ci` never writes the lock, so the npm 10
+route is safe and leaves `package-lock.json` untouched.
+
+### 11.2 Never chain a gate behind a pipe
+
+`npm run lint 2>&1 | tail -25 && npm run build` reports **exit 0 even when lint
+fails**, because the pipeline's status is `tail`'s. This masked a real lint
+failure twice in one session. Redirect to a file and capture the code:
+
+```
+npm run lint > /tmp/lint.log 2>&1; echo "EXIT=$?"; tail -25 /tmp/lint.log
+```
+
+The same trap applies to `ddev composer verify | tail`.
+
+### 11.3 Check the dev site's STATE before believing a Playwright result
+
+Unit 3B ran all three Playwright suites against a dev site whose Global Styles
+post held a leftover `#101010` background. Result: visual 4 failed (80% of pixels
+on the home page), accessibility 6 failed (every violation naming
+`background color: #101010`). After resetting the post, accessibility was
+**6 passed** and the home-page diff fell from 80% to 2%.
+
+Two lessons. First, orchestrator probes and the e2e suite both write to the dev
+site's `wp_global_styles` row and do not always restore it — the integration
+suite does not, because it runs against the separate `wordpress_test` database.
+Second, before attributing any Playwright failure to code, dump the state the
+test actually renders. One `wp eval-file` probe replaces a long argument.
+
+### 11.4 The carried-over DDEV database has drifted from the visual baselines
+
+Even with Global Styles clean, the local visual suite still differs: home desktop
+2%, mobile 23%, and the demo page renders 1521px tall against an 1899px baseline
+— a structural difference, not antialiasing. The database volume has been carried
+across four units and mutated by every e2e run; the baselines were captured
+against a fresh install in CI. **Local visual is therefore NOT a reliable gate on
+this host; CI on a fresh database is the authority.** Do not spend time chasing
+it, and do not regenerate baselines from a local run — a `ci-capture/visual-baselines`
+ref is the only correct way to regenerate. Unit 4B should decide whether to
+re-seed the local database.
+
+### 11.5 A worker invocation can be killed leaving NO artifacts
+
+One `opencode` run was killed by the harness after about 26 minutes. The output
+buffer was **empty**, and the artifact directory contained only the three
+pre-flight stderr files — no `stdout.ndjson`, no `session.json`. The ONLY
+evidence of ~750 lines of good work was the worktree itself.
+
+So: **do not batch several plan tasks into one invocation.** The Unit 3B handoff
+advised batching Tasks 22 and 23 into a single run; that advice assumes the run
+completes. Dispatch one task per invocation and let each commit land. Recovery is
+then cheap — inspect the worktree, write a resume prompt that names the exact
+state, and the worker finishes rather than restarts.
+
+When recovering, READ THE PARTIAL WORK BEFORE RE-DISPATCHING. The killed run had
+left a deliberate `// BREAK:` in place mid-proof; running the suite showed 12 of
+13 green with the 13th failing exactly as its break intended. Telling the resume
+worker that turned a restart into a five-minute finish.
+
+### 11.6 Theme JSON facts that cost this unit its whole audit budget
+
+All verified by execution against WordPress 7.0.2. They are cited in the Task 22
+and 23 CORRECTION blocks and should not be re-derived.
+
+- **`WP_Theme_JSON::get_raw_data()` is NOT theme.json input shape.** It keys every
+  preset node by ORIGIN (`spacingSizes => {"theme":[…]}`). Writing it back as
+  `theme.json` produces `Undefined array key "slug"` warnings from
+  `class-wp-theme-json.php:3451` and mis-registers every preset.
+  **`get_data()` is the input-shape API** — it flattens presets to lists in origin
+  order and is idempotent.
+- **`wp_get_global_settings()` returns origin-keyed presets too.** Any
+  before/after comparison across a promotion will therefore report false drift,
+  because promotion legitimately moves a user preset from the `custom` origin to
+  the `theme` origin. Compare
+  `WP_Theme_JSON_Resolver::get_merged_data()->get_data()` instead.
+- **`WP_Theme_JSON_Resolver::$theme_json_file_cache` survives
+  `clean_cached_data()` AND `wp_clean_theme_json_cache()`.** It is a
+  `protected static` keyed by file path. A process that resolved before
+  `theme.json` changed keeps resolving the OLD file. Clearing it needs guarded
+  reflection.
+- The shipped `theme.json` loses `settings.appearanceTools` (core expands it) and
+  `settings.spacing.custom` (not a valid v3 property) through `WP_Theme_JSON`, so
+  any "every input key survives" check refuses the shipped theme.
+
+### 11.7 The pre-dispatch execution probe is the cheapest instrument here
+
+Unit 3A found its two release-blocking defects AFTER the worker runs, each
+costing a worker run plus a review plus a fix. Unit 3B found THREE of the same
+species BEFORE dispatch, in about forty minutes of probing, by asking §8b's
+question first and then answering it with `wp eval-file` instead of by reading.
+
+**Budget an hour of probing before the first worker of any unit that governs a
+shipped artefact.** Ask it in this order: what does the task write, what rule
+governs it, does the REAL shipped file satisfy that rule today, and can the
+declared gate actually go green? Unit 4A owns commerce templates and inherits
+exactly this shape.

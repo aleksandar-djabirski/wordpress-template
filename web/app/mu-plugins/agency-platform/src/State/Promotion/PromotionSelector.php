@@ -48,7 +48,7 @@ final class PromotionSelector {
 
 			if ( ! $has_strategy( $provider ) ) {
 				throw PromotionException::hard(
-					sprintf( 'No promotion strategy is registered for provider "%s". Templates and template parts are promotable in this release; Global Styles promotion arrives with its own release gate.', $provider )
+					sprintf( 'No promotion strategy is registered for provider "%s"; only the registered providers are promotable.', $provider )
 				);
 			}
 

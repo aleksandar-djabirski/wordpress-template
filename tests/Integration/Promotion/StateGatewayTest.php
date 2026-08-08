@@ -19,6 +19,7 @@ namespace Tests\Integration\Promotion;
 
 use AgencyPlatform\State\HmacSigner;
 use AgencyPlatform\State\Normalizer;
+use AgencyPlatform\State\Promotion\PreparablePromotionStrategy;
 use AgencyPlatform\State\Promotion\PromotionException;
 use AgencyPlatform\State\Promotion\PromotionExitCode;
 use AgencyPlatform\State\Promotion\StateGateway;
@@ -175,22 +176,27 @@ final class StateGatewayTest extends IntegrationTestCase {
 	}
 
 	/**
-	 * This test FLIPPED DIRECTION when the subsystem was wired into Plugin.php.
+	 * This test FLIPPED DIRECTION TWICE, once per release boundary.
 	 *
-	 * It used to assert `strategy_for( 'templates' )` was NULL, which was
-	 * correct while the registry shipped empty and nothing registered it. The
-	 * final commit of this release adds the one sequenced
-	 * `PromotionSubsystem::register()` line, so the strategies are now
-	 * registered on every request — and the old assertion became a test that
-	 * the wiring does NOT work.
+	 * Its first flip was Release 3: it used to assert
+	 * `strategy_for( 'templates' )` was NULL, which was correct while the
+	 * registry shipped empty and nothing registered it. The final commit of
+	 * Release 3 added the one sequenced `PromotionSubsystem::register()`
+	 * line, so the strategies are now registered on every request — and the
+	 * old assertion became a test that the wiring does NOT work.
 	 *
-	 * The replacement is strictly stronger. It is the only test that proves the
-	 * `Plugin.php` registration line is actually REACHED at runtime: remove that
-	 * one line and this fails. It also still pins the Release 3/Release 4
-	 * boundary, because `global-styles` must stay unregistered until Unit 3B
-	 * adds its strategy.
+	 * Its second flip is Release 4: the same test then pinned the Release
+	 * 3/Release 4 boundary by asserting `global-styles` stays unregistered
+	 * until Unit 3B adds its strategy. Task 23 IS that addition, so the pin
+	 * has now closed; asserting null again would be a test that the Release
+	 * 4 wiring does NOT work. The replacement is strictly stronger than
+	 * what it replaces.
+	 *
+	 * The two assertNotNull assertions are the only proof that the sequenced
+	 * `Plugin.php` registration line is actually REACHED at runtime: remove
+	 * that one line and this fails.
 	 */
-	public function test_the_plugin_registers_the_release_three_strategies_and_no_more(): void {
+	public function test_the_plugin_registers_every_promotion_strategy(): void {
 		$gateway = new StateGateway();
 
 		self::assertNotNull(
@@ -201,9 +207,17 @@ final class StateGatewayTest extends IntegrationTestCase {
 			$gateway->strategy_for( 'template-parts' ),
 			'Plugin.php must register PromotionSubsystem; without it the promotion CLI has no strategies.'
 		);
-		self::assertNull(
-			$gateway->strategy_for( 'global-styles' ),
-			'Global Styles stays unregistered until Unit 3B; this is the Release 3/Release 4 boundary.'
+
+		$global_styles = $gateway->strategy_for( 'global-styles' );
+
+		self::assertNotNull(
+			$global_styles,
+			'Release 4 must register the Global Styles strategy; Task 23 is the change the Release 3 pin was waiting for.'
+		);
+		self::assertInstanceOf(
+			PreparablePromotionStrategy::class,
+			$global_styles,
+			'The registered Global Styles strategy must implement the preparable contract the finalizer requires.'
 		);
 	}
 

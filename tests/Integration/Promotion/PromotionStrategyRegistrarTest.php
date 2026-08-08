@@ -1,10 +1,10 @@
 <?php
 /**
- * The Release 3/Release 4 boundary in one file: the registrar adds exactly
- * the templates and template-parts strategies, and global-styles stays out
- * because no strategy is registered for it — even though the state track
- * classifies it promotable. The filter callback is a named method, never a
- * closure, and every registered strategy must be preparable.
+ * The Release 4 registration contract in one file: the registrar adds the
+ * templates, template-parts and global-styles strategies — Release 3
+ * shipped the first two, Release 4 adds global-styles behind the Theme
+ * JSON adapter. The filter callback is a named method, never a closure,
+ * and every registered strategy must be preparable.
  *
  * @package Tests\Integration
  */
@@ -35,18 +35,34 @@ final class PromotionStrategyRegistrarTest extends IntegrationTestCase {
 		parent::tear_down();
 	}
 
-	public function test_release_three_registers_only_templates_and_template_parts(): void {
+	/**
+	 * Release 3's contract, kept explicit in Release 4: the templates and
+	 * template-parts strategies were each registered and preparable, and
+	 * Release 4 must not have broken them.
+	 */
+	public function test_release_three_registers_templates_and_template_parts_as_preparable(): void {
 		PromotionStrategies::reset();
 		( new PromotionStrategyRegistrar() )->register();
 
-		self::assertSame( array( 'template-parts', 'templates' ), array_keys( PromotionStrategies::all() ) );
+		self::assertInstanceOf( PreparablePromotionStrategy::class, PromotionStrategies::for_provider( 'templates' ) );
+		self::assertInstanceOf( PreparablePromotionStrategy::class, PromotionStrategies::for_provider( 'template-parts' ) );
 	}
 
-	public function test_global_styles_has_no_strategy_in_release_three(): void {
+	public function test_release_four_registers_all_three_strategies(): void {
 		PromotionStrategies::reset();
 		( new PromotionStrategyRegistrar() )->register();
 
-		self::assertNull( PromotionStrategies::for_provider( 'global-styles' ) );
+		self::assertSame( array( 'global-styles', 'template-parts', 'templates' ), array_keys( PromotionStrategies::all() ) );
+	}
+
+	public function test_global_styles_is_registered_as_a_preparable_strategy_in_release_four(): void {
+		PromotionStrategies::reset();
+		( new PromotionStrategyRegistrar() )->register();
+
+		$strategy = PromotionStrategies::for_provider( 'global-styles' );
+
+		self::assertNotNull( $strategy );
+		self::assertInstanceOf( PreparablePromotionStrategy::class, $strategy );
 	}
 
 	public function test_every_registered_strategy_is_preparable(): void {

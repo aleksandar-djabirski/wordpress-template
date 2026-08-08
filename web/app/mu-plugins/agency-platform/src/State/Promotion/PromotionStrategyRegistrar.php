@@ -8,14 +8,14 @@ use AgencyPlatform\State\PromotionStrategies;
 use AgencyPlatform\State\PromotionStrategy;
 
 /**
- * The Release 3/Release 4 boundary: registers the templates and
- * template-parts promotion strategies and nothing else. Global Styles is
- * classified promotable by the state track but has no strategy until
- * Release 4, so the allow-list here is what keeps it out of Release 3.
+ * The Release 4 boundary: registers the templates, template-parts and
+ * global-styles promotion strategies. Release 3 shipped the first two;
+ * Release 4 adds global-styles behind the Theme JSON adapter, so the
+ * allow-list here is what admits it to the selector and the finalizer.
  */
 final class PromotionStrategyRegistrar {
 
-	/** Release 3 registers exactly these two slugs. Release 4 adds global-styles. */
+	/** Release 3 shipped exactly these two slugs; Release 4 added global-styles. */
 	public const RELEASE_3_SLUGS = array( 'templates', 'template-parts' );
 
 	/** Registers the strategies; the filter runs once per request through the registry's memoisation. */
@@ -32,6 +32,7 @@ final class PromotionStrategyRegistrar {
 	public function add_strategies( array $strategies ): array {
 		$strategies['templates']      = new TemplatePromotionStrategy();
 		$strategies['template-parts'] = new TemplatePartPromotionStrategy();
+		$strategies['global-styles']  = new GlobalStylesPromotionStrategy( new ThemeJsonAdapter(), new StateGateway() );
 
 		return $strategies;
 	}
