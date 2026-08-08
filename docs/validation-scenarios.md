@@ -171,7 +171,7 @@ Revert: change `"file:./styles.css"` back to `"file:./style.css"`.
 
 ## 6. Raw hex color in block CSS
 
-**Proven in CI** (`frontend` / `npm run lint:css`).
+**Proven in CI** (`frontend` / `npm run lint`).
 
 Mutation — add to `web/app/themes/site-theme/blocks/reference-callout/style.css`:
 ```css
@@ -227,10 +227,15 @@ Revert: remove the added line.
 
 **Requires DDEV/CI context** — needs a live database.
 
-Mutation:
+Mutation. The `wp_theme` term is NOT optional: `TemplatesState::posts_for_name()`
+queries `wp_template` rows through a mandatory `wp_theme` tax_query on the active
+stylesheet, so a row created without that term is invisible to the differ and the
+report will not change.
+
 ```sh
 ddev wp post create --post_type=wp_template --post_status=publish \
-  --post_title="Custom Front Page" --post_name=front-page --porcelain
+  --post_title="Custom Front Page" --post_name=front-page \
+  --tax_input='{"wp_theme":["site-theme"]}' --porcelain
 ```
 
 Check:
@@ -238,26 +243,41 @@ Check:
 ddev wp agency check-overrides
 ```
 
-Expected report (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
+Expected report (`AgencyPlatform\State\StateCommandRunner::overrides()`; the
+command is a thin delegate at `AgencyCommands::check_overrides`):
 ```
-Template/template-part overrides: 1
-  - front-page (wp_template) [publish]
-Expected core-generated global-styles records: <N>
-Synced patterns (informational only): <N>
-Success: 1 database override(s) reported. Overrides are expected under the Site Editor editing model; pass --fail-on-drift to make them a hard failure.
+promotable: 1, db-owned: 5, forbidden: 0, unresolved: 0, unchanged: 16
+content:page-2 (added, db-owned)
+content:page-3 (added, db-owned)
+content:page-6 (added, db-owned)
+content:post-1 (added, db-owned)
+custom-css:custom-css-post (unchanged, unchanged)
+custom-css:global-styles (unchanged, unchanged)
+navigation:primary (added, db-owned)
+templates:front-page (added, promotable)
+1 record(s) differ from the Git baseline. Database overrides are expected under the block-theme editing model; this report is informational.
 ```
-Exits **zero**. A database template row is a legitimate client edit under the block-theme editing model, not a guardrail breach.
+and on STDERR:
+```
+Warning: check-overrides is deprecated. Use `wp agency state-diff` for the machine-readable report.
+```
+Exits **zero**. A database template row is a legitimate client edit under the
+block-theme editing model, not a guardrail breach. The exact counts depend on
+what else the site holds; the load-bearing part is that the new record appears
+as `templates:front-page (added, promotable)` and the exit code stays 0.
 
 Gate check:
 ```sh
 ddev wp agency check-overrides --fail-on-drift
 ```
 
-Expected failure:
+Expected failure, on STDERR:
 ```
-Error: 1 database override(s) found and --fail-on-drift was requested. Reconcile them through the promotion workflow, or re-run without the flag to report only.
+Warning: 1 record(s) differ from the Git baseline (--fail-on-drift).
 ```
-Exits non-zero (`WP_CLI::error()`).
+The full report still prints on STDOUT. Exits **1** —
+`CliOutput::emit()` calls `WP_CLI::halt( StateException::EXIT_HARD_ERROR )`,
+not `WP_CLI::error()`.
 
 Revert:
 ```sh
@@ -718,7 +738,7 @@ The HMAC does not match: the document was modified, or it was not signed for thi
 A manifest edited the same way is refused by `--finalize` with the same
 exit 4, before any guard or mutation runs. (Without the keyring
 environment, both commands exit 1 with
-`AGENCY_PROMOTION_HMAC_KEYS is not set` instead — that is the missing-keyring
+`AGENCY_PROMOTION_HMAC_KEYS is not set: no HMAC key is available.` instead — that is the missing-keyring
 failure, not the tamper path.)
 
 Revert: re-export the pristine bundle.
