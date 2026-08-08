@@ -376,11 +376,20 @@ for required in "${HEADER_PART_SOURCE}" "${MINI_CART_PATTERN}"; do
   fi
 done
 
+# The content file lives INSIDE the DDEV mount: var/agency-state/ is
+# gitignored, and this script runs BOTH on the host (CI invokes it directly)
+# and in the container, while `wp post create/update` always execute INSIDE
+# the container. A host-side `mktemp` path under /tmp is invisible there, so
+# the file uses a REPOSITORY-RELATIVE path — it resolves identically on both
+# sides because the host and the container both work from the project root.
+# The file is removed on every branch below.
+header_part_file="var/agency-state/site-header-override.html"
+mkdir -p "var/agency-state"
+
 header_part_id="$("${WP[@]}" post list --post_type=wp_template_part --name=site-header \
   --post_status=any --field=ID --format=ids 2>/dev/null | tr -d '\r' | awk '{print $1}')"
 
 if [ -n "${header_part_id}" ]; then
-  header_part_file="$(mktemp)"
   "${WP[@]}" post get "${header_part_id}" --field=post_content > "${header_part_file}" 2>/dev/null
   # Match the ACTUAL block, not the bare substring: any content merely
   # mentioning "mini-cart" (a paragraph, a CSS class, a comment) must not count
@@ -398,7 +407,6 @@ if [ -n "${header_part_id}" ]; then
     echo "    appended the Mini-Cart to the existing site-header override (#${header_part_id})."
   fi
 else
-  header_part_file="$(mktemp)"
   cat "${HEADER_PART_SOURCE}" > "${header_part_file}"
   printf '\n' >> "${header_part_file}"
   # The same composition site-commerce registers as its header pattern, read
