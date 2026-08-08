@@ -6,7 +6,7 @@ than the one before it. This file is NOT a history. The tracking file
 records only what the NEXT orchestrator should DO DIFFERENTLY, and what to reuse
 rather than rediscover.
 
-**Audience:** the orchestrator of Unit 3B, 4A and 4B, and, through the brief it
+**Audience:** the orchestrator of Unit 4B, and, through the brief it
 writes, every worker and reviewer agent.
 
 **Rule for maintaining this file:** an entry earns its place only if it changes a
@@ -519,3 +519,132 @@ shipped artefact.** Ask it in this order: what does the task write, what rule
 governs it, does the REAL shipped file satisfy that rule today, and can the
 declared gate actually go green? Unit 4A owns commerce templates and inherits
 exactly this shape.
+
+---
+
+## 12. Added by Unit 4A
+
+### 12.1 A finding is not closed until every CALLER is checked
+
+This was Unit 4A's most expensive mistake and it was entirely avoidable.
+
+A worker reported that running `scripts/enable-commerce` from the WSL host made
+its new step silently abort: `mktemp` writes to the host `/tmp`, and the
+in-container `ddev wp` cannot read that path, with stderr discarded by the
+step's own `2>/dev/null`. The orchestrator recorded it, changed its OWN switching
+procedure to `ddev exec bash scripts/enable-commerce`, and moved on.
+
+**CI invokes the same script the same broken way**, at `ci.yml:511`, on a line
+the orchestrator had already read. The required `commerce-e2e` gate then failed
+at seeding, and the two commerce suites never ran.
+
+When a worker hands you a mechanism, grep for every caller of the thing before
+you close it. The fix was to make the script work from either side — a
+repository-relative temp path under the gitignored `var/agency-state/`, which
+resolves identically on the host and in the container — not to change the one
+caller you happened to notice.
+
+### 12.2 Aim the whole-unit review at the artefact with NO automated test
+
+Unit 4A's whole-unit review found THREE defects and all three were in
+`scripts/enable-commerce` — the single artefact in the unit with no PHPUnit
+coverage, by design, because the commerce suite runs against wp-phpunit's
+throwaway database the script never touches. Every tested surface came back
+clean.
+
+The three were a `wp post delete --force` that fired on any page merely
+CONTAINING a shortcode, a silent overwrite of a customised template-part
+override, and an idempotency predicate that was a bare substring (`mini-cart`)
+so that a paragraph mentioning it made the script skip and report success.
+
+Prose and shell scripts are where the defects hide, because no suite executes
+them. Point the review there explicitly.
+
+### 12.3 Probe before re-dispatching a failed worker
+
+A dispatch failed with a 705-byte event stream containing one record:
+`APIError 400 — Error from provider (Console Go): Upstream request failed: Model
+is unavailable`, `isRetryable: false`. The worktree was untouched.
+
+Instead of re-running the whole task blind, a five-word probe prompt through the
+same wrapper returned `PROBE-OK` on the correct model in seconds. That
+distinguishes a transient outage from a model-policy failure, which is one of the
+three conditions the handoff says to STOP for. Cost: about a minute.
+
+### 12.4 `$?` is destroyed by PowerShell
+
+In PowerShell `$?` is a BOOLEAN. Any double-quoted string containing
+`echo "EXIT=$?"` — including one you are passing on to `bash -lc` — expands to
+`EXIT=True` or `EXIT=False` before bash ever sees it, whatever the real exit code
+was. A worker spent part of a run reading `EXIT=True` from failing commands.
+
+Use a single-quoted string, escape it as `\$?`, or avoid the question entirely by
+redirecting to a log and reading the log. This is a SECOND, independent hazard
+from §11.2's pipe problem: redirecting to a file fixes the pipe, not this.
+
+### 12.5 DDEV snapshots do not follow the project across worktrees
+
+`ddev snapshot --list` from a new worktree reports **No snapshots**, even though
+the database volume itself survives `ddev stop --unlist` intact. Snapshots live
+in `<project>/.ddev/db_snapshots/`, which is inside the WORKTREE, not in the
+volume.
+
+So a handoff carries the DATA but not the SNAPSHOTS. Copy the `.zst` files from
+the previous worktree if you want the old states, and take a fresh
+`base-profile` snapshot before installing WooCommerce for anything, because
+`SWITCH TO BASE` restores by that name.
+
+Two related DDEV facts, both verified: `ddev snapshot list` is NOT a subcommand —
+listing is the flag `--list` — and `ddev snapshot --name=<existing>` REFUSES with
+`snapshot … already exists` rather than overwriting. Use
+`ddev snapshot --cleanup --name <name> -y` first.
+
+### 12.6 The carried-over database is now a repeat offender
+
+Unit 3B found it had drifted from the visual baselines. Unit 4A found it made the
+commerce profile **unreachable**: a previous run's 2 products, 2 variations, 9
+legacy `shop_order` rows, 1 coupon and 14 `wp_wc_orders` rows left HPOS already
+enabled with 5 unsynced orders, so `wp wc hpos enable` failed a pre-check for a
+setting that was already on and `scripts/enable-commerce` aborted at step 3.
+
+Worth knowing for any future cleanup: **`wp post delete --force` is NOT
+sufficient for legacy `shop_order` rows** while HPOS is on with compatibility
+mode off — WooCommerce intercepts the deletion and the `wp_posts` rows survive.
+Direct SQL was required, plus clearing `wp_wc_orders`, `wp_wc_order_addresses`,
+`wp_wc_order_operational_data` and `wp_wc_orders_meta`.
+
+Unit 4B should decide whether to re-seed. The argument now has two independent
+supports.
+
+### 12.7 Two Playwright assertion shapes that cannot fail
+
+Both were caught in Unit 4A, one by the orchestrator's audit and one by a worker
+on its own work.
+
+- **`toHaveCount(1)` on a `.first()` locator ALWAYS passes**, because `.first()`
+  yields exactly one element by construction. A worker wrote this as a scoping
+  guard, its own break run stayed green, and it correctly declared the test the
+  defect rather than shipping it. Assert on the raw set instead.
+- **A role locator whose name regex is too loose silently matches the wrong
+  control.** `getByRole( 'button', { name: /cart/i } )` matches "Add to cart", so
+  a Mini-Cart assertion on a product page passes whether or not a Mini-Cart
+  exists. Scope it to the container element and prove the scoping on a page that
+  also holds the decoy.
+
+Related, and cheap: when the value you care about lives in an `aria-label` rather
+than the visible text, assert `toHaveAccessibleName`, and assert BOTH states of a
+transition. A test that only checks the "1" state passes even if the control
+always says 1.
+
+### 12.8 `$template->theme` does not distinguish a theme template from a plugin one
+
+`get_block_template()` fills `theme` with the ACTIVE STYLESHEET even for
+plugin-provided templates. Proven with one template overridden and one not:
+
+    archive-product | origin=NULL     | source=theme  | theme=site-theme
+    single-product  | origin='plugin' | source=plugin | theme=site-theme
+
+So an assertion of the form `assertSame( get_stylesheet(), $template->theme )`
+passes with NO override present. `source` and `origin` are the discriminating
+fields. This was the plan's only test that an override takes effect, and it could
+not fail.
