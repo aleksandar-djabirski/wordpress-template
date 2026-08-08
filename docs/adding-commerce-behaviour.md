@@ -77,23 +77,43 @@ the plugin only shows an admin notice (`render_missing_woocommerce_notice()`).
   `Requires Plugins: woocommerce` so WordPress itself understands the
   dependency, on top of the runtime `class_exists()` guard.
 
-## 3. Hooks first, template overrides last
+## 3. Hooks first, block templates second, classic overrides never
 
-Prefer a `woocommerce_*` hook over a template override every time — a hook
-keeps tracking upstream WooCommerce changes; an override silently stops.
-Only fall back to `web/app/themes/site-theme/woocommerce/` when no hook
-covers the change, and when you do:
+Prefer a `woocommerce_*` hook over any template change — a hook keeps tracking
+upstream changes; an override silently stops.
 
-1. Copy the WooCommerce core template you're overriding.
-2. Add a row to the override log in `web/app/themes/site-theme/woocommerce/README.md`
-   (overridden template, reason, WC template version, related tests, and
-   confirmation a hook-based alternative was actually considered).
-3. Keep the override as small as possible — inherit as much of the
-   surrounding markup as you can.
+When markup really must change, the block theme has exactly one override
+surface: a block template at
+`web/app/themes/site-theme/templates/<slug>.html`. The theme ships one per
+commerce request type (product, product archive, product taxonomies, product
+search, cart, checkout, order confirmation), and each is a **derived copy of
+the template WooCommerce ships for that slug with only the header/footer
+template-part slugs rewritten** to this theme's `site-header` / `site-footer`
+and any environment-specific template-part `theme` attribute removed.
+That missing-part rewrite is the whole justification for the override: WooCommerce's
+templates reference `header` / `footer` parts this theme does not have, so
+without it the storefront renders with no header and no footer.
 
-The base profile ships with **zero** overrides deliberately; the README's
-log starts empty and every future entry should be a reviewed, logged
-exception, not a habit.
+Rules when you change one:
+
+1. Keep the divergence minimal and reviewable — inherit as much upstream
+   composition as you can.
+2. Keep both `wp:template-part` blocks (`site-header`, `site-footer`).
+   `CommerceBoundaryTest` fails if either disappears.
+3. Re-derive from upstream after a major WooCommerce upgrade, then re-apply
+   your divergence. `CommerceBlockTemplatesTest` fails when WooCommerce starts
+   shipping a template slug that is neither owned nor deliberately excluded in
+   `tests/Architecture/commerce-template-list.php`.
+4. Commerce block markup lives ONLY in those declared templates. A commerce
+   block in a base template, a template part, or a theme pattern renders as a
+   broken block on any site without WooCommerce — register it as a pattern
+   from `site-commerce` instead (`SiteCommerce\Theme\CommercePatterns`).
+
+**The classic `web/app/themes/site-theme/woocommerce/` PHP override directory
+is gone.** It held zero overrides, and a block theme has one rendering path
+(spec §4); a classic template override would reintroduce the second one. If a
+future project proves it needs a classic override, that is an ADR-level
+decision, not a habit.
 
 ## 4. Isolation rules
 
@@ -101,7 +121,9 @@ WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) are
 forbidden everywhere except:
 
 - `web/app/plugins/site-commerce/`
-- `web/app/themes/site-theme/woocommerce/`
+- `web/app/themes/site-theme/templates/*.html` — the commerce block
+  templates, the block theme's only commerce markup override surface
+  (enforced by `CommerceBoundaryTest`, the HTML half of this boundary)
 - `tests/commerce/`
 - a reviewed entry in `tests/Architecture/woocommerce-allowlist.php`, each
   with a one-line reason (see the handful of existing entries — e.g.
