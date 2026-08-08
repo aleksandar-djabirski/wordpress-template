@@ -1,6 +1,11 @@
 import { test, expect, type Page } from '@playwright/test';
 import { loginAs } from '../../e2e/helpers/auth';
 import { adminUrl, expectNoAdminMenu } from '../../e2e/helpers/wp';
+import {
+	addSimpleProductToCart,
+	fillBlockCheckoutWithCod,
+	placeOrderAndReadNumber,
+} from './helpers/checkout';
 
 /**
  * Lean shop-manager wp-admin smoke for the commerce profile. Like its journey
@@ -17,57 +22,34 @@ import { adminUrl, expectNoAdminMenu } from '../../e2e/helpers/wp';
  * its day-to-day catalogue/order/coupon work AND that the agency lockdown still
  * holds around it.
  *
- * Every selector below was verified against a live `scripts/enable-commerce`
- * store (WooCommerce 10.9, HPOS active, products in the CLASSIC editor), not
- * from memory. Auth reuses tests/e2e/helpers/auth.ts and the admin-menu
- * assertion reuses tests/e2e/helpers/wp.ts — both resolve across the shared
- * `tests/` tree (tsconfig includes the whole tests tree, Playwright testDir is
- * ./tests), so the cross-directory imports type-check and bundle cleanly.
+ * Auth reuses tests/e2e/helpers/auth.ts and the admin-menu assertion reuses
+ * tests/e2e/helpers/wp.ts — both resolve across the shared `tests/` tree
+ * (tsconfig includes the whole tests tree, Playwright testDir is ./tests), so
+ * the cross-directory imports type-check and bundle cleanly.
  *
  * Credentials are the LOCAL-ONLY throwaway pair scripts/enable-commerce creates
  * (never valid outside a freshly enabled commerce install).
  */
 
 const SHOP_MANAGER = { user: 'shop-manager', pass: 'shop-manager' } as const;
-const SIMPLE_PRODUCT_SLUG = 'test-simple-product';
 
 function isMobileProject(): boolean {
 	return test.info().project.name === 'chromium-mobile';
 }
 
 /**
- * Places a guest Cash-on-Delivery order through the CLASSIC storefront checkout
- * (the same server-rendered selectors the journey suite drives) and returns the
- * order number from the order-received page. Used to seed a deterministic order
- * for the orders-screen test WITHOUT depending on the journey suite having run
- * first — the whole point is that this spec is self-contained.
+ * Places a guest Cash-on-Delivery order through the BLOCK storefront checkout
+ * (the same accessible-role/label helpers the journey suite drives, from
+ * helpers/checkout.ts) and returns the order number from the order-received
+ * page. Used to seed a deterministic order for the orders-screen test WITHOUT
+ * depending on the journey suite having run first — the whole point is that
+ * this spec is self-contained.
  */
 async function placeGuestCodOrder( page: Page ): Promise<string> {
-	await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
-	await page.locator( '.single_add_to_cart_button' ).click();
-	await expect( page.locator( '.woocommerce-message, .wc-block-components-notice-banner' ).first() ).toBeVisible();
-
+	await addSimpleProductToCart( page );
 	await page.goto( '/checkout/' );
-	await page.locator( '#billing_first_name' ).fill( 'Smoke' );
-	await page.locator( '#billing_last_name' ).fill( 'Tester' );
-	await page.locator( '#billing_country' ).selectOption( 'US' );
-	await page.locator( '#billing_address_1' ).fill( '123 Test Street' );
-	await page.locator( '#billing_city' ).fill( 'Los Angeles' );
-	await page.locator( '#billing_state' ).selectOption( 'CA' );
-	await page.locator( '#billing_postcode' ).fill( '90001' );
-	await page.locator( '#billing_phone' ).fill( '5550100' );
-	await page.locator( '#billing_email' ).fill( 'smoke-tester@example.invalid' );
-	// COD lives in the payment panel update_order_review re-renders; check it
-	// last (Playwright waits out the .blockOverlay the AJAX refresh paints).
-	await page.locator( '#payment_method_cod' ).check();
-
-	await page.locator( '#place_order' ).click();
-	await page.waitForURL( /order-received/ );
-
-	const raw = ( await page.locator( '.woocommerce-order-overview__order strong' ).innerText() ).trim();
-	// HPOS numbers orders by id; strip any decoration so the value can address
-	// the order-edit screen directly.
-	return raw.replace( /\D/g, '' );
+	await fillBlockCheckoutWithCod( page, 'smoke-tester@example.com' );
+	return placeOrderAndReadNumber( page );
 }
 
 /**
@@ -197,5 +179,31 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		await expect(
 			page.getByText( /you do not have sufficient permissions|not allowed to access this page/i )
 		).toHaveCount( 0 );
+	} );
+
+	test( 'shop-manager can open the Site Editor', async ( { page } ) => {
+		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
+
+		const response = await page.goto( adminUrl( 'site-editor.php' ) );
+		expect( response?.status() ).toBe( 200 );
+		await expect(
+			page.getByText( /you do not have sufficient permissions|not allowed to access this page/i )
+		).toHaveCount( 0 );
+
+		// The Site Editor canvas is an iframe; its presence is the proof the
+		// editor booted rather than rendering a permissions error.
+		await expect( page.locator( 'iframe[name="editor-canvas"], .edit-site-visual-editor' ).first() ).toBeVisible( { timeout: 30_000 } );
+	} );
+
+	test( 'shop-manager is still refused the theme installer and the theme file editor', async ( { page } ) => {
+		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
+
+		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php' ] ) {
+			const response = await page.goto( adminUrl( denied ) );
+			expect( response?.status(), denied ).toBe( 403 );
+			await expect(
+				page.getByText( /higher level of permission|not allowed/i ).first()
+			).toBeVisible();
+		}
 	} );
 } );
