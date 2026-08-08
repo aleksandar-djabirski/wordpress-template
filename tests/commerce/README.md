@@ -26,20 +26,31 @@ PHPUnit suite lives in its own `commerce-integration` testsuite that base
     with PII and a stored payment token in the HPOS tables, runs the sanitize
     step, and asserts every PII column is anonymized and the payment-token
     tables are cleared.
+  - `Integration/Theme/CommerceBlockTemplatesTest.php` — every commerce block
+    template parses, names only registered blocks, resolves its
+    `site-header`/`site-footer` parts, wins over the store plugin's default
+    template, and no upstream template slug is left undecided.
+  - `Integration/Theme/CommercePatternsTest.php` — the commerce pattern
+    category and the `header-mini-cart` / `product-grid` patterns register
+    when the profile boots.
 - **`e2e/commerce-journey.spec.ts`** — the `COMMERCE=1` Playwright journeys:
-  product archive → PDP (simple + variable) add-to-cart → cart quantity +
-  `TESTCOUPON` → guest COD checkout → order-received → a logged-in customer's
-  order history. The mobile project runs the checkout as a smoke; the desktop
-  project runs the full set.
+  they drive the **native block** cart and checkout (seeded by
+  `scripts/enable-commerce`), plus the theme-chrome assertion on the shop
+  archive and the header Mini-Cart. The mobile project runs the checkout as a
+  smoke; the desktop project runs the full set.
 - **`e2e/shop-manager-admin.spec.ts`** — a lean, desktop-only `COMMERCE=1`
   wp-admin smoke for the `shop-manager` user: the products list shows the
   fixtures and a published product opens for editing (the workflow-complete
   catalogue role), the HPOS orders screen loads and a private order note
-  round-trips (against an
-  order the spec places itself), the coupons screen lists `TESTCOUPON`, the
-  agency lockdown still hides Plugins/Appearance, and WooCommerce Settings stays
-  reachable (the documented `manage_woocommerce` dial). Full fulfillment/refund
-  flows are deferred to the first real store project.
+  round-trips (against an order the spec places itself), the coupons screen
+  lists `TESTCOUPON`, WooCommerce Settings stays reachable (the documented
+  `manage_woocommerce` dial), the Site Editor opens, and the theme installer
+  and the theme file editor are refused with 403s. The agency lockdown
+  removes the Plugins menu and replaces the Appearance menu with a single
+  Design entry that links straight to the Site Editor
+  (`AdminScreenPolicy::replace_appearance_menu()` calls
+  `remove_menu_page( 'themes.php' )`). Full fulfillment/refund flows are
+  deferred to the first real store project.
 
 ## How to run locally
 
@@ -80,6 +91,10 @@ PHPUnit suite lives in its own `commerce-integration` testsuite that base
 - The Playwright journeys `test.skip()` themselves unless `COMMERCE=1`.
 - WooCommerce symbols are allowed here: `WooCommerceIsolationTest` excludes
   `tests/commerce/`.
+- `tests/Architecture/CommerceBoundaryTest` runs in the BASE architecture
+  suite and keeps commerce block markup inside the declared commerce
+  templates — it is the block-markup half of `WooCommerceIsolationTest`'s
+  PHP-symbol rule.
 - CI runs all of this in a dedicated `commerce-e2e` job (see
   `.github/workflows/ci.yml`) that installs WooCommerce ephemerally; the base
   jobs never install it.

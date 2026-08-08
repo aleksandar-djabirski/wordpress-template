@@ -22,7 +22,7 @@ Composition of blocks → pattern (`site-theme/patterns/`)
 Business rule → `site-core`
 External service → `site-integrations`
 WooCommerce behavior → `site-commerce`
-WooCommerce markup override → `site-theme/woocommerce/`
+WooCommerce markup override → `site-theme/templates/<commerce-slug>.html` (block template; the classic `woocommerce/` directory is retired)
 
 ## Layer ownership
 
