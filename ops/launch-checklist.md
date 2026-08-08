@@ -30,10 +30,14 @@ the outcome (who, when, and the choice made) in the project's change log;
 
 - [ ] **HMAC keyring provisioned in every environment that signs or verifies.**
       `AGENCY_PROMOTION_HMAC_KEYS` (a JSON keyring) and
-      `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID` are set in local/CI preparation and
-      on the production host. A missing or empty keyring is a hard failure by
-      design — there is no fallback to WordPress salts, which differ per
-      environment. Record where the keys live and who can rotate them.
+      `AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID` must be set in local/CI
+      preparation and on the production host. **The starter ships neither** —
+      `.env.example` carries both commented out — so this is work to do, not a
+      default to confirm. Until they are set, `wp agency state-export` exits 1
+      with `AGENCY_PROMOTION_HMAC_KEYS is not set: no HMAC key is available.`
+      A missing or empty keyring is a hard failure by design — there is no
+      fallback to WordPress salts, which differ per environment. Record where
+      the keys live and who can rotate them.
 - [ ] **`AGENCY_TARGET_SITE_UUID` recorded for production**, and a rotation plan
       exists (add the new key, advance the signing key id, keep the old key
       until outstanding manifests and backups expire).

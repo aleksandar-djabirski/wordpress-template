@@ -61,7 +61,7 @@ production or exposing PII to whoever's debugging:
    restore-test cadence) — don't let a one-off debug copy become an
    unmonitored, unpatched, forgotten install.
 
-## A promotion made the site wrong
+## 5. A promotion made the site wrong
 
 1. Do not hand-edit the database. Run
    `wp agency promote-overrides --rollback --manifest=<path>` — it restores the
@@ -84,7 +84,7 @@ production or exposing PII to whoever's debugging:
    restore. Treat that as an open incident until each named record is resolved.
 5. Full procedure and command lines: `docs/state-reconciliation.md`.
 
-## 5. After the incident
+## 6. After the incident
 
 Write down what happened, when, the trigger, the fix, and one concrete
 prevention step (a new architecture test, a new monitor, a process change)
