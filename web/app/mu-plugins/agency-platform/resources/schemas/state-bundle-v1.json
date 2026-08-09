@@ -34,6 +34,7 @@
     },
     "stateHash": { "$ref": "#/definitions/sha256" },
     "hmacKeyId": { "type": "string", "minLength": 1 },
+    "hmacVersion": { "type": "integer", "enum": [1, 2] },
     "hmac": { "$ref": "#/definitions/sha256" }
   },
   "definitions": {
