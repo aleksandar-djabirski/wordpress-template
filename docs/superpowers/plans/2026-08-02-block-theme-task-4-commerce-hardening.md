@@ -4144,50 +4144,50 @@ This task carries no release gate of its own — it closes Releases 1–4. It is
 
 **Cross-task preconditions (this task cannot close without them):**
 
-- [ ] **P1** and **P2** satisfied — Phase A's templates landed without editing a Task 1-owned test.
-- [ ] **P3** satisfied — `tests/support/BlockIndexGenerator.php` indexes `templates/*.html`, proven empirically in Task A8 Step 3. **Hard gate: Phase A does not close otherwise.**
-- [ ] **P4** satisfied by Task 1 — the fresh-clone proof completed on a bootstrap that creates a block-theme navigation. If it is still stale, the fresh-clone proof is BLOCKED, not passed.
-- [ ] **P5** satisfied by Task 3 — `scripts/promote-overrides` runs in the proof environment, and its Playwright wiring accepts both the required project name and test path. If not, the promotion proof is BLOCKED, not passed.
-- [ ] Every ownership item this task deliberately did NOT fix (the `WooCommerceIsolationTest` wording, `scripts/setup`, `.github/workflows/ci.yml`) is recorded and escalated, not silently left.
+- [x] **P1** and **P2** satisfied — Phase A's templates landed without editing a Task 1-owned test.
+- [x] **P3** satisfied — `tests/support/BlockIndexGenerator.php` indexes `templates/*.html`, proven empirically in Task A8 Step 3. **Hard gate: Phase A does not close otherwise.**
+- [x] **P4** satisfied by Task 1 — the fresh-clone proof completed on a bootstrap that creates a block-theme navigation. If it is still stale, the fresh-clone proof is BLOCKED, not passed.
+- [x] **P5** satisfied by Task 3 — `scripts/promote-overrides` runs in the proof environment, and its Playwright wiring accepts both the required project name and test path. If not, the promotion proof is BLOCKED, not passed.
+- [x] Every ownership item this task deliberately did NOT fix (the `WooCommerceIsolationTest` wording, `scripts/setup`, `.github/workflows/ci.yml`) is recorded and escalated, not silently left.
 
 **Profile separation (the base profile is never certified from a commerce site):**
 
-- [ ] Every base result in the validation matrix is labelled with the profile it ran on, and each was produced after a `SWITCH TO BASE` whose five assertions passed.
-- [ ] CI shows `e2e` and `commerce-e2e` green independently — each builds its own environment, which is the strongest available proof neither profile depends on the other.
+- [x] Every base result in the validation matrix is labelled with the profile it ran on, and each was produced after a `SWITCH TO BASE` whose five assertions passed.
+- [x] CI shows `e2e` and `commerce-e2e` green independently — each builds its own environment, which is the strongest available proof neither profile depends on the other.
 
 **Spec §13 "All releases" closing conditions:**
 
-- [ ] No state bundle, backup payload, secret, or customer data is committed — all four checks in Task B8 Step 2.14 print their `OK` line.
-- [ ] `git status` is clean, and every commit in the branch was made on a green `verify:fast`. No commit in this task's history was made while a suite was red.
+- [x] No state bundle, backup payload, secret, or customer data is committed — all four checks in Task B8 Step 2.14 print their `OK` line.
+- [x] `git status` is clean, and every commit in the branch was made on a green `verify:fast`. No commit in this task's history was made while a suite was red.
 
 **Spec §12 proofs recorded:**
 
-- [ ] Full command matrix run and recorded, base and commerce, with every environment-dependent test explicitly labelled (`.superpowers/sdd/BLOCK_THEME_PROPOSAL/proofs/validation-matrix.log`).
-- [ ] Fresh-clone proof, all 7 steps, recorded (`proofs/fresh-clone.log`), run in an isolated temporary directory under its own DDEV project.
-- [ ] Full isolated-adapter promotion proof, all 14 steps, recorded (`proofs/promotion-proof.log`) — including the intentional Playwright failure that auto-rolls back, a rollback refused **because a second confirmed promotion claimed the record**, and the Release 4 Global Styles selection and resolved-output-equivalence result. The isolated DDEV proof target is the accepted full promotion target for this template.
+- [x] Full command matrix run and recorded, base and commerce, with every environment-dependent test explicitly labelled (`.superpowers/sdd/BLOCK_THEME_PROPOSAL/proofs/validation-matrix.log`).
+- [x] Fresh-clone proof, all 7 steps, recorded (`proofs/fresh-clone.log`), run in an isolated temporary directory under its own DDEV project.
+- [x] Full isolated-adapter promotion proof, all 14 steps, recorded (`proofs/promotion-proof.log`) — including the intentional Playwright failure that auto-rolls back, a rollback refused **because a second confirmed promotion claimed the record**, and the Release 4 Global Styles selection and resolved-output-equivalence result. The isolated DDEV proof target is the accepted full promotion target for this template.
 - [ ] Every proof-only commit reverted, with `git diff origin/feat/block-theme-fse-migration` empty for the promoted files.
 
 **Spec §11.8 (commerce profile):**
 
-- [ ] Every justified commerce block template exists under `site-theme/templates/`, derived from upstream with only the header/footer part slugs rewritten and environment-specific template-part `theme` attributes removed. No `templates/woocommerce/*` directory exists.
-- [ ] The Mini-Cart reaches the header through the `site-commerce/header-mini-cart` pattern and the `scripts/enable-commerce` template-part override; the base header part stays commerce-free.
-- [ ] Styling is `theme.json`/block-supports only; no commerce CSS, no commerce keys in `theme.json`.
-- [ ] `scripts/enable-commerce` seeds native Cart/Checkout **blocks** and hard-fails if either page is not block-based.
-- [ ] `site-theme/woocommerce/` is deleted and the policy is documented in `docs/adding-commerce-behaviour.md`.
-- [ ] `tests/Architecture/CommerceBoundaryTest` and `tests/commerce/Integration/Theme/CommerceBlockTemplatesTest` both pass; commerce E2E covers the block storefront.
+- [x] Every justified commerce block template exists under `site-theme/templates/`, derived from upstream with only the header/footer part slugs rewritten and environment-specific template-part `theme` attributes removed. No `templates/woocommerce/*` directory exists.
+- [x] The Mini-Cart reaches the header through the `site-commerce/header-mini-cart` pattern and the `scripts/enable-commerce` template-part override; the base header part stays commerce-free.
+- [x] Styling is `theme.json`/block-supports only; no commerce CSS, no commerce keys in `theme.json`.
+- [x] `scripts/enable-commerce` seeds native Cart/Checkout **blocks** and hard-fails if either page is not block-based.
+- [x] `site-theme/woocommerce/` is deleted and the policy is documented in `docs/adding-commerce-behaviour.md`.
+- [x] `tests/Architecture/CommerceBoundaryTest` and `tests/commerce/Integration/Theme/CommerceBlockTemplatesTest` both pass; commerce E2E covers the block storefront.
 
 **Spec §11.14 (commerce Playwright):**
 
-- [ ] Shop Manager Site Editor access is proven, and the theme-installer/file-editor/Customizer refusals still hold.
-- [ ] Commerce storefront journeys run against the block templates.
+- [x] Shop Manager Site Editor access is proven, and the theme-installer/file-editor/Customizer refusals still hold.
+- [x] Commerce storefront journeys run against the block templates.
 
 **Spec §11.15 (documentation):**
 
-- [ ] `docs/state-reconciliation.md` exists and covers every required bullet, including the revision-history trade-off.
-- [ ] `ops/backup.md`, `ops/restore.md`, `ops/update-process.md`, `ops/incident-recovery.md`, `ops/monitoring.md`, and `ops/launch-checklist.md` are updated.
-- [ ] The consistency sweep leaves no document claiming the theme is hybrid/classic, that a published template/part database row is always invalid, or that the classic commerce override directory exists.
-- [ ] `docs/generated-block-index.md` matches `php scripts/generate-block-index`.
+- [x] `docs/state-reconciliation.md` exists and covers every required bullet, including the revision-history trade-off.
+- [x] `ops/backup.md`, `ops/restore.md`, `ops/update-process.md`, `ops/incident-recovery.md`, `ops/monitoring.md`, and `ops/launch-checklist.md` are updated.
+- [x] The consistency sweep leaves no document claiming the theme is hybrid/classic, that a published template/part database row is always invalid, or that the classic commerce override directory exists.
+- [x] `docs/generated-block-index.md` matches `php scripts/generate-block-index`.
 
 **Spec §17:**
 
-- [ ] The final report exists with all fourteen required elements and is delivered as the closing message, with no completion claim for a skipped test.
+- [x] The final report exists with all fourteen required elements and is delivered as the closing message, with no completion claim for a skipped test.

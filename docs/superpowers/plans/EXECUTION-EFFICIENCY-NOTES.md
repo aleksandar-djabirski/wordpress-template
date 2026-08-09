@@ -648,3 +648,45 @@ So an assertion of the form `assertSame( get_stylesheet(), $template->theme )`
 passes with NO override present. `source` and `origin` are the discriminating
 fields. This was the plan's only test that an override takes effect, and it could
 not fail.
+
+---
+
+## 13. Added after the final review
+
+### 13.1 PHPStan has a result cache and can give a false green
+
+A local PHPStan run reported `No errors`, while CI reported 49 errors in files
+that the fix wave did not touch. `phpstan clear-result-cache` reproduced CI
+exactly. Clear the PHPStan result cache before any gate that you intend to
+trust. The existing PHPUnit `cacheResultFile` warning does not cover this tool.
+
+### 13.2 Test stubs must match the real WordPress symbols
+
+PHPStan scans `tests/`, so a narrower test stub shadows
+`php-stubs/wordpress-stubs` for the whole analysis. A `WP_Post` stub with only
+`ID` and `post_type` caused 49 undefined-property errors in production state
+providers. The same defect affected `WP_REST_Request::get_method()` and the
+untyped `wp_die()` title and response-code contract. A stub must be an accurate
+stand-in. It must not be stricter than WordPress.
+
+### 13.3 Parallel agents must partition symbols as well as files
+
+Seven agents had disjoint file lists but still collided on the
+`WP_Block_Type_Registry` symbol. One declared the class and another used
+`class_alias`. The unit suite passed according to load order, but PHPStan did
+not. Partition shared symbols as well as paths, and require PHPStan as a
+per-agent gate. A unit and architecture pass is not sufficient for parallel
+work.
+
+### 13.4 Base e2e runs are not idempotent
+
+Two Unit 1-owned specs can destroy the navigation that later tests need. A
+fresh-clone first run passed, but the repaired-navigation, full-suite,
+repair-navigation, smoke-only sequence exposed the loss. Treat the worktree
+state as a test input and repair it before a repeat run.
+
+### 13.5 Measure the work product during an opencode run
+
+An empty artifact directory does not prove that an opencode run is hung. The
+reliable liveness signal is whether the work product is growing. Inspect the
+work product before dispatching a replacement.
