@@ -110,8 +110,17 @@ final class WooCommerceIsolationTest extends TestCase {
 
 	/**
 	 * Every file the isolation rule applies to: the mu-plugin, site-core,
-	 * site-integrations, the theme (minus its woocommerce/ overrides), and the
-	 * test suite (minus tests/commerce/ and tests/Architecture/).
+	 * site-integrations, the theme, and the test suite (minus tests/commerce/
+	 * and tests/Architecture/).
+	 *
+	 * This scanner reads PHP only. The theme's commerce surface is its declared
+	 * commerce BLOCK TEMPLATES (`templates/<commerce-slug>.html`), which are
+	 * HTML and therefore invisible here — `CommerceBoundaryTest` is the other
+	 * half of the same boundary. The classic `site-theme/woocommerce/` PHP
+	 * override directory was retired with the move to a block theme, so the
+	 * `/woocommerce/` fragment below now excludes a directory that does not
+	 * exist. It is harmless, and kept so that a project which re-creates that
+	 * directory is still excluded here rather than silently scanned.
 	 *
 	 * Two directories are excluded by definition rather than by allow-list:
 	 * site-commerce (WooCommerce's approved home) and tests/Architecture/

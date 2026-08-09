@@ -62,12 +62,18 @@ final class ManifestStore {
 	public function render( PromotionManifest $manifest ): string {
 		$data = $manifest->to_array();
 
-		unset( $data['hmac'], $data['hmacKeyId'] );
+		// Every field the signer OWNS is cleared before signing and written
+		// back afterwards. hmacVersion belongs to that set: it is part of the
+		// signed bytes, so a stored manifest that omitted it would be read back
+		// as a legacy-format document, canonicalised the old way, and would
+		// then fail verification against its own signature.
+		unset( $data['hmac'], $data['hmacKeyId'], $data['hmacVersion'] );
 
 		$signature = $this->gateway->sign_manifest( $data );
 
-		$data['hmacKeyId'] = $signature['hmacKeyId'];
-		$data['hmac']      = $signature['hmac'];
+		$data['hmacKeyId']   = $signature['hmacKeyId'];
+		$data['hmacVersion'] = $signature['hmacVersion'];
+		$data['hmac']        = $signature['hmac'];
 
 		// The schema describes the SIGNED, STORED manifest; validating the
 		// signed document catches a schema break introduced by this code.

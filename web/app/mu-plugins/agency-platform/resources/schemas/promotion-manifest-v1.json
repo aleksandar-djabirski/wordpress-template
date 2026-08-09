@@ -43,6 +43,7 @@
     "settledAtUtc": { "oneOf": [{ "$ref": "#/definitions/dateTimeUtc" }, { "type": "null" }] },
     "retentionUntilUtc": { "oneOf": [{ "$ref": "#/definitions/dateTimeUtc" }, { "type": "null" }] },
     "hmacKeyId": { "type": "string", "minLength": 1 },
+    "hmacVersion": { "type": "integer", "enum": [1, 2] },
     "hmac": { "$ref": "#/definitions/sha256" }
   },
   "definitions": {

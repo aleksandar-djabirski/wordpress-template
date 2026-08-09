@@ -5,10 +5,12 @@
  * WooCommerceIsolationTest forbids WooCommerce symbols (WooCommerce, WC_*,
  * wc_*, woocommerce_*) everywhere in the base profile so a site can run
  * without WooCommerce and so all commerce logic stays quarantined inside the
- * site-commerce plugin and the theme's woocommerce/ overrides. The files
- * below are the handful of deliberate, reviewed exceptions: each references a
- * WooCommerce symbol for a legitimate reason that does NOT belong in
- * site-commerce.
+ * site-commerce plugin and the theme's declared commerce block templates
+ * (`templates/<commerce-slug>.html`, enforced by CommerceBoundaryTest — the
+ * classic `site-theme/woocommerce/` PHP override directory was retired with
+ * the move to a block theme). The files below are the handful of deliberate,
+ * reviewed exceptions: each references a WooCommerce symbol for a legitimate
+ * reason that does NOT belong in site-commerce.
  *
  * Keys are repo-relative paths (forward slashes). Values are the one-line
  * reason each exception exists. To add an entry you must have a reason that

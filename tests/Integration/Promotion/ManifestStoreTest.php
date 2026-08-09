@@ -473,9 +473,10 @@ final class ManifestStoreTest extends IntegrationTestCase {
 
 		$document['unexpectedField'] = true;
 
-		$signature             = $this->gateway->sign_manifest( $document );
-		$document['hmacKeyId'] = $signature['hmacKeyId'];
-		$document['hmac']      = $signature['hmac'];
+		$signature               = $this->gateway->sign_manifest( $document );
+		$document['hmacKeyId']   = $signature['hmacKeyId'];
+		$document['hmacVersion'] = $signature['hmacVersion'];
+		$document['hmac']        = $signature['hmac'];
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- rewriting the signed fixture; the WP_Filesystem credentials context does not exist here.
 		file_put_contents( $path, wp_json_encode( $document ) );

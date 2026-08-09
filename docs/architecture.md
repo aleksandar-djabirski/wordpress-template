@@ -89,8 +89,9 @@ Customer copy, media choices, page compositions, navigation data, and
 product/order data live in the database. Database structural overrides are
 **expected**: a client editing a template, a part or Global Styles writes a
 `wp_template`, `wp_template_part` or `wp_global_styles` row.
-`wp agency check-overrides` reports them and exits zero; `--fail-on-drift` is
-the opt-in gate.
+`wp agency state-diff` reports them and exits zero; `--fail-on-drift` is the
+opt-in gate. (`wp agency check-overrides` remains as a compatibility alias and
+prints a deprecation warning pointing at `state-diff`.)
 
 State ownership, in one paragraph: templates and template parts are a Git
 baseline plus database overrides, both promotable; Global Styles is the same
@@ -109,8 +110,9 @@ and export/diff only. The full table — the single copy — lives at
 between the database and the Git baseline. It exits zero by default — a
 database template, part or Global Styles row is a legitimate client edit under
 this editing model — and exits 1 only with `--fail-on-drift`. Richer,
-machine-readable reporting arrives with `wp agency state-export` /
-`wp agency state-diff`; this command remains as a compatibility alias.
+machine-readable reporting is `wp agency state-export` / `wp agency state-diff`,
+which ship today; `check-overrides` remains as a compatibility alias and prints
+a deprecation warning pointing at `state-diff`.
 
 ## Editing surfaces and their guardrails
 
