@@ -40,8 +40,13 @@ namespace {
 			 */
 			private array $params = array();
 
+			private string $method;
+
+			private string $route;
+
 			public function __construct( string $method = 'GET', string $route = '' ) {
-				unset( $method, $route );
+				$this->method = $method;
+				$this->route  = $route;
 			}
 
 			public function set_param( string $key, mixed $value ): void {
@@ -50,6 +55,19 @@ namespace {
 
 			public function get_param( string $key ): mixed {
 				return $this->params[ $key ] ?? null;
+			}
+
+			// Production reads both — GlobalStylesGuard and AdminScreenPolicy
+			// branch on them. A stub that omits a method the real class has
+			// does not merely fail this test's own needs: it SHADOWS
+			// php-stubs/wordpress-stubs for the entire PHPStan run and turns
+			// every production call site into "undefined method".
+			public function get_method(): string {
+				return $this->method;
+			}
+
+			public function get_route(): string {
+				return $this->route;
 			}
 		}
 	}
@@ -71,12 +89,49 @@ namespace {
 		}
 	}
 
+	/**
+	 * The unit suite runs without WordPress, so it needs a real WP_Post at
+	 * RUNTIME. But php-stubs/wordpress-stubs is what PHPStan reads WordPress
+	 * classes from, and a class declared here SHADOWS it for the whole
+	 * analysis — every production `$post->post_name` then becomes
+	 * "Access to an undefined property". That is not hypothetical: a
+	 * two-property version of this stub produced 49 such errors across
+	 * TemplatesState, TemplatePartsState and friends, none of which this test
+	 * touches.
+	 *
+	 * So the stub carries every property the production code reads. If PHPStan
+	 * reports another undefined WP_Post property, add it here rather than
+	 * silencing it — the error means this stub has drifted from the real class,
+	 * which is exactly what it is supposed to stand in for.
+	 *
+	 * `tests/support/wp-stubs.php` deliberately holds FUNCTION stubs only, for
+	 * the same reason: its own docblock warns against growing "a shadow
+	 * WordPress".
+	 */
 	if ( ! class_exists( 'WP_Post' ) ) {
 		final class WP_Post {
 
 			public int $ID;
 
 			public string $post_type;
+
+			public string $post_name = '';
+
+			public string $post_status = '';
+
+			public string $post_content = '';
+
+			public string $post_title = '';
+
+			public string $post_modified_gmt = '';
+
+			public string $post_password = '';
+
+			public int $post_author = 0;
+
+			public int $post_parent = 0;
+
+			public int $menu_order = 0;
 
 			public function __construct( int $id, string $post_type ) {
 				$this->ID        = $id;
@@ -184,12 +239,29 @@ namespace {
 
 	if ( ! function_exists( 'wp_die' ) ) {
 		/**
-		 * @param mixed                 $message
-		 * @param string                $title
-		 * @param array<string, mixed>  $arguments
+		 * Signature MATCHES WordPress's own — `wp_die( $message = '',
+		 * $title = '', $args = array() )`, all untyped — and that is
+		 * deliberate, not laziness.
+		 *
+		 * Real WordPress accepts an INT as $title and treats it as the
+		 * response code; AdminScreenPolicy::deny() calls `wp_die( $html, 403 )`
+		 * and the forbidden-admin-screens e2e spec proves it really does return
+		 * 403. A stub narrowed to `string $title` shadows
+		 * php-stubs/wordpress-stubs for the whole PHPStan run and reports that
+		 * untouched production line as an argument.type error — a defect
+		 * invented by the test, in code the test does not cover.
+		 *
+		 * A stub must be an accurate stand-in for the real symbol, never a
+		 * stricter one.
+		 *
+		 * @param mixed $message
+		 * @param mixed $title
+		 * @param mixed $arguments
 		 */
-		function wp_die( $message, string $title = '', array $arguments = array() ): never {
-			throw new SaveValidationTestWpDie( (string) $message, $arguments );
+		function wp_die( $message = '', $title = '', $arguments = array() ): never {
+			unset( $title );
+
+			throw new SaveValidationTestWpDie( (string) $message, is_array( $arguments ) ? $arguments : array() );
 		}
 	}
 }
