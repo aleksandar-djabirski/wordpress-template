@@ -16,8 +16,12 @@ function formatViolations( violations: Result[] ): string {
 
 	return violations
 		.map( ( violation ) => {
-			const targets = violation.nodes.map( ( node ) => `    - ${ node.target.join( ' ' ) }` ).join( '\n' );
-			return `${ violation.id } [${ violation.impact ?? 'unknown impact' }]: ${ violation.help }\n${ targets }`;
+			const targets = violation.nodes
+				.map( ( node ) => `    - ${ node.target.join( ' ' ) }` )
+				.join( '\n' );
+			return `${ violation.id } [${
+				violation.impact ?? 'unknown impact'
+			}]: ${ violation.help }\n${ targets }`;
 		} )
 		.join( '\n\n' );
 }
@@ -25,19 +29,31 @@ function formatViolations( violations: Result[] ): string {
 test( 'home page has no WCAG 2 A/AA violations', async ( { page } ) => {
 	await page.goto( '/' );
 
-	const results = await new AxeBuilder( { page } ).withTags( [ 'wcag2a', 'wcag2aa' ] ).analyze();
+	const results = await new AxeBuilder( { page } )
+		.withTags( [ 'wcag2a', 'wcag2aa' ] )
+		.analyze();
 
-	expect( results.violations, formatViolations( results.violations ) ).toEqual( [] );
+	expect(
+		results.violations,
+		formatViolations( results.violations )
+	).toEqual( [] );
 } );
 
-test( 'a content page (Sample Page) has no WCAG 2 A/AA violations', async ( { page } ) => {
+test( 'a content page (Sample Page) has no WCAG 2 A/AA violations', async ( {
+	page,
+} ) => {
 	const response = await page.goto( '/sample-page/' );
 
 	expect( response?.status() ).toBe( 200 );
 
-	const results = await new AxeBuilder( { page } ).withTags( [ 'wcag2a', 'wcag2aa' ] ).analyze();
+	const results = await new AxeBuilder( { page } )
+		.withTags( [ 'wcag2a', 'wcag2aa' ] )
+		.analyze();
 
-	expect( results.violations, formatViolations( results.violations ) ).toEqual( [] );
+	expect(
+		results.violations,
+		formatViolations( results.violations )
+	).toEqual( [] );
 } );
 
 test( 'the demo page has no WCAG 2 A/AA violations', async ( { page } ) => {
@@ -45,7 +61,12 @@ test( 'the demo page has no WCAG 2 A/AA violations', async ( { page } ) => {
 
 	expect( response?.status() ).toBe( 200 );
 
-	const results = await new AxeBuilder( { page } ).withTags( [ 'wcag2a', 'wcag2aa' ] ).analyze();
+	const results = await new AxeBuilder( { page } )
+		.withTags( [ 'wcag2a', 'wcag2aa' ] )
+		.analyze();
 
-	expect( results.violations, formatViolations( results.violations ) ).toEqual( [] );
+	expect(
+		results.violations,
+		formatViolations( results.violations )
+	).toEqual( [] );
 } );

@@ -32,13 +32,17 @@ test.describe( 'promotion verification drill', () => {
 		'drill only — set AGENCY_PROMOTION_FAILURE_DRILL=1 to make verification fail on purpose'
 	);
 
-	test( 'fails on purpose so promotion verification rolls back', async ( { page } ) => {
+	test( 'fails on purpose so promotion verification rolls back', async ( {
+		page,
+	} ) => {
 		await page.goto( '/' );
 		// A second navigation keeps the run longer than the wrapper's
 		// heartbeat interval, so at least one --heartbeat provably fires
 		// while verification is still running. The assertion below still
 		// fails on purpose; the collected-test count stays exactly one.
 		await page.goto( '/sample-page/' );
-		expect( 'promotion-verification-drill' ).toBe( 'this assertion always fails' );
+		expect( 'promotion-verification-drill' ).toBe(
+			'this assertion always fails'
+		);
 	} );
 } );

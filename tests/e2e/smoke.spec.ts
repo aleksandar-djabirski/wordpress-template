@@ -15,12 +15,17 @@ test( 'home page renders the standard chrome', async ( { page } ) => {
 
 	expect( response?.status() ).toBe( 200 );
 	await expect( page.locator( 'header.site-header' ) ).toBeVisible();
-	await expect( page.locator( '.site-header__branding .wp-block-site-title' ) ).toBeVisible();
+	await expect(
+		page.locator( '.site-header__branding .wp-block-site-title' )
+	).toBeVisible();
 	await expect( page.locator( 'footer.site-footer' ) ).toBeVisible();
 	await expect( page.locator( 'main#site-main' ) ).toBeAttached();
 } );
 
-test( 'internal links on the home page all resolve', async ( { page, baseURL } ) => {
+test( 'internal links on the home page all resolve', async ( {
+	page,
+	baseURL,
+} ) => {
 	await page.goto( '/' );
 
 	const hrefs = await page.$$eval(
@@ -34,7 +39,7 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 			} catch {
 				return [];
 			}
-			const internal = new Set<string>();
+			const internal = new Set< string >();
 			for ( const anchor of anchors ) {
 				const href = anchor.getAttribute( 'href' );
 				if ( ! href ) {
@@ -57,26 +62,47 @@ test( 'internal links on the home page all resolve', async ( { page, baseURL } )
 
 	for ( const href of hrefs.slice( 0, 20 ) ) {
 		const response = await page.request.get( href );
-		expect( response.status(), `expected ${ href } to respond < 400` ).toBeLessThan( 400 );
+		expect(
+			response.status(),
+			`expected ${ href } to respond < 400`
+		).toBeLessThan( 400 );
 	}
 } );
 
-test( 'desktop: the site navigation is visible without opening an overlay', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-desktop', 'desktop-only: core collapses the navigation into an overlay on narrow viewports' );
+test( 'desktop: the site navigation is visible without opening an overlay', async ( {
+	page,
+}, testInfo ) => {
+	test.skip(
+		testInfo.project.name !== 'chromium-desktop',
+		'desktop-only: core collapses the navigation into an overlay on narrow viewports'
+	);
 
 	await page.goto( '/' );
 
-	await expect( page.locator( 'header.site-header nav.wp-block-navigation' ) ).toBeVisible();
-	await expect( page.locator( '.wp-block-navigation__responsive-container-open' ) ).toBeHidden();
+	await expect(
+		page.locator( 'header.site-header nav.wp-block-navigation' )
+	).toBeVisible();
+	await expect(
+		page.locator( '.wp-block-navigation__responsive-container-open' )
+	).toBeHidden();
 } );
 
-test( 'mobile: the navigation overlay opens and Escape closes it', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-mobile', 'mobile-only: the navigation overlay toggle only renders below core\'s breakpoint' );
+test( 'mobile: the navigation overlay opens and Escape closes it', async ( {
+	page,
+}, testInfo ) => {
+	test.skip(
+		testInfo.project.name !== 'chromium-mobile',
+		"mobile-only: the navigation overlay toggle only renders below core's breakpoint"
+	);
 
 	await page.goto( '/' );
 
-	const toggle = page.locator( '.wp-block-navigation__responsive-container-open' );
-	const overlay = page.locator( '.wp-block-navigation__responsive-container' );
+	const toggle = page.locator(
+		'.wp-block-navigation__responsive-container-open'
+	);
+	const overlay = page.locator(
+		'.wp-block-navigation__responsive-container'
+	);
 
 	await expect( toggle ).toBeVisible();
 	await toggle.click();
@@ -90,7 +116,13 @@ test( 'the demo page renders every section', async ( { page } ) => {
 	const response = await page.goto( '/demo/' );
 
 	expect( response?.status() ).toBe( 200 );
-	await expect( page.locator( 'main#site-main h1.wp-block-heading' ) ).toBeVisible();
-	await expect( page.locator( 'main#site-main .wp-block-image img' ) ).toBeVisible();
-	await expect( page.locator( 'main#site-main .reference-callout__heading' ) ).toBeVisible();
+	await expect(
+		page.locator( 'main#site-main h1.wp-block-heading' )
+	).toBeVisible();
+	await expect(
+		page.locator( 'main#site-main .wp-block-image img' )
+	).toBeVisible();
+	await expect(
+		page.locator( 'main#site-main .reference-callout__heading' )
+	).toBeVisible();
 } );

@@ -17,29 +17,49 @@ import { expect, test } from '@playwright/test';
  */
 
 test( 'home page (desktop)', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-desktop', 'desktop-only baseline' );
+	test.skip(
+		testInfo.project.name !== 'chromium-desktop',
+		'desktop-only baseline'
+	);
 
 	await page.goto( '/' );
-	await expect( page ).toHaveScreenshot( 'home-desktop.png', { fullPage: true } );
+	await expect( page ).toHaveScreenshot( 'home-desktop.png', {
+		fullPage: true,
+	} );
 } );
 
 test( 'home page (mobile)', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-mobile', 'mobile-only baseline' );
+	test.skip(
+		testInfo.project.name !== 'chromium-mobile',
+		'mobile-only baseline'
+	);
 
 	await page.goto( '/' );
-	await expect( page ).toHaveScreenshot( 'home-mobile.png', { fullPage: true } );
+	await expect( page ).toHaveScreenshot( 'home-mobile.png', {
+		fullPage: true,
+	} );
 } );
 
 test( 'demo page (desktop)', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-desktop', 'desktop-only baseline' );
+	test.skip(
+		testInfo.project.name !== 'chromium-desktop',
+		'desktop-only baseline'
+	);
 
 	await page.goto( '/demo/' );
-	await expect( page ).toHaveScreenshot( 'demo-desktop.png', { fullPage: true } );
+	await expect( page ).toHaveScreenshot( 'demo-desktop.png', {
+		fullPage: true,
+	} );
 } );
 
 test( 'demo page (mobile)', async ( { page }, testInfo ) => {
-	test.skip( testInfo.project.name !== 'chromium-mobile', 'mobile-only baseline' );
+	test.skip(
+		testInfo.project.name !== 'chromium-mobile',
+		'mobile-only baseline'
+	);
 
 	await page.goto( '/demo/' );
-	await expect( page ).toHaveScreenshot( 'demo-mobile.png', { fullPage: true } );
+	await expect( page ).toHaveScreenshot( 'demo-mobile.png', {
+		fullPage: true,
+	} );
 } );

@@ -17,8 +17,15 @@ export const CREDS = {
  * `/wp/`) and asserts the login actually succeeded by checking the browser
  * left wp-login.php behind, rather than asserting on any particular
  * post-login destination.
+ * @param page     The Playwright page used for the login flow.
+ * @param username The WordPress username to submit.
+ * @param password The WordPress password to submit.
  */
-export async function loginAs( page: Page, username: string, password: string ): Promise<void> {
+export async function loginAs(
+	page: Page,
+	username: string,
+	password: string
+): Promise< void > {
 	await page.goto( '/wp/wp-login.php' );
 	await page.locator( '#user_login' ).fill( username );
 	await page.locator( '#user_pass' ).fill( password );

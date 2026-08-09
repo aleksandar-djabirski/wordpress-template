@@ -8,28 +8,60 @@ export type EditorBlock = {
 
 export type WpEditor = {
 	blocks: {
-		createBlock: ( name: string, attributes: { content: string } ) => EditorBlock;
+		createBlock: (
+			name: string,
+			attributes: { content: string }
+		) => EditorBlock;
 	};
 	data: {
-		dispatch( store: 'core' ): {
-			saveEntityRecord: ( kind: string, name: string, record: { id: number; content: string } ) => Promise< unknown >;
-		};
-		dispatch( store: 'core/block-editor' ): {
+		dispatch: ( store: 'core/block-editor' ) => {
 			moveBlocksUp: ( clientIds: string[] ) => void;
 			removeBlocks: ( clientIds: string[] ) => void;
 			replaceBlocks: ( clientId: string, block: EditorBlock ) => void;
 		};
-		select( store: 'core' ): {
+		select: ( ( store: 'core' ) => {
 			__experimentalGetCurrentGlobalStylesId: () => number;
-		};
-		select( store: 'core/block-editor' ): {
-			getBlocks: () => EditorBlock[];
-		};
-		select( store: 'core/editor' ): {
-			getEditorSettings: () => { codeEditingEnabled: boolean };
-		};
+		} ) &
+			( ( store: 'core/block-editor' ) => {
+				getBlocks: () => EditorBlock[];
+			} ) &
+			( ( store: 'core/editor' ) => {
+				getEditorSettings: () => { codeEditingEnabled: boolean };
+			} );
 	};
 };
+
+export async function saveNavigationRecord(
+	page: Page,
+	id: number,
+	content: string,
+	headers: { 'X-WP-Nonce': string }
+): Promise< void > {
+	const response = await page.request.put(
+		`/wp-json/wp/v2/navigation/${ id }`,
+		{
+			data: { content },
+			headers,
+		}
+	);
+
+	expect( response.status() ).toBe( 200 );
+}
+
+export async function getNavigationContent(
+	page: Page,
+	id: number,
+	headers: { 'X-WP-Nonce': string }
+): Promise< string > {
+	const response = await page.request.get(
+		`/wp-json/wp/v2/navigation/${ id }?context=edit`,
+		{ headers }
+	);
+	expect( response.status() ).toBe( 200 );
+
+	const record = ( await response.json() ) as { content: { raw: string } };
+	return record.content.raw;
+}
 
 /**
  * Small WordPress-shaped URL/assertion helpers shared across the e2e
@@ -41,6 +73,7 @@ export type WpEditor = {
 /**
  * Bedrock serves WordPress core (and wp-admin) under `/wp/`, not the site
  * root — see the repo's Bedrock layout (web/wp).
+ * @param path
  */
 export function adminUrl( path = '' ): string {
 	const normalized = path.replace( /^\//, '' );
@@ -55,9 +88,16 @@ export function siteUrl( path = '/' ): string {
  * Asserts the WP admin menu does NOT contain a top-level item with the
  * given `#adminmenu li` id (e.g. `menu-plugins`, `menu-appearance`) — the
  * markup WordPress core renders for `wp-admin/menu.php` list items.
+ * @param page
+ * @param menuId
  */
-export async function expectNoAdminMenu( page: Page, menuId: string ): Promise<void> {
-	await expect( page.locator( `#adminmenu li#${ menuId }` ) ).toHaveCount( 0 );
+export async function expectNoAdminMenu(
+	page: Page,
+	menuId: string
+): Promise< void > {
+	await expect( page.locator( `#adminmenu li#${ menuId }` ) ).toHaveCount(
+		0
+	);
 }
 
 /**
@@ -65,9 +105,15 @@ export async function expectNoAdminMenu( page: Page, menuId: string ): Promise<v
  * first time a given WordPress user opens it (tracked in user meta, so it
  * only appears once per user/browser profile). Closes it if present so it
  * doesn't cover the inserter toggle; a no-op otherwise.
+ * @param page
  */
-export async function dismissWelcomeGuideIfPresent( page: Page ): Promise<void> {
-	const closeButton = page.getByRole( 'dialog' ).getByRole( 'button', { name: /close/i } ).first();
+export async function dismissWelcomeGuideIfPresent(
+	page: Page
+): Promise< void > {
+	const closeButton = page
+		.getByRole( 'dialog' )
+		.getByRole( 'button', { name: /close/i } )
+		.first();
 	try {
 		await closeButton.waitFor( { state: 'visible', timeout: 3000 } );
 		await closeButton.click();
@@ -75,7 +121,10 @@ export async function dismissWelcomeGuideIfPresent( page: Page ): Promise<void> 
 		// No welcome guide shown — nothing to close.
 	}
 
-	const getStartedButton = page.getByRole( 'dialog' ).getByRole( 'button', { name: /get started/i } ).first();
+	const getStartedButton = page
+		.getByRole( 'dialog' )
+		.getByRole( 'button', { name: /get started/i } )
+		.first();
 	try {
 		await getStartedButton.waitFor( { state: 'visible', timeout: 3000 } );
 		await getStartedButton.click();
@@ -93,10 +142,14 @@ export async function dismissWelcomeGuideIfPresent( page: Page ): Promise<void> 
  * historically, "Block Inserter" in newer 6.x releases). Matching by role
  * + a loose /inserter/i name is the resilient option the block editor's
  * own accessible name is guaranteed to contain in either case.
+ * @param page
  */
-export async function openBlockInserter( page: Page ): Promise<void> {
+export async function openBlockInserter( page: Page ): Promise< void > {
 	await dismissWelcomeGuideIfPresent( page );
-	await page.getByRole( 'button', { name: /inserter/i } ).first().click();
+	await page
+		.getByRole( 'button', { name: /inserter/i } )
+		.first()
+		.click();
 }
 
 /**
@@ -104,8 +157,13 @@ export async function openBlockInserter( page: Page ): Promise<void> {
  * SearchControl renders `<input type="search" placeholder={__('Search')}>`
  * (see node_modules/@wordpress/components/src/search-control/index.tsx) —
  * stable across WP versions, unlike the panel's internal class names.
+ * @param page
+ * @param term
  */
-export async function searchInserter( page: Page, term: string ): Promise<void> {
+export async function searchInserter(
+	page: Page,
+	term: string
+): Promise< void > {
 	await page.getByPlaceholder( 'Search' ).fill( term );
 }
 
@@ -113,43 +171,65 @@ export async function searchInserter( page: Page, term: string ): Promise<void> 
  * The Site Editor's WordPress 7.0 route shape: site-editor.php?p=<route>, with
  * &canvas=edit to land directly in the editing canvas rather than the browse
  * view.
+ * @param route
+ * @param canvas
  */
 export function siteEditorUrl( route = '/template', canvas = false ): string {
 	const suffix = canvas ? '&canvas=edit' : '';
-	return adminUrl( `site-editor.php?p=${ encodeURIComponent( route ) }${ suffix }` );
+	return adminUrl(
+		`site-editor.php?p=${ encodeURIComponent( route ) }${ suffix }`
+	);
 }
 
 /**
  * Opens a Site Editor route and returns its block canvas frame.
+ * @param page
+ * @param route
  */
-export async function openSiteEditorCanvas( page: Page, route: string ): Promise< FrameLocator > {
+export async function openSiteEditorCanvas(
+	page: Page,
+	route: string
+): Promise< FrameLocator > {
 	await page.goto( siteEditorUrl( route, true ) );
 	await dismissWelcomeGuideIfPresent( page );
 
 	const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
-	await canvas.locator( '.editor-styles-wrapper' ).waitFor( { state: 'visible' } );
+	await canvas
+		.locator( '.editor-styles-wrapper' )
+		.waitFor( { state: 'visible' } );
 
 	return canvas;
 }
 
 /**
  * Clicks the editor's Save button and waits for the confirmation.
+ * @param page
  */
 export async function saveInEditor( page: Page ): Promise< void > {
 	await page.keyboard.press( 'Escape' );
 
-	const reviewButton = page.getByRole( 'button', { name: /^review \d+ changes?/i } ).first();
+	const reviewButton = page
+		.getByRole( 'button', { name: /^review \d+ changes?/i } )
+		.first();
 	const saveButton = page.getByRole( 'button', { name: /^save$/i } );
-	if ( await saveButton.count() === 0 && await reviewButton.count() > 0 ) {
+	if (
+		( await saveButton.count() ) === 0 &&
+		( await reviewButton.count() ) > 0
+	) {
 		await reviewButton.click();
 	}
 
 	await saveButton.first().click();
 
 	const panelSave = page.getByRole( 'button', { name: /^save$/i } );
-	if ( await panelSave.count() > 0 ) {
-		await panelSave.last().click().catch( () => undefined );
+	if ( ( await panelSave.count() ) > 0 ) {
+		await panelSave
+			.last()
+			.click()
+			.catch( () => undefined );
 	}
 
-	await expect( page.getByText( /saved|updated/i ).first() ).toBeVisible( { timeout: 30_000 } );
+	await expect( page.getByText( /saved|updated/i ).first() ).toBeVisible( {
+		timeout: 30_000,
+	} );
 }
