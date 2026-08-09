@@ -47,6 +47,41 @@ h6 {
 	line-height: 1.2;
 }
 
+.is-style-hero,
+.is-style-cta {
+	padding: var(--wp--preset--spacing--50) var(--wp--preset--spacing--40);
+	border-radius: var(--wp--custom--radius-medium);
+}
+
+.is-style-hero {
+	background-color: var(--wp--preset--color--neutral-100);
+	border: 1px solid var(--wp--preset--color--neutral-300);
+}
+
+.is-style-hero > .wp-block-heading {
+	max-width: 18ch;
+	font-size: var(--wp--preset--font-size--xx-large);
+}
+
+.is-style-hero > .wp-block-paragraph {
+	max-width: 50ch;
+}
+
+.is-style-cta {
+	background-color: var(--wp--preset--color--primary-dark);
+	color: var(--wp--preset--color--base);
+}
+
+.is-style-cta .wp-block-heading,
+.is-style-cta .wp-block-paragraph {
+	color: var(--wp--preset--color--base);
+}
+
+.is-style-cta .wp-block-button__link {
+	background-color: var(--wp--preset--color--accent);
+	color: var(--wp--preset--color--neutral-900);
+}
+
 /* .site-header is the <header> the core/template-part block emits (the
    template sets tagName + className); .site-header__inner is the group inside
    the part file. Only one of the two emits the landmark element. */

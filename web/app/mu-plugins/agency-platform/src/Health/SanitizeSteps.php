@@ -141,7 +141,13 @@ final class SanitizeSteps {
 			// More than just the 'ID' anchor means at least one users-table
 			// field changed; user_login is never among the keys.
 			if ( count( $update ) > 1 ) {
-				wp_update_user( $update );
+				add_filter( 'send_email_change_email', array( self::class, 'suppress_email_change_notification' ) );
+
+				try {
+					wp_update_user( $update );
+				} finally {
+					remove_filter( 'send_email_change_email', array( self::class, 'suppress_email_change_notification' ) );
+				}
 			}
 
 			// Blank profile meta directly: update_user_meta() lets us set an
@@ -169,6 +175,14 @@ final class SanitizeSteps {
 			sprintf( 'Cleared user_url on %d %s.', $urls_cleared, $scope ),
 			sprintf( 'Blanked profile meta (first/last name, nickname, description) on %d %s.', $meta_cleared, $scope ),
 		);
+	}
+
+	/**
+	 * Prevents WordPress from notifying the previous address during sanitization.
+	 */
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- The filter callback accepts WordPress's current send decision but always suppresses it for this scoped mutation.
+	public static function suppress_email_change_notification( bool $send ): bool {
+		return false;
 	}
 
 	/**

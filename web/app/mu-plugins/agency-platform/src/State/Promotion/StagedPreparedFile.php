@@ -69,11 +69,17 @@ final class StagedPreparedFile implements StagedPromotionEntry {
 		if ( null === $this->previous_bytes ) {
 			if ( is_file( $this->absolute_path ) ) {
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.unlink_unlink -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-				unlink( $this->absolute_path );
+				if ( ! unlink( $this->absolute_path ) ) {
+					throw PromotionException::hard( sprintf( 'The prepared file "%s" could not be removed during rollback.', $this->absolute_path ) );
+				}
 			}
 		} else {
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents -- atomic temp-write + rename() is required by the promotion contract (master spec §7.5); WP_Filesystem exposes no atomic-replace primitive.
-			file_put_contents( $this->absolute_path, $this->previous_bytes );
+			$written = file_put_contents( $this->absolute_path, $this->previous_bytes );
+
+			if ( false === $written ) {
+				throw PromotionException::hard( sprintf( 'The prepared file "%s" could not be restored during rollback.', $this->absolute_path ) );
+			}
 		}
 
 		$this->committed = false;

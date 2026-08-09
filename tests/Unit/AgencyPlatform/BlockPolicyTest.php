@@ -12,6 +12,24 @@ declare(strict_types=1);
 
 namespace Tests\Unit\AgencyPlatform;
 
+$wordpress_includes = dirname( __DIR__, 3 ) . '/web/wp/wp-includes';
+
+if ( ! class_exists( 'WP_Block_Parser_Block', false ) ) {
+	require_once $wordpress_includes . '/class-wp-block-parser-block.php';
+}
+
+if ( ! class_exists( 'WP_Block_Parser_Frame', false ) ) {
+	require_once $wordpress_includes . '/class-wp-block-parser-frame.php';
+}
+
+if ( ! class_exists( 'WP_Block_Parser', false ) ) {
+	require_once $wordpress_includes . '/class-wp-block-parser.php';
+}
+
+if ( ! function_exists( 'parse_blocks' ) ) {
+	require_once $wordpress_includes . '/blocks.php';
+}
+
 use AgencyPlatform\Editor\BlockPolicy;
 use PHPUnit\Framework\TestCase;
 
@@ -137,27 +155,7 @@ final class BlockPolicyTest extends TestCase {
 	}
 
 	public function test_forbidden_blocks_are_found_recursively(): void {
-		$parsed = array(
-			array(
-				'blockName'   => 'core/group',
-				'attrs'       => array(),
-				'innerBlocks' => array(
-					array(
-						'blockName'   => 'core/paragraph',
-						'attrs'       => array(),
-						'innerBlocks' => array(),
-						'innerHTML'   => '',
-					),
-					array(
-						'blockName'   => 'core/html',
-						'attrs'       => array(),
-						'innerBlocks' => array(),
-						'innerHTML'   => '',
-					),
-				),
-				'innerHTML'   => '',
-			),
-		);
+		$parsed = parse_blocks( '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph --><p>Fine</p><!-- /wp:paragraph --><!-- wp:html --><div>raw</div><!-- /wp:html --></div><!-- /wp:group -->' );
 
 		$violations = BlockPolicy::forbidden_blocks( $parsed, array( 'core/group', 'core/paragraph' ) );
 
@@ -167,20 +165,7 @@ final class BlockPolicyTest extends TestCase {
 	}
 
 	public function test_null_name_blocks_with_real_markup_are_raw_html_violations(): void {
-		$parsed = array(
-			array(
-				'blockName'   => null,
-				'attrs'       => array(),
-				'innerBlocks' => array(),
-				'innerHTML'   => "\n\n",
-			),
-			array(
-				'blockName'   => null,
-				'attrs'       => array(),
-				'innerBlocks' => array(),
-				'innerHTML'   => '<script>alert(1)</script>',
-			),
-		);
+		$parsed = parse_blocks( '<!-- wp:paragraph --><p>Safe</p><!-- /wp:paragraph -->\n\n<script>alert(1)</script>' );
 
 		$violations = BlockPolicy::raw_html_violations( $parsed );
 
@@ -188,22 +173,23 @@ final class BlockPolicyTest extends TestCase {
 		self::assertStringContainsString( '<script>', $violations[0] );
 	}
 
-	public function test_block_instance_custom_css_is_detected_recursively(): void {
-		$parsed = array(
-			array(
-				'blockName'   => 'core/group',
-				'attrs'       => array(),
-				'innerBlocks' => array(
-					array(
-						'blockName'   => 'core/paragraph',
-						'attrs'       => array( 'style' => array( 'css' => 'color:red' ) ),
-						'innerBlocks' => array(),
-						'innerHTML'   => '',
-					),
-				),
-				'innerHTML'   => '',
-			),
+	public function test_named_blocks_with_disallowed_markup_are_raw_html_violations(): void {
+		$parsed = parse_blocks( '<!-- wp:paragraph --><p style="position:fixed;z-index:99999">Injected</p><!-- /wp:paragraph -->' );
+
+		self::assertSame(
+			array( '<p style="position:fixed;z-index:99999">Injected</p>' ),
+			BlockPolicy::raw_html_violations( $parsed )
 		);
+	}
+
+	public function test_named_blocks_with_ordinary_markup_are_not_raw_html_violations(): void {
+		$parsed = parse_blocks( '<!-- wp:paragraph --><p>Ordinary paragraph markup.</p><!-- /wp:paragraph -->' );
+
+		self::assertSame( array(), BlockPolicy::raw_html_violations( $parsed ) );
+	}
+
+	public function test_block_instance_custom_css_is_detected_recursively(): void {
+		$parsed = parse_blocks( '<!-- wp:group --><div class="wp-block-group"><!-- wp:paragraph {"style":{"css":"color:red"}} --><p>x</p><!-- /wp:paragraph --></div><!-- /wp:group -->' );
 
 		$violations = BlockPolicy::block_css_violations( $parsed );
 

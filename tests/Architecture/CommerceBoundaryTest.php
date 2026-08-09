@@ -90,7 +90,23 @@ final class CommerceBoundaryTest extends TestCase {
 	}
 
 	public function test_declared_commerce_templates_render_the_theme_chrome(): void {
-		$missing = array();
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- pure static analysis of local source files; this test must stay WordPress-free.
+		$base_content   = (string) file_get_contents( $this->theme_root() . '/templates/page.html' );
+		$expected_parts = $this->template_part_attributes( $base_content );
+		$expected_slugs = array( 'site-header', 'site-footer' );
+
+		foreach ( $expected_slugs as $part ) {
+			self::assertArrayHasKey(
+				$part,
+				$expected_parts,
+				$this->architecture_failure(
+					'The base template does not declare the expected theme chrome part',
+					'templates/page.html -> ' . $part,
+					'The commerce templates derive their chrome contract from the base template.',
+					'Add the ' . $part . ' template-part reference to templates/page.html.'
+				)
+			);
+		}
 
 		foreach ( $this->declared()['templates'] as $slug ) {
 			$path = $this->theme_root() . '/templates/' . $slug . '.html';
@@ -100,29 +116,55 @@ final class CommerceBoundaryTest extends TestCase {
 			}
 
 			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- pure static analysis of local source files; this test must stay WordPress-free.
-			$content = (string) file_get_contents( $path );
+			$content      = (string) file_get_contents( $path );
+			$actual_parts = $this->template_part_attributes( $content );
 
-			foreach ( array( 'site-header', 'site-footer' ) as $part ) {
-				if ( ! str_contains( $content, '"slug":"' . $part . '"' ) ) {
-					$missing[] = $slug . ' -> ' . $part;
-				}
+			foreach ( $expected_slugs as $part ) {
+				self::assertSame(
+					$expected_parts[ $part ],
+					$actual_parts[ $part ] ?? null,
+					$this->architecture_failure(
+						'Commerce template chrome attributes do not match the base template',
+						'templates/' . $slug . '.html -> ' . $part,
+						'Every commerce template must preserve the base template header and footer attributes for styling and landmarks.',
+						'Copy the exact ' . $part . ' template-part attributes from templates/page.html.'
+					)
+				);
 			}
 
 			if ( preg_match( '/<!--\s+wp:template-part\s+\{[^}]*"theme":/', $content ) === 1 ) {
-				$missing[] = $slug . ' -> environment-specific theme attribute';
+				self::fail(
+					$this->architecture_failure(
+						'Commerce template contains an environment-specific theme attribute',
+						'templates/' . $slug . '.html',
+						'Template-part references must resolve through the active theme and must not pin an environment-specific theme name.',
+						'Remove the theme attribute from the template-part reference.'
+					)
+				);
 			}
 		}
+	}
 
-		self::assertSame(
-			array(),
-			$missing,
-			$this->architecture_failure(
-				'A commerce template does not render the theme chrome',
-				implode( "\n                          ", $missing ),
-				'Rendering the theme header/footer parts is the ONLY reason these overrides exist; a template without them is worse than no override at all.',
-				'Re-derive the file from the upstream template, rewrite only the header/footer template-part slugs, and remove environment-specific template-part theme attributes.'
-			)
-		);
+	/**
+	 * @return array<string, array<string, mixed>>
+	 */
+	private function template_part_attributes( string $content ): array {
+		$parts   = array();
+		$matches = array();
+
+		preg_match_all( '/<!--\s+wp:template-part\s+(\{[^}\r\n]*\})\s+\/-->/', $content, $matches );
+
+		foreach ( $matches[1] as $raw_attributes ) {
+			$attributes = json_decode( $raw_attributes, true );
+
+			if ( ! is_array( $attributes ) || ! isset( $attributes['slug'] ) || ! is_string( $attributes['slug'] ) ) {
+				continue;
+			}
+
+			$parts[ $attributes['slug'] ] = $attributes;
+		}
+
+		return $parts;
 	}
 
 	/**

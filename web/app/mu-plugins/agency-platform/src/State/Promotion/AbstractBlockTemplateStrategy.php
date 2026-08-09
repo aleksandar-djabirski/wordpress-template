@@ -371,12 +371,33 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 		}
 
 		foreach ( parse_blocks( $markup ) as $block ) {
-			$block_name = isset( $block['blockName'] ) && is_string( $block['blockName'] ) ? $block['blockName'] : '';
-
-			if ( '' === $block_name ) {
-				continue;
+			if ( is_array( $block ) ) {
+				$this->validate_block( $block, $record_key, $provider, $slug, $bundle, $selected_keys, $refusals );
 			}
+		}
 
+		return $refusals;
+	}
+
+	/**
+	 * Validates one block and every descendant in document order.
+	 *
+	 * @param array<string, mixed> $block
+	 * @param list<string>         $selected_keys
+	 * @param list<RecordRefusal>  $refusals
+	 */
+	private function validate_block(
+		array $block,
+		string $record_key,
+		string $provider,
+		string $slug,
+		BundleView $bundle,
+		array $selected_keys,
+		array &$refusals
+	): void {
+		$block_name = isset( $block['blockName'] ) && is_string( $block['blockName'] ) ? $block['blockName'] : '';
+
+		if ( '' !== $block_name ) {
 			if ( ! \WP_Block_Type_Registry::get_instance()->is_registered( $block_name ) ) {
 				$refusals[] = new RecordRefusal(
 					$record_key,
@@ -411,7 +432,13 @@ abstract class AbstractBlockTemplateStrategy implements PreparablePromotionStrat
 			}
 		}
 
-		return $refusals;
+		if ( isset( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
+			foreach ( $block['innerBlocks'] as $inner_block ) {
+				if ( is_array( $inner_block ) ) {
+					$this->validate_block( $inner_block, $record_key, $provider, $slug, $bundle, $selected_keys, $refusals );
+				}
+			}
+		}
 	}
 
 	/**

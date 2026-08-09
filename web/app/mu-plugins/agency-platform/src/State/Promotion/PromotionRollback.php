@@ -60,7 +60,7 @@ final class PromotionRollback {
 			);
 		}
 
-		if ( 'pending' === $manifest->finalize_status() ) {
+		if ( 'pending' === $manifest->finalize_status() && 'partially-rolled-back' !== $manifest->settlement_status() ) {
 			throw PromotionException::hard( sprintf( 'Promotion %s was never finalized.', $id ) );
 		}
 

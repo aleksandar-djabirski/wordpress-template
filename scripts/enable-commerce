@@ -235,7 +235,7 @@ fi
 # test suite against the wrong rendering path.
 echo "==> [4/11] Ensuring shop/cart/checkout/my-account pages exist (native block cart/checkout)"
 for page in cart checkout; do
-  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r')"
+  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r' || true)"
   if [ -n "${page_id}" ]; then
     page_content="$("${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | tr -d '\r' || true)"
     page_content_trimmed="$(printf '%s' "${page_content}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
@@ -255,7 +255,7 @@ done
 "${WP[@]}" wc tool run install_pages --user=admin >/dev/null
 
 for page in cart checkout; do
-  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r')"
+  page_id="$("${WP[@]}" option get "woocommerce_${page}_page_id" 2>/dev/null | tr -d '\r' || true)"
   if [ -z "${page_id}" ] \
       || ! "${WP[@]}" post get "${page_id}" --field=post_content 2>/dev/null | grep -q "wp:woocommerce/${page}"; then
     echo "" >&2
