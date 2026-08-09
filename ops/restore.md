@@ -54,10 +54,12 @@ Run this after every restore — scheduled test or real incident:
 
 - [ ] Site loads (homepage, a representative page, a representative post).
 - [ ] Admin login works with a known account.
-- [ ] `ddev wp agency check-overrides` runs and its report matches expectations.
+- [ ] `ddev wp agency state-diff` runs and its report matches expectations.
       It is INFORMATIONAL by default — legitimate database overrides are normal
       and do not fail it. Use `--fail-on-drift` only where a non-zero exit is
-      genuinely wanted (for example a CI gate).
+      genuinely wanted (for example a CI gate). `wp agency check-overrides`
+      still works as a compatibility alias, but it prints a deprecation warning
+      pointing at `state-diff`, which is also the machine-readable form.
 - [ ] Create the ignored state directory, then export a smoke-test bundle:
       `mkdir -p var/agency-state` followed by
       `ddev wp agency state-export --output=var/agency-state/restore-smoke-bundle.json`.
