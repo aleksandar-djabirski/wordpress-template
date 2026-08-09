@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agency-platform.invalid/schemas/state-bundle-v1.json",
+  "title": "Agency state bundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "exportId", "exportedAtUtc", "siteUuid", "siteUrl",
+    "environment", "wordpressVersion", "activeTheme", "providers",
+    "stateHash", "hmacKeyId", "hmac"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "exportId": { "$ref": "#/definitions/uuid" },
+    "exportedAtUtc": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$" },
+    "siteUuid": { "$ref": "#/definitions/uuid" },
+    "siteUrl": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "wordpressVersion": { "type": "string", "minLength": 1 },
+    "activeTheme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stylesheet", "version", "gitCommit"],
+      "properties": {
+        "stylesheet": { "type": "string", "minLength": 1 },
+        "version": { "type": "string" },
+        "gitCommit": { "type": ["string", "null"] }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/definitions/provider" }
+    },
+    "stateHash": { "$ref": "#/definitions/sha256" },
+    "hmacKeyId": { "type": "string", "minLength": 1 },
+    "hmac": { "$ref": "#/definitions/sha256" }
+  },
+  "definitions": {
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "ownership": { "enum": ["git-baseline+db", "git-baseline+db-user-origin", "database", "database+uploads", "forbidden"] },
+    "promotion": { "enum": ["promotable", "export-and-diff", "never-promote", "refuse"] },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "ownership", "promotion", "hasGitBaseline", "records"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+        "ownership": { "$ref": "#/definitions/ownership" },
+        "promotion": { "$ref": "#/definitions/promotion" },
+        "hasGitBaseline": { "type": "boolean" },
+        "records": { "type": "array", "items": { "$ref": "#/definitions/record" } }
+      }
+    },
+    "record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "objectId", "slug", "status", "modifiedGmt", "content", "contentHash", "references", "ownership", "promotion"],
+      "properties": {
+        "key": { "type": "string", "pattern": "^[a-z0-9-]+:[^\\s]+$" },
+        "objectId": { "type": ["integer", "null"] },
+        "slug": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "modifiedGmt": { "type": ["string", "null"] },
+        "content": { "type": ["object", "array", "string", "number", "boolean", "null"] },
+        "contentHash": { "$ref": "#/definitions/sha256" },
+        "references": { "type": "array", "items": { "$ref": "#/definitions/reference" } },
+        "ownership": { "$ref": "#/definitions/ownership" },
+        "promotion": { "$ref": "#/definitions/promotion" }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["record", "provider", "blockName", "attribute", "value", "kind", "resolution", "policy", "targetKey", "targetHash", "targetIdentity"],
+      "properties": {
+        "record": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "blockName": { "type": ["string", "null"] },
+        "attribute": { "type": "string", "minLength": 1 },
+        "value": { "type": ["string", "integer", "null"] },
+        "kind": { "enum": ["navigation", "synced-pattern", "attachment", "site-logo", "gallery", "font-file", "plugin-block", "post-meta", "unknown-ref"] },
+        "resolution": { "enum": ["resolved", "environment-specific", "unknown"] },
+        "policy": { "type": "string" },
+        "targetKey": { "type": ["string", "null"] },
+        "targetHash": { "oneOf": [{ "$ref": "#/definitions/sha256" }, { "type": "null" }] },
+        "targetIdentity": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

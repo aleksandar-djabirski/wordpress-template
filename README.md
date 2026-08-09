@@ -1,6 +1,6 @@
 # Agency Starter
 
-An AI-first WordPress starter for agency work: [Bedrock](https://roots.io/bedrock/)-structured WordPress, a hybrid block/classic theme, and layered plugins with architecture tests that keep the codebase legible to both humans and coding agents.
+An AI-first WordPress starter for agency work: [Bedrock](https://roots.io/bedrock/)-structured WordPress, a native block theme with full Site Editor access for clients, and layered plugins with architecture tests that keep the codebase legible to both humans and coding agents.
 
 **If you are an AI agent working in this repo, read [AGENTS.md](AGENTS.md) first.** It is the single source of agent guidance (imported by `CLAUDE.md` for Claude Code).
 
@@ -15,12 +15,14 @@ This repository is a **starter kit you copy for every new customer project** —
 **How does a customer get their look?** You never create a second theme and never install a bought one on top. The workflow is always:
 
 1. **Copy the template** for the new customer and run `scripts/rename-project`.
-2. **Reshape `site-theme` in place** — it belongs to that customer's copy, so editing it directly is correct. Colors/fonts/spacing → `theme.json`. Header/footer → `parts/`. New sections the customer may edit → `blocks/` and `patterns/`.
+2. **Reshape `site-theme` in place** — it belongs to that customer's copy, so editing it directly is correct. Colors/fonts/spacing → `theme.json`. Header/footer → `parts/site-header.html` and `parts/site-footer.html`; shared visual rules → `assets/global/shared.css`. New sections the customer may edit → `blocks/` and `patterns/`.
 3. **If the customer bought a theme they like, don't install it.** Use it as a *design reference*: look at its demo, then recreate that look inside `site-theme`. Installing the bought theme itself would throw away everything this template provides — the editing locks, the tests, and the guarantee that the design lives in Git and can't be broken from the admin panel.
 
 Think of it like a house with finished wiring, plumbing, and alarm systems, where `site-theme` is its unpainted walls. A bought theme is a different prefab house — you can't bolt it onto yours, but you can look at it and paint your walls to match.
 
-**The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers edit text, images, and products and compose pages from an approved set of blocks while structure, styles, and templates stay locked (tighten that block set per project with the editing-strictness dial), every change is tested automatically, and any AI agent working on the site knows exactly where everything goes (that is what [AGENTS.md](AGENTS.md) tells it). For an agency maintaining many sites long-term, that trade is the reason this template exists.
+**The trade-off:** recreating a bought theme's design is more up-front work than installing it. In exchange, customers edit the whole site visually — templates, header, footer, navigation, colours and typography — from an approved set of blocks, while the code editor, raw HTML, shortcodes and Additional CSS stay closed and every change is testable against Git (tighten the block set per project with the editing-strictness dial). For an agency maintaining many sites long-term, that trade is the reason this template exists.
+
+**How do customer edits get back into Git?** Client changes to templates, template parts and Global Styles live in the database. `wp agency state-export` / `state-diff` inspect that state, and the promotion lifecycle (`wp agency promote-overrides`) selectively and verifiably moves a chosen override into Git as the new baseline — backed up before the move, with rollback inside a retention window. It is deliberate promotion, never automatic reconciliation — see `docs/state-reconciliation.md`.
 
 ## The playbook — a project's whole life in five steps
 
@@ -82,7 +84,7 @@ web/app/mu-plugins/agency-platform/   Guardrails: roles, editor lockdown, securi
 web/app/plugins/site-core/            Business rules + SiteCore\Contracts\* public API
 web/app/plugins/site-integrations/    Contract implementations that talk to the outside world
 web/app/plugins/site-commerce/        WooCommerce-only behavior (activates only if Woo present)
-web/app/themes/site-theme/            Hybrid theme: templates, parts, blocks, patterns, tokens
+web/app/themes/site-theme/            Block theme: HTML templates and parts, blocks, patterns, tokens
 tests/                    Architecture, Unit, Integration (PHPUnit) + e2e/visual/accessibility (Playwright)
 scripts/                  setup, verify, generate-block-index, check-database-overrides, sanitize-database,
                           verify-environment, rename-project
@@ -99,9 +101,10 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 | --- | --- |
 | `ddev composer verify:fast` | validate, audit, phpcs, phpstan, deptrac, architecture + unit tests (no DB) |
 | `ddev composer verify` | `verify:fast` + integration tests (needs the DDEV database) |
-| `ddev composer test:architecture` | the 22 architecture tests (structure/dependency guardrails) |
+| `ddev composer test:architecture` | the 49 architecture tests (structure/dependency guardrails) |
 | `ddev composer test:unit` | unit tests (no WordPress runtime) |
 | `ddev composer test:integration` | integration tests against a real WordPress + DB |
+| `ddev composer test:integration:cli` | the `wp agency` command surface against a real WP-CLI + DB |
 | `ddev composer lint:php` / `analyse` / `deptrac` / `audit` | phpcs / phpstan (level 6) / dependency-direction check / security audit |
 | `npm run build` / `npm run start` | production / watch build of block editor assets (wp-scripts) |
 | `npm run lint` (`lint:js`, `lint:css`) | ESLint (blocks + parts) / Stylelint (theme CSS) |
@@ -112,9 +115,10 @@ Run Composer scripts via `ddev composer <script>` (no host PHP needed); npm scri
 
 | Suite | Needs a database? | Needs a running site? | Run with |
 | --- | --- | --- | --- |
-| Architecture (22 tests) | no | no | `ddev composer test:architecture` (or `composer` directly, anywhere) |
-| Unit (121 tests) | no | no | `ddev composer test:unit` |
-| Integration (27 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
+| Architecture (49 tests) | no | no | `ddev composer test:architecture` (or `composer` directly, anywhere) |
+| Unit (424 tests) | no | no | `ddev composer test:unit` |
+| Integration (451 tests) | yes | no (WordPress test scaffold) | `ddev composer test:integration`, or CI's `integration` job |
+| CLI integration | yes | no (WordPress test scaffold + real `wp` binary) | `ddev composer test:integration:cli` |
 | e2e / accessibility | no | yes | `npm run test:e2e` / `test:accessibility` against `WP_BASE_URL` |
 | Visual regression | no | yes | `npm run test:visual`; baselines are Linux-CI-authoritative — see `playwright.config.ts` |
 | Commerce integration | yes | no (+ WooCommerce) | `bash scripts/enable-commerce` then `ddev composer test:integration:commerce` |
@@ -139,8 +143,9 @@ It deliberately does **not** rename the `agency/` block namespace (e.g. `agency/
 
 - [`docs/architecture.md`](docs/architecture.md) — layers, dependency rules, source of truth
 - [`docs/ownership-rules.md`](docs/ownership-rules.md) — "I need to do X, which layer owns it?"
-- [`docs/editing-strictness.md`](docs/editing-strictness.md) — the default content-only editing model and the per-project dials to tighten it
+- [`docs/editing-strictness.md`](docs/editing-strictness.md) — the default editing model and the per-project dials to tighten it
 - [`docs/adding-a-block.md`](docs/adding-a-block.md), [`docs/adding-an-integration.md`](docs/adding-an-integration.md), [`docs/adding-commerce-behaviour.md`](docs/adding-commerce-behaviour.md) — how-to guides
 - [`docs/validation-scenarios.md`](docs/validation-scenarios.md) — how to prove each guardrail actually fails closed
+- [`docs/state-reconciliation.md`](docs/state-reconciliation.md) — state export, promotion, rollback, recovery
 - [`docs/mcp.md`](docs/mcp.md) — optional local MCP policy
 - [`ops/`](ops/) — launch checklist, backup, restore, update process, monitoring, incident recovery

@@ -19,6 +19,15 @@ web/app/themes/site-theme/blocks/**/build/** text eol=lf
 # documented `ddev composer verify:fast` path. Force these source types to
 # stay LF on checkout (and normalize to LF on commit) on every platform.
 *.php text eol=lf
+# *.html is the block theme's ENTIRE rendering path — templates/ and parts/ —
+# and it was the one source type missing from this list. Without it a Windows
+# checkout writes CRLF into every template on disk, which the DDEV container
+# then reads back through the mount. That matters beyond tidiness here:
+# templates/order-confirmation.html is a byte-exact copy of the upstream
+# WooCommerce template plus exactly ONE trailing LF (see
+# docs/adding-commerce-behaviour.md), and CRLF on disk makes that claim false
+# while the committed blob stays correct.
+*.html text eol=lf
 *.css text eol=lf
 *.js text eol=lf
 *.ts text eol=lf

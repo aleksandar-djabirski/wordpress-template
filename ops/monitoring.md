@@ -34,8 +34,9 @@ per-project/per-host setup this contract defines the requirements for.
 
 ## Cron
 
-- WordPress's pseudo-cron (`DISABLE_WP_CRON` is not set by this starter,
-  so wp-cron runs on request traffic by default) is unreliable on
+- WordPress's pseudo-cron (`DISABLE_WP_CRON` is set by the base config from
+  `env('DISABLE_WP_CRON') ?: false`; it is false when the environment variable
+  is absent, so wp-cron runs on request traffic by default) is unreliable on
   low-traffic sites. Every project must run real cron —
   `wp cron event run --due-now` on a system crontab, or the host's
   managed WP-cron equivalent — and monitor that it actually executed
@@ -44,6 +45,14 @@ per-project/per-host setup this contract defines the requirements for.
 - Any project-specific scheduled task (a custom `wp_schedule_event`
   registration) needs its own last-run/last-success signal, not just
   reliance on cron running in general.
+- **Unresolved promotions.** A promotion that reached `--finalize` but never
+  reached `--confirm` or `--rollback` holds the record locks for the records it
+  actually PROMOTED, and keeps a backup alive. Records it refused or
+  self-restored release their locks in `--finalize`'s own teardown, so a
+  partially-refused promotion holds fewer locks than it names. Check `wp agency promotion-backups list` on a schedule and alert on
+  any promotion older than one deployment cycle. An unconfirmed promotion is
+  the only state from which a rollback is still possible — an operator who
+  lets one age out is losing the recovery path, not just leaking a lock.
 
 ## Domain / certificate
 

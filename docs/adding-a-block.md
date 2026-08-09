@@ -47,14 +47,23 @@ Server-side render callback (WordPress provides `$attributes`, `$content`,
 - **No hooks here.** `HookOwnershipTest` forbids `add_action`/`add_filter`
   in any block `render.php` — wiring belongs in `ThemeBootstrap`.
 
-## 4. Add `index.js` only if the block needs editor UI
+## 4. Give a dynamic block a real editor preview
+
+A dynamic block must intentionally implement a useful editor preview.
+Server-rendered output and interactive frontend behaviour are not reproduced in
+the editor automatically. `blocks/reference-callout/index.js` is the
+representative example: it renders testimonial placeholder content in the
+editor and marks it with the `--preview` style. Use `ServerSideRender` only as
+a last resort.
+
+## 5. Add `index.js` only if the block needs editor UI
 
 `reference-callout/index.js` registers editor-side controls
 (`registerBlockType`, `InspectorControls`, etc.). No custom UI needed? Keep
 a minimal `editorScript` pointing at `build/index.js` anyway —
 `block.json` still needs at least one `file:` reference (step 2).
 
-## 5. Build
+## 6. Build
 
 No build config to edit. `npm run build` runs `scripts/build-blocks.mjs`,
 which auto-discovers every `blocks/*/index.js` and runs `wp-scripts build`
@@ -75,21 +84,21 @@ watch is one block at a time), pass its slug:
 npm run start -- <your-slug>
 ```
 
-## 6. Allow-list and index
+## 7. Block policy and index
 
 - **Register**: nothing to do. `SiteTheme\Bootstrap\ThemeBootstrap::register_block()`
   globs `blocks/*/block.json` and registers each, so a new block folder is
   registered automatically — no edit here.
-- **Allow-list**: if customers should be able to insert it, add
-  `'agency/<your-slug>'` to
-  `AgencyPlatform\Editor\EditorRestrictions::ALLOWED_BLOCKS` (administrators
-  are unaffected either way).
+- **Policy**: a block in the `agency/` namespace is insertable by clients
+  automatically, because the policy is derived from the registered blocks.
+  Use `agency_platform_disallowed_blocks` to withhold one.
 - **Regenerate the index**: `php scripts/generate-block-index`.
   `GeneratedIndexFreshnessTest` byte-compares `docs/generated-block-index.md`
   against a fresh regeneration; skipping this fails
   `ddev composer test:architecture`.
+  Its Templates column scans `templates/*.html` as well as `patterns/*.php`.
 
-## 7. Tests
+## 8. Tests
 
 - **Architecture** picks up a new block automatically —
   `BlockManifestTest`'s `@dataProvider` scans every `blocks/` directory, so

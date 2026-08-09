@@ -19,12 +19,14 @@ namespace Tests\Commerce\Integration\SiteCommerce;
 use AgencyPlatform\Health\SanitizeSteps;
 use SiteCommerce\Health\CommerceSanitizeStep;
 use SiteCommerce\Plugin;
+use SiteCommerce\Theme\CommercePatterns;
 use Tests\Integration\IntegrationTestCase;
 
 /**
  * @covers \SiteCommerce\Plugin
  * @covers \SiteCommerce\Products\ExampleProductRules
  * @covers \SiteCommerce\Health\CommerceSanitizeStep
+ * @covers \SiteCommerce\Theme\CommercePatterns
  */
 final class PluginBootTest extends IntegrationTestCase {
 
@@ -61,6 +63,13 @@ final class PluginBootTest extends IntegrationTestCase {
 		self::assertFalse(
 			has_action( 'admin_notices', array( Plugin::class, 'render_missing_woocommerce_notice' ) ),
 			'With WooCommerce active, site-commerce must not register its missing-WooCommerce admin notice.'
+		);
+	}
+
+	public function test_commerce_patterns_are_wired(): void {
+		self::assertNotFalse(
+			has_action( 'init', array( CommercePatterns::class, 'register_patterns' ) ),
+			'CommercePatterns must wire its init hook once site-commerce boots.'
 		);
 	}
 }

@@ -27,7 +27,7 @@ cd "${REPO_ROOT}"
 # --- Environment guard -------------------------------------------------------
 # This script seeds DETERMINISTIC, PUBLICLY-KNOWN local credentials and fixtures
 # — a WordPress administrator admin/admin, a client-editor/client-editor user, a
-# Primary navigation menu. Harmless on a throwaway local box, catastrophic
+# Primary site navigation, and a Demo page. Harmless on a throwaway local box, catastrophic
 # anywhere shared: it would plant a known-password administrator on a live site.
 # So it runs ONLY when the environment is development or local, and this check is
 # first — before any composer/wp/ddev call — so nothing happens otherwise.
@@ -63,7 +63,7 @@ require_development_environment() {
       echo "  This script seeds deterministic, PUBLICLY-KNOWN artifacts:" >&2
       echo "    - a WordPress administrator   admin / admin" >&2
       echo "    - a client-editor user        client-editor / client-editor" >&2
-      echo "    - a 'Primary' navigation menu and pretty permalinks" >&2
+      echo "    - a site navigation menu, a Demo page, and pretty permalinks" >&2
       echo "  On a shared, staging, or production site that is a critical security" >&2
       echo "  exposure — a known-password administrator on a live install." >&2
       echo "" >&2
@@ -97,11 +97,11 @@ else
 fi
 
 # --- 1. PHP dependencies -----------------------------------------------------
-echo "==> [1/9] Installing Composer dependencies (WordPress core + tooling)"
+echo "==> [1/11] Installing Composer dependencies (WordPress core + tooling)"
 "${COMPOSER[@]}" install
 
 # --- 2. Environment file + salts --------------------------------------------
-echo "==> [2/9] Ensuring .env exists with real auth salts"
+echo "==> [2/11] Ensuring .env exists with real auth salts"
 if [ -f .env ]; then
   echo "    .env already present — leaving it untouched."
 else
@@ -132,7 +132,7 @@ WP_HOME_VALUE="${WP_HOME_VALUE%\'}"; WP_HOME_VALUE="${WP_HOME_VALUE#\'}"
 WP_HOME_VALUE="${WP_HOME_VALUE:-https://agency-starter.ddev.site}"
 
 # --- 3. WordPress core install ----------------------------------------------
-echo "==> [3/9] Installing WordPress core (if not already installed)"
+echo "==> [3/11] Installing WordPress core (if not already installed)"
 if "${WP[@]}" core is-installed >/dev/null 2>&1; then
   echo "    WordPress is already installed — skipping."
 else
@@ -147,17 +147,17 @@ else
 fi
 
 # --- 4. Theme ----------------------------------------------------------------
-echo "==> [4/9] Activating the site-theme"
+echo "==> [4/11] Activating the site-theme"
 "${WP[@]}" theme activate site-theme
 
 # --- 5. Base-profile plugins -------------------------------------------------
 # site-commerce is intentionally NOT activated here: it only does anything
 # when WooCommerce is present, and the base profile ships without it.
-echo "==> [5/9] Activating base-profile plugins (site-core, site-integrations)"
+echo "==> [5/11] Activating base-profile plugins (site-core, site-integrations)"
 "${WP[@]}" plugin activate site-core site-integrations
 
 # --- 6. Node dependencies ----------------------------------------------------
-echo "==> [6/9] Installing Node dependencies"
+echo "==> [6/11] Installing Node dependencies"
 if [ -f package-lock.json ]; then
   npm ci
 else
@@ -165,7 +165,7 @@ else
 fi
 
 # --- 7. Block build ----------------------------------------------------------
-echo "==> [7/9] Building block editor assets (wp-scripts)"
+echo "==> [7/11] Building block editor assets (wp-scripts)"
 npm run build
 
 # --- 8. Client editor test user ---------------------------------------------
@@ -175,7 +175,7 @@ npm run build
 # random password, which is fine for a human but breaks e2e specs that need
 # to log this user in (see tests/e2e/helpers/auth.ts). Never run this against
 # a shared or production environment.
-echo "==> [8/9] Ensuring a client-editor test user exists"
+echo "==> [8/11] Ensuring a client-editor test user exists"
 if "${WP[@]}" user get client-editor >/dev/null 2>&1; then
   echo "    user 'client-editor' already exists — skipping."
 else
@@ -187,29 +187,49 @@ else
   echo "    created 'client-editor' (role: client_editor, LOCAL-ONLY password: client-editor)."
 fi
 
-# --- 9. Primary navigation menu ---------------------------------------------
-# The site header renders wp_nav_menu( theme_location => 'primary',
-# fallback_cb => false ) (see parts/site-header/site-header.php), so until a
-# menu is assigned to the 'primary' location the <nav id="site-header-nav"> and
-# its mobile toggle never render at all — and the e2e nav specs
-# (tests/e2e/smoke.spec.ts) then have nothing to assert against. Create a
-# minimal primary menu once and assign it, so a freshly bootstrapped site
-# matches what those specs (and a real editor filling in navigation) expect.
-echo "==> [9/9] Ensuring a primary navigation menu exists"
-if "${WP[@]}" menu list --fields=locations --format=csv 2>/dev/null | grep -q 'primary'; then
-  echo "    a menu is already assigned to the primary location — skipping."
+# --- 9. Site navigation ------------------------------------------------------
+# The block theme's parts/site-header.html renders <!-- wp:navigation /--> with
+# no ref. WordPress resolves that block at render time to the most recently
+# published non-empty wp_navigation record. Seed one named record and leave any
+# other records alone, so this step is idempotent without being exclusive.
+echo "==> [9/11] Ensuring a site navigation menu exists"
+if [ -n "$("${WP[@]}" post list --post_type=wp_navigation --post_status=publish --title="Primary" --field=ID)" ]; then
+  echo "    the Primary navigation menu already exists — skipping."
 else
-  "${WP[@]}" menu create "Primary" >/dev/null
-  "${WP[@]}" menu item add-custom primary "Home" "${WP_HOME_VALUE}/" >/dev/null
-  # Add the "Sample Page" WordPress core ships, when present, so the menu has a
-  # real internal link (its ID is not fixed across installs — look it up).
+  nav_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"${WP_HOME_VALUE}/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /-->"
   sample_page_id="$("${WP[@]}" post list --post_type=page --name=sample-page --field=ID 2>/dev/null | head -n1)"
   if [ -n "${sample_page_id}" ]; then
-    "${WP[@]}" menu item add-post primary "${sample_page_id}" >/dev/null
+    nav_content="${nav_content}<!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${sample_page_id},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"${WP_HOME_VALUE}/sample-page/\"} /-->"
   fi
-  "${WP[@]}" menu location assign primary primary >/dev/null
-  echo "    created the 'Primary' menu and assigned it to the primary location."
+  "${WP[@]}" post create \
+    --post_type=wp_navigation \
+    --post_status=publish \
+    --post_title="Primary" \
+    --post_content="${nav_content}" \
+    --porcelain >/dev/null
 fi
+
+echo "==> [10/11] Ensuring the Demo page exists"
+if "${WP[@]}" post list --post_type=page --name=demo --field=ID | grep -q '[0-9]'; then
+  echo "    the Demo page already exists — skipping."
+else
+  # The demo page carries an image, and a media id is environment-specific, so
+  # the fixture ships placeholder tokens that are substituted here rather than
+  # a baked-in id that would break on every other install.
+  media_id="$("${WP[@]}" media import tests/fixtures/demo-media.png --title="Demo media" --porcelain)"
+  media_url="$("${WP[@]}" eval "echo wp_get_attachment_url( ${media_id} );")"
+  demo_content="$(sed -e "s|{{MEDIA_ID}}|${media_id}|g" -e "s|{{MEDIA_URL}}|${media_url}|g" tests/fixtures/demo-page.html)"
+  "${WP[@]}" post create \
+    --post_type=page \
+    --post_status=publish \
+    --post_title="Demo" \
+    --post_name=demo \
+    --post_content="${demo_content}" \
+    --porcelain >/dev/null
+fi
+
+echo "==> [11/11] Setting pretty permalinks"
+"${WP[@]}" rewrite structure '/%postname%/' --hard
 
 echo
 echo "==> Setup complete. Site: ${WP_HOME_VALUE}"

@@ -10,12 +10,12 @@
  * PHPUnit 9 has no per-testsuite bootstrap option, so this single shared
  * file has to pick a path at runtime. It gates on environment variables
  * rather than sniffing `--testsuite` out of $_SERVER['argv']: the
- * `test:integration` / `test:integration:commerce` Composer scripts set
- * WP_INTEGRATION=1 / WP_COMMERCE_INTEGRATION=1 via `@putenv` before invoking
- * phpunit (see composer.json), so this stays correct regardless of how the
- * suite ends up selected (name, group filter, a re-run of one file, ...) —
- * an argv string match would silently stop matching the moment any of those
- * change.
+ * `test:integration` / `test:integration:commerce` / `test:integration:cli`
+ * Composer scripts set WP_INTEGRATION=1 / WP_COMMERCE_INTEGRATION=1 via
+ * `@putenv` before invoking phpunit (see composer.json), so this stays
+ * correct regardless of how the suite ends up selected (name, group filter,
+ * a re-run of one file, ...) — an argv string match would silently stop
+ * matching the moment any of those change.
  *
  * Two real-WordPress paths exist: the base `integration` suite
  * (tests/Integration/bootstrap.php — no WooCommerce, proves the base profile)

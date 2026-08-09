@@ -65,6 +65,15 @@ playwright-report/
 test-results/
 
 # ------------------------------------------------------------------
+# Agency state subsystem (BLOCK_THEME_PROPOSAL.md §7.3): exported state
+# bundles and, later, promotion manifests and backup payloads. These can
+# contain customer content and internal site structure, so the default
+# AGENCY_STATE_DIR must never be committed. var/agency-state/ sits
+# outside the web root (web/), so nothing here is reachable over HTTP.
+# ------------------------------------------------------------------
+/var/agency-state/
+
+# ------------------------------------------------------------------
 # DDEV — everything is auto-generated except config.yaml, which is
 # hand-maintained and tracked intentionally.
 # ------------------------------------------------------------------

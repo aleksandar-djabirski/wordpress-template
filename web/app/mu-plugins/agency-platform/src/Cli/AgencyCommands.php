@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace AgencyPlatform\Cli;
 
-use AgencyPlatform\Health\DatabaseOverrideCheck;
 use AgencyPlatform\Health\SanitizeSteps;
+use AgencyPlatform\State\CliOutput;
+use AgencyPlatform\State\StateCommandRunner;
 
 /**
  * Registers the `wp agency ...` WP-CLI command family. Guarded so it never
@@ -26,36 +27,35 @@ final class AgencyCommands {
 	}
 
 	/**
-	 * Reports database records that shadow Git-owned templates/styles.
-	 * Exits with code 1 when overrides are found, so this is safe to wire
-	 * into CI/deploy checks.
+	 * Reports database state that differs from the Git-owned theme baseline.
+	 *
+	 * INFORMATIONAL BY DEFAULT. Under the block-theme editing model, database
+	 * template/template-part/Global Styles rows are EXPECTED: they are what a
+	 * client using the Site Editor produces, and the promotion workflow is how
+	 * they get reconciled back into Git. A deployment must not fail simply
+	 * because a client edited their own site.
+	 *
+	 * This command is a DEPRECATED alias for `wp agency state-diff`, and its
+	 * detection runs through AgencyPlatform\State\StateDiffer. The report
+	 * includes content by default — content is database-owned and can never
+	 * be Git drift, so including it costs only report lines; large sites
+	 * should use `wp agency state-diff --providers=...` for a narrower run.
+	 * The report is human-facing and is deliberately NOT part of the
+	 * machine-readable STDOUT contract: every deprecation notice and
+	 * diagnostic goes to STDERR, and only --fail-on-drift may turn the run
+	 * into a non-zero exit.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--fail-on-drift]
+	 * : Exit non-zero when any drift is found. Off by default.
+	 *
+	 * @param array<int, string>   $args       Positional arguments (unused; required by the WP-CLI command signature).
+	 * @param array<string, mixed> $assoc_args Associative arguments/flags, e.g. `--fail-on-drift`.
 	 */
-	public static function check_overrides(): void {
-		$report = ( new DatabaseOverrideCheck() )->run();
-
-		\WP_CLI::log( sprintf( 'Template/template-part overrides: %d', count( $report['overrides'] ) ) );
-
-		foreach ( $report['overrides'] as $record ) {
-			\WP_CLI::log(
-				sprintf(
-					'  - %s (%s) [%s]',
-					(string) ( $record['post_name'] ?? '' ),
-					(string) ( $record['post_type'] ?? '' ),
-					(string) ( $record['post_status'] ?? '' )
-				)
-			);
-		}
-
-		\WP_CLI::log( sprintf( 'Expected core-generated global-styles records: %d', count( $report['expected'] ) ) );
-		\WP_CLI::log( sprintf( 'Synced patterns (informational only): %d', count( $report['synced_patterns'] ) ) );
-
-		if ( array() !== $report['overrides'] ) {
-			// WP_CLI::error() halts execution (exit code 1); no explicit
-			// `return` after it — PHPStan knows this call never returns.
-			\WP_CLI::error( 'Database overrides found — Git owns templates/template-parts. Reconcile or intentionally re-export them to disk.' );
-		}
-
-		\WP_CLI::success( 'No database overrides found.' );
+	// phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundBeforeLastUsed -- $args is required by the WP-CLI command signature; this command takes no positional arguments.
+	public static function check_overrides( array $args, array $assoc_args = array() ): void {
+		CliOutput::emit( ( new StateCommandRunner() )->check_overrides( $assoc_args ) );
 	}
 
 	/**

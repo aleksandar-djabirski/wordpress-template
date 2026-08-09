@@ -9,7 +9,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'ci-capture/**'
   pull_request:
   workflow_dispatch:
     inputs:
@@ -20,6 +22,15 @@ on:
           `visual-baselines` artifact. Nothing is committed automatically —
           a maintainer downloads the artifact and commits it. Leave false for
           a normal manual run.
+        type: boolean
+        default: false
+      capture_migration_baselines:
+        description: >-
+          Capture the IMMUTABLE pre-migration parity baselines
+          (tests/parity/__migration_baselines__) against the classic theme and
+          upload them as the `migration-baselines` artifact. Run this ONCE,
+          against a commit where the classic theme still renders. Nothing is
+          committed automatically.
         type: boolean
         default: false
 
@@ -164,7 +175,8 @@ jobs:
   #    storefront runs (and is tested) without it.
   e2e:
     name: End-to-end (DDEV + Playwright)
-    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/ci-capture/migration-baselines'
+    runs-on: ubuntu-24.04
     needs: [php-qa, frontend]
     steps:
       - name: Checkout
@@ -172,6 +184,9 @@ jobs:
 
       - name: Set up DDEV
         uses: ddev/github-action-setup-ddev@v1
+
+      - name: Install deterministic parity fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
 
       - name: Start DDEV
         run: ddev start
@@ -192,7 +207,21 @@ jobs:
           sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
 
       - name: Install PHP dependencies (inside DDEV)
-        run: ddev composer install --no-interaction --prefer-dist
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
 
       - name: Install WordPress core
         # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
@@ -211,6 +240,14 @@ jobs:
           ddev wp theme activate site-theme
           ddev wp plugin activate site-core site-integrations
 
+      - name: WP-CLI alias integration suite (real `wp` + installed site)
+        # The `wp agency check-overrides` alias test shells out to the real
+        # WP-CLI binary against the DDEV dev database, so it can only run in
+        # this job — the wp-phpunit-only `integration` CI job has no WP-CLI
+        # and no installed site. Runs before the Playwright steps so a CLI
+        # registration regression fails fast.
+        run: ddev composer test:integration:cli
+
       - name: Create client-editor test user
         # LOCAL/CI-ONLY throwaway credential — mirrors scripts/setup step 8;
         # tests/e2e/helpers/auth.ts logs in with this exact user/pass.
@@ -220,17 +257,28 @@ jobs:
             --display_name="Client Editor" \
             --user_pass=client-editor
 
-      - name: Create primary navigation menu
-        # Mirrors scripts/setup step 9. The theme header renders
-        # wp_nav_menu( theme_location => 'primary', fallback_cb => false ), so
-        # without a menu assigned to the 'primary' location the
-        # <nav id="site-header-nav"> and its mobile toggle never render, and
-        # tests/e2e/smoke.spec.ts's nav specs have nothing to assert against.
+      - name: Create the site navigation menu
+        # Mirrors scripts/setup step 9. parts/site-header.html renders a
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # most recently published non-empty wp_navigation record.
+        # Seeding one named record makes CI deterministic; it does not depend on
+        # no other record existing.
         run: |
-          ddev wp menu create "Primary"
-          ddev wp menu item add-custom primary "Home" https://agency-starter.ddev.site/
-          ddev wp menu item add-post primary "$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
-          ddev wp menu location assign primary primary
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
+
+      - name: Create the Demo page
+        # Mirrors scripts/setup step 10; tests/parity and tests/e2e both drive
+        # /demo/.
+        run: |
+          MEDIA_ID="$(ddev wp media import tests/fixtures/demo-media.png --title='Demo media' --porcelain)"
+          MEDIA_URL="$(ddev wp eval "echo wp_get_attachment_url( ${MEDIA_ID} );")"
+          sed -e "s|{{MEDIA_ID}}|${MEDIA_ID}|g" -e "s|{{MEDIA_URL}}|${MEDIA_URL}|g" tests/fixtures/demo-page.html > /tmp/demo-page.html
+          ddev wp post create --post_type=page --post_status=publish --post_title="Demo" --post_name=demo --post_content="$(cat /tmp/demo-page.html)"
 
       - name: Set pretty permalinks
         # tests/accessibility/smoke.spec.ts and other specs request
@@ -272,7 +320,8 @@ jobs:
       # Visual regression has three mutually-exclusive paths, gated on the
       # manual workflow_dispatch input and on whether baselines are already
       # committed:
-      #   1. update_visual_snapshots=true  -> (re)generate baselines, upload
+      #   1. update_visual_snapshots=true or ref ci-capture/visual-baselines
+      #      -> (re)generate baselines, upload
       #      as an artifact for a maintainer to download and commit. Never
       #      run on push/pull_request (Windows/macOS-vs-Linux font
       #      rendering makes non-CI-generated baselines untrustworthy, and
@@ -284,14 +333,18 @@ jobs:
       #   3. update_visual_snapshots=false (or push/pull_request) AND no
       #      baselines exist yet -> nothing to compare against; skip with a
       #      notice instead of failing the whole workflow.
-      - name: Regenerate visual baselines (manual trigger only)
-        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+      - name: Regenerate visual baselines (manual or ci-capture ref)
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines'
         env:
           WP_BASE_URL: https://agency-starter.ddev.site
         run: npm run test:visual -- --update-snapshots
 
       - name: Upload regenerated visual baselines
-        if: github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true
+        if: >-
+          (github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines'
         uses: actions/upload-artifact@v7
         with:
           name: visual-baselines
@@ -299,19 +352,45 @@ jobs:
           if-no-files-found: error
 
       - name: Run visual regression suite
-        if: |
-          !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) &&
-          steps.visual_baselines.outputs.exists == 'true'
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+          && steps.visual_baselines.outputs.exists == 'true'
         env:
           WP_BASE_URL: https://agency-starter.ddev.site
         run: npm run test:visual
 
       - name: Skip visual regression (no committed baselines yet)
-        if: |
-          !(github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true) &&
-          steps.visual_baselines.outputs.exists == 'false'
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.update_visual_snapshots == true)
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+          && steps.visual_baselines.outputs.exists == 'false'
         run: |
           echo "::notice::No committed visual baselines at tests/visual/__screenshots__ yet — skipping npm run test:visual. Re-run this workflow manually (workflow_dispatch) with update_visual_snapshots=true to generate them, then download the visual-baselines artifact and commit it."
+
+      - name: Set migration parity site title
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+          || github.ref == 'refs/heads/ci-capture/migration-baselines'
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+        run: ddev wp option update blogname "Agency Starter Baseline Capture"
+
+      - name: Run migration and editing parity suites
+        if: >-
+          !((github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+          || github.ref == 'refs/heads/ci-capture/migration-baselines'
+          || github.ref == 'refs/heads/ci-capture/visual-baselines')
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:parity -- --workers=1
+
+      # Required release gate. The spec uses a test-only key inside its
+      # isolated DDEV site. Production keyrings still come from the host's
+      # secret store.
+      - name: Run promotion lifecycle end-to-end gate
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+        run: npm run test:e2e:promotion
 
       - name: Upload Playwright report
         if: failure()
@@ -330,6 +409,7 @@ jobs:
   #    php-qa/frontend for the same cost reason as the base e2e job.
   commerce-e2e:
     name: 'Commerce (DDEV + WooCommerce: integration + Playwright)'
+    if: github.ref != 'refs/heads/ci-capture/migration-baselines'
     runs-on: ubuntu-latest
     needs: [php-qa, frontend]
     steps:
@@ -350,7 +430,21 @@ jobs:
           sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
 
       - name: Install PHP dependencies (inside DDEV)
-        run: ddev composer install --no-interaction --prefer-dist
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
 
       - name: Install WordPress core
         # LOCAL/CI-ONLY throwaway credentials — mirrors scripts/setup step 3.
@@ -367,6 +461,28 @@ jobs:
         run: |
           ddev wp theme activate site-theme
           ddev wp plugin activate site-core site-integrations
+
+      - name: Create the site navigation menu
+        # Mirrors scripts/setup step 9. parts/site-header.html renders a
+        # ref-less <!-- wp:navigation /-->, which resolves at render time to the
+        # most recently published non-empty wp_navigation record.
+        # Seeding one named record makes CI deterministic; it does not depend on
+        # no other record existing.
+        run: |
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
+
+      - name: Create the Demo page
+        # Mirrors scripts/setup step 10.
+        run: |
+          MEDIA_ID="$(ddev wp media import tests/fixtures/demo-media.png --title='Demo media' --porcelain)"
+          MEDIA_URL="$(ddev wp eval "echo wp_get_attachment_url( ${MEDIA_ID} );")"
+          sed -e "s|{{MEDIA_ID}}|${MEDIA_ID}|g" -e "s|{{MEDIA_URL}}|${MEDIA_URL}|g" tests/fixtures/demo-page.html > /tmp/demo-page.html
+          ddev wp post create --post_type=page --post_status=publish --post_title="Demo" --post_name=demo --post_content="$(cat /tmp/demo-page.html)"
 
       - name: Ensure WordPress core uploads directory exists
         # The commerce integration suite (wp-phpunit) scans WP core's default
@@ -410,3 +526,112 @@ jobs:
           name: playwright-report-commerce
           path: playwright-report/
           retention-days: 7
+
+  # 6. One-shot capture of the IMMUTABLE pre-migration parity baselines.
+  #    Manual trigger only, and deliberately gated on NOTHING: the baselines
+  #    photograph a frontend that stops existing after the block-theme
+  #    conversion, so an unrelated red check in php-qa or frontend must never
+  #    be able to prevent the capture. Pinned to the same runner image and the
+  #    same font package as the e2e job, because a parity baseline is only
+  #    comparable against a run with identical font rendering.
+  migration-baseline-capture:
+    name: Capture migration parity baselines (manual or ci-capture ref)
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.capture_migration_baselines == true)
+      || github.ref == 'refs/heads/ci-capture/migration-baselines'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up DDEV
+        uses: ddev/github-action-setup-ddev@v1
+
+      - name: Install deterministic parity fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-dejavu-core
+
+      - name: Start DDEV
+        run: ddev start
+
+      - name: Create .env for CI
+        run: |
+          cp .env.example .env
+          sed -i 's/^WP_ENV=.*/WP_ENV=development/' .env
+          sed -i 's#^WP_HOME=.*#WP_HOME=https://agency-starter.ddev.site#' .env
+
+      - name: Install PHP dependencies (inside DDEV)
+        # Retried: WordPress core is fetched from downloads.w.org over HTTP/3,
+        # and a dropped QUIC connection makes Composer exit 100 with
+        # "curl error 56". That killed five separate runs during the Unit 1
+        # verification, each time recovering on an unchanged re-run. The failure
+        # is transient and network-side, so retry rather than fail the job.
+        run: |
+          for attempt in 1 2 3; do
+            if ddev composer install --no-interaction --prefer-dist; then
+              exit 0
+            fi
+            echo "::warning::composer install failed (attempt ${attempt}/3) — retrying"
+            sleep 15
+          done
+          echo "::error::composer install failed after 3 attempts"
+          exit 1
+
+      - name: Install WordPress core
+        run: |
+          ddev wp core install \
+            --url=https://agency-starter.ddev.site \
+            --title="Agency Starter Baseline Capture" \
+            --admin_user=admin \
+            --admin_password=admin \
+            --admin_email=admin@example.invalid \
+            --skip-email
+
+      - name: Activate theme and base-profile plugins
+        run: |
+          ddev wp theme activate site-theme
+          ddev wp plugin activate site-core site-integrations
+
+      - name: Seed the site navigation
+        run: |
+          SAMPLE_PAGE_ID="$(ddev wp post list --post_type=page --name=sample-page --field=ID)"
+          ddev wp post create \
+            --post_type=wp_navigation \
+            --post_status=publish \
+            --post_title="Primary" \
+            --post_content="<!-- wp:navigation-link {\"label\":\"Home\",\"url\":\"https://agency-starter.ddev.site/\",\"kind\":\"custom\",\"isTopLevelLink\":true} /--><!-- wp:navigation-link {\"label\":\"Sample Page\",\"id\":${SAMPLE_PAGE_ID},\"type\":\"page\",\"kind\":\"post-type\",\"url\":\"https://agency-starter.ddev.site/sample-page/\"} /-->"
+          ddev wp rewrite structure '/%postname%/' --hard
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (Chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture the baselines
+        env:
+          WP_BASE_URL: https://agency-starter.ddev.site
+          CAPTURE_MIGRATION_BASELINE: '1'
+        run: npm run capture:migration-baseline
+
+      - name: Record the capture environment
+        run: |
+          {
+            echo "capturedAtCommit=${GITHUB_SHA}"
+            echo "capturedAtUtc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "playwrightVersion=$(npx playwright --version)"
+            echo "browserVersion=$(node -e 'const { chromium } = require("playwright"); chromium.launch().then(async b => { process.stdout.write(b.version()); await b.close(); })')"
+          } > tests/parity/__migration_baselines__/capture-environment.txt
+          cat tests/parity/__migration_baselines__/capture-environment.txt
+
+      - name: Upload migration parity baselines
+        uses: actions/upload-artifact@v7
+        with:
+          name: migration-baselines
+          path: tests/parity/__migration_baselines__
+          if-no-files-found: error

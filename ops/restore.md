@@ -37,6 +37,16 @@ unverified backup is a hope, not a guarantee — this contract exists so
    not arbitrary third-party plugins — review every installed plugin for its own
    PII tables/meta before treating any sanitized dump as safe to share (this is
    a launch gate: see `ops/launch-checklist.md`).
+   Sanitize also regenerates the site's stable identifier
+   (`agency_platform_site_uuid`) the first time a production database is seen
+   outside production, so the restored copy can never satisfy a promotion
+   manifest that targets production. The regeneration is idempotent — a second
+   sanitize run on the same non-production copy preserves the local identifier.
+7. If the restore is a rollback of a deployment that included a promotion,
+   read `docs/state-reconciliation.md`'s recovery procedure BEFORE re-applying
+   database overrides. `wp agency promote-overrides --rollback` refuses any
+   record a newer promotion or a client edit has since changed; that refusal is
+   correct and must be resolved by decision, not by force.
 
 ## Restore smoke-test checklist
 
@@ -44,9 +54,21 @@ Run this after every restore — scheduled test or real incident:
 
 - [ ] Site loads (homepage, a representative page, a representative post).
 - [ ] Admin login works with a known account.
-- [ ] `ddev wp agency check-overrides` runs clean (or reports only the
-      overrides you expect — a restore can resurrect stale database
-      template rows).
+- [ ] `ddev wp agency check-overrides` runs and its report matches expectations.
+      It is INFORMATIONAL by default — legitimate database overrides are normal
+      and do not fail it. Use `--fail-on-drift` only where a non-zero exit is
+      genuinely wanted (for example a CI gate).
+- [ ] Create the ignored state directory, then export a smoke-test bundle:
+      `mkdir -p var/agency-state` followed by
+      `ddev wp agency state-export --output=var/agency-state/restore-smoke-bundle.json`.
+      The command writes a signed bundle and prints only its export envelope.
+- [ ] Verify that bundle with
+      `ddev wp agency state-diff --source=var/agency-state/restore-smoke-bundle.json --format=json`.
+      Run this immediately after export. Exit `0` means no drift. Exit `2`
+      means that state changed after export. The command verifies the bundle's
+      signature and state hash before it reads the bundle.
+- [ ] `ddev wp agency promotion-backups list` runs and shows only backups you
+      expect for this environment.
 - [ ] Media referenced by recent content actually resolves (proves the
       uploads restore, not just the database restore, succeeded).
 - [ ] WooCommerce profile only: a test order/checkout flow completes.

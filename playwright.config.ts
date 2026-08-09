@@ -43,9 +43,22 @@ export default defineConfig({
 			maxDiffPixelRatio: 0.01,
 		},
 	},
+	// The promotion lifecycle spec MUTATES the live theme: it commits a prepared
+	// file over parts/site-header.html and restores it afterwards. Run inside the
+	// general suite it corrupts every other spec that renders a page, and with
+	// parallel workers it does so mid-run. CI proved exactly that — the general
+	// e2e run failed with "ENOENT ... parts/site-header.html" and took
+	// site-editor, client-workflow, forbidden-admin-screens and smoke down with
+	// it, which in turn SKIPPED the dedicated promotion gate later in the job.
+	// It also ran in BOTH viewport projects, so the second run started against
+	// the tree the first had left dirty.
+	//
+	// It runs only through `npm run test:e2e:promotion`, which pins one project
+	// and one worker.
 	projects: [
 		{
 			name: 'chromium-desktop',
+			testIgnore: [ /[\\/]parity[\\/]/, /promotion-lifecycle\.spec\.ts$/ ],
 			use: {
 				...devices[ 'Desktop Chrome' ],
 				viewport: { width: 1280, height: 800 },
@@ -53,8 +66,41 @@ export default defineConfig({
 		},
 		{
 			name: 'chromium-mobile',
+			testIgnore: [ /[\\/]parity[\\/]/, /promotion-lifecycle\.spec\.ts$/ ],
 			use: {
 				...devices[ 'Pixel 7' ],
+			},
+		},
+		// The promotion lifecycle gate: its own project so the mutating spec runs
+		// exactly ONCE, in one viewport, never alongside a spec that renders a
+		// page. `npm run test:e2e:promotion` selects it.
+		{
+			name: 'promotion',
+			testMatch: /promotion-lifecycle\.spec\.ts$/,
+			use: {
+				...devices[ 'Desktop Chrome' ],
+				viewport: { width: 1280, height: 800 },
+			},
+		},
+		// Parity projects use the exact viewports BLOCK_THEME_PROPOSAL.md §9.6
+		// mandates, and run ONLY the parity specs.
+		{
+			name: 'parity-desktop',
+			testMatch: /[\\/]parity[\\/].*\.spec\.ts$/,
+			use: {
+				...devices[ 'Desktop Chrome' ],
+				viewport: { width: 1440, height: 900 },
+				deviceScaleFactor: 1,
+			},
+		},
+		{
+			name: 'parity-mobile',
+			testMatch: /[\\/]parity[\\/].*\.spec\.ts$/,
+			use: {
+				...devices[ 'Desktop Chrome' ],
+				viewport: { width: 390, height: 844 },
+				deviceScaleFactor: 1,
+				hasTouch: true,
 			},
 		},
 	],

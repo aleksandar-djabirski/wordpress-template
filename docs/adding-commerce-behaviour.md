@@ -13,10 +13,13 @@ bash scripts/enable-commerce
 ```
 
 It installs WooCommerce via Composer, activates it alongside site-commerce,
-configures a deterministic store (HPOS on, classic cart/checkout, COD, free
-shipping, guest checkout, store taken out of "coming soon"), and creates the
-fixtures the commerce test suites assert against. It is idempotent and, like
-`scripts/setup`, is written to be read top to bottom.
+configures a deterministic store (HPOS on, native block cart/checkout
+(verified, never hand-written), COD, free shipping, guest checkout, store
+taken out of "coming soon"), and creates the fixtures the commerce test
+suites assert against. It also seeds a site-header template-part database
+override carrying the Mini-Cart block — the store-side composition the base
+theme deliberately does not ship. It is idempotent and, like `scripts/setup`,
+is written to be read top to bottom.
 
 Under the hood it does what a real project does by hand. WooCommerce is
 installed through Composer — the required path for any real project: a
@@ -77,23 +80,54 @@ the plugin only shows an admin notice (`render_missing_woocommerce_notice()`).
   `Requires Plugins: woocommerce` so WordPress itself understands the
   dependency, on top of the runtime `class_exists()` guard.
 
-## 3. Hooks first, template overrides last
+## 3. Hooks first, block templates second, classic overrides never
 
-Prefer a `woocommerce_*` hook over a template override every time — a hook
-keeps tracking upstream WooCommerce changes; an override silently stops.
-Only fall back to `web/app/themes/site-theme/woocommerce/` when no hook
-covers the change, and when you do:
+Prefer a `woocommerce_*` hook over any template change — a hook keeps tracking
+upstream changes; an override silently stops.
 
-1. Copy the WooCommerce core template you're overriding.
-2. Add a row to the override log in `web/app/themes/site-theme/woocommerce/README.md`
-   (overridden template, reason, WC template version, related tests, and
-   confirmation a hook-based alternative was actually considered).
-3. Keep the override as small as possible — inherit as much of the
-   surrounding markup as you can.
+When markup really must change, the block theme has exactly one override
+surface: a block template at
+`web/app/themes/site-theme/templates/<slug>.html`. The theme owns six commerce
+templates: `single-product`, `archive-product`, `taxonomy-product_attribute`,
+`product-search-results`, `page-cart`, and `order-confirmation`. It does not
+override `page-checkout` or `coming-soon`; see
+`tests/Architecture/commerce-template-list.php` for the ground truth. Each
+owned template is a **derived copy of the template WooCommerce ships for that
+slug with only the header/footer template-part slugs rewritten** to this
+theme's `site-header` / `site-footer` and any environment-specific
+template-part `theme` attribute removed.
+That missing-part rewrite is the whole justification for the override: WooCommerce's
+templates reference `header` / `footer` parts this theme does not have, so
+without it the storefront renders with no header and no footer.
 
-The base profile ships with **zero** overrides deliberately; the README's
-log starts empty and every future entry should be a reviewed, logged
-exception, not a habit.
+One byte in that derivation is deliberate. `templates/order-confirmation.html`
+carries a single trailing LF that the upstream file does not — upstream ships
+it without a trailing newline, the other five overrides end in LF (as does
+every other file in the theme), and the derivation rules require a single
+trailing newline. A re-derivation with `sed … > file` does NOT append a
+trailing newline, so it drops that byte again and produces a spurious one-line
+diff; re-add it after a re-derivation.
+
+Rules when you change one:
+
+1. Keep the divergence minimal and reviewable — inherit as much upstream
+   composition as you can.
+2. Keep both `wp:template-part` blocks (`site-header`, `site-footer`).
+   `CommerceBoundaryTest` fails if either disappears.
+3. Re-derive from upstream after a major WooCommerce upgrade, then re-apply
+   your divergence. `CommerceBlockTemplatesTest` fails when WooCommerce starts
+   shipping a template slug that is neither owned nor deliberately excluded in
+   `tests/Architecture/commerce-template-list.php`.
+4. Commerce block markup lives ONLY in those declared templates. A commerce
+   block in a base template, a template part, or a theme pattern renders as a
+   broken block on any site without WooCommerce — register it as a pattern
+   from `site-commerce` instead (`SiteCommerce\Theme\CommercePatterns`).
+
+**The classic `web/app/themes/site-theme/woocommerce/` PHP override directory
+is gone.** It held zero overrides, and a block theme has one rendering path
+(spec §4); a classic template override would reintroduce the second one. If a
+future project proves it needs a classic override, that is an ADR-level
+decision, not a habit.
 
 ## 4. Isolation rules
 
@@ -101,7 +135,9 @@ WooCommerce symbols (`WooCommerce`, `WC_*`, `wc_*`, `woocommerce_*`) are
 forbidden everywhere except:
 
 - `web/app/plugins/site-commerce/`
-- `web/app/themes/site-theme/woocommerce/`
+- `web/app/themes/site-theme/templates/*.html` — the commerce block
+  templates, the block theme's only commerce markup override surface
+  (enforced by `CommerceBoundaryTest`, the HTML half of this boundary)
 - `tests/commerce/`
 - a reviewed entry in `tests/Architecture/woocommerce-allowlist.php`, each
   with a one-line reason (see the handful of existing entries — e.g.
@@ -147,8 +183,9 @@ WooCommerce installed.
   ddev composer test:integration:commerce
   ```
 
-- **e2e** (`COMMERCE=1`): the full storefront journey — archive → PDP (simple +
-  variable) → cart + `TESTCOUPON` → guest COD checkout → order history:
+- **e2e** (`COMMERCE=1`): the full storefront journey — archive (inside the
+  theme header/footer) → PDP (simple + variable) → block cart + `TESTCOUPON`
+  → guest COD block checkout → order history, plus the header Mini-Cart:
 
   ```sh
   COMMERCE=1 npm run test:e2e:commerce
@@ -160,7 +197,7 @@ ephemerally; the base jobs never install it.
 ## Verify
 
 ```sh
-ddev composer test:architecture         # WooCommerceIsolationTest, allowlist checks
+ddev composer test:architecture         # CommerceBoundaryTest, isolation + allow-list checks
 ddev composer test:unit
 bash scripts/enable-commerce            # once, to set up the store + fixtures
 ddev composer test:integration:commerce

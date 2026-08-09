@@ -25,8 +25,10 @@ For a bad deploy (the common case after `ops/update-process.md`'s step 8):
 3. Re-run `ddev composer verify:fast` (or the project's CI) against the
    reverted state before it goes live again, even under time pressure —
    a rushed rollback that's also broken doubles the incident.
-4. Confirm the rollback in production the same way you'd confirm any
-   deploy (smoke test, `wp agency verify-env`).
+4. Confirm the rollback in production with a smoke test and the host's
+   production health checks. Do not use `wp agency verify-env` as a production
+   check. It only checks non-production safety invariants. In production it
+   warns and exits successfully without checking those invariants.
 
 ## 3. Database restore
 
@@ -61,7 +63,30 @@ production or exposing PII to whoever's debugging:
    restore-test cadence) — don't let a one-off debug copy become an
    unmonitored, unpatched, forgotten install.
 
-## 5. After the incident
+## 5. A promotion made the site wrong
+
+1. Do not hand-edit the database. Run
+   `wp agency promote-overrides --rollback --manifest=<path>` — it restores the
+   original records in dependency-safe order and verifies hashes afterwards.
+2. **Confirm is the point of no return.** `--rollback` after `--confirm` is
+   refused with `Promotion <id> is already confirmed; rollback is refused after
+   confirm.` and exits 1. That is safety, not an oversight: retention may prune
+   the backups at any moment after confirm, so a rollback that appeared to work
+   could silently restore nothing. Roll back BEFORE confirming — between
+   `--finalize` and `--confirm` is the window in which a promotion can still be
+   undone; after confirm the recovery path is a database restore
+   (`ops/restore.md`), not a rollback. The backups themselves do survive
+   confirm (`wp agency promotion-backups list` still shows them) — it is the
+   rollback that is refused, not the backup that is gone.
+3. Rollback REFUSES any record that a newer promotion or a client edit has
+   changed since finalisation, and any deleted record that has since been
+   re-created. Those refusals protect newer work — resolve each one by
+   decision, never by forcing the restore.
+4. A partial rollback exits non-zero and names every record it could not
+   restore. Treat that as an open incident until each named record is resolved.
+5. Full procedure and command lines: `docs/state-reconciliation.md`.
+
+## 6. After the incident
 
 Write down what happened, when, the trigger, the fix, and one concrete
 prevention step (a new architecture test, a new monitor, a process change)

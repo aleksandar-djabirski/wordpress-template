@@ -1,0 +1,18 @@
+/*
+ * Editor-only canvas corrections. WordPress scopes every selector in this file
+ * to .editor-styles-wrapper automatically (see add_editor_style()), so write
+ * them unscoped. Nothing here may be needed on the frontend — if a rule is,
+ * it belongs in shared.css.
+ */
+
+body {
+	background-color: var(--wp--preset--color--base);
+}
+
+/* The canvas renders a template part inline in the post flow rather than as a
+   document region, so its child margins can collapse out and shift the header
+   or footer a few pixels against the frontend. A new block formatting context
+   keeps the later editing-parity geometry check honest. */
+.wp-block-template-part {
+	display: flow-root;
+}

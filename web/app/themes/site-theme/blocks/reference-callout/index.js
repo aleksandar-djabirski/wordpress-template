@@ -4,6 +4,12 @@
  * is dynamic (server-rendered by render.php), so `save` returns `null` and
  * WordPress stores only the attributes in post content.
  *
+ * The testimonial shown in the editor is REPRESENTATIVE placeholder content.
+ * The real testimonial comes from `SiteCore\Contracts\Testimonials::latest()`
+ * at render time (see `render.php`) and is frontend-only; `ServerSideRender`
+ * is deliberately not used, because a client-side preview is both faster and
+ * editable.
+ *
  * Built by `npm run build` (@wordpress/scripts) into ./build/index.js,
  * which block.json's `editorScript` references via `file:./build/index.js`.
  */
@@ -55,6 +61,22 @@ function Edit( { attributes, setAttributes } ) {
 					}
 					placeholder={ __( 'Body copy', 'site-theme' ) }
 				/>
+				{ showTestimonial && (
+					<blockquote className="reference-callout__testimonial reference-callout__testimonial--preview">
+						<p>
+							{ __(
+								'This starter cut our build time in half and the client still edits everything themselves.',
+								'site-theme'
+							) }
+						</p>
+						<cite>
+							{ __(
+								'Representative preview — the live testimonial is loaded when the page is viewed.',
+								'site-theme'
+							) }
+						</cite>
+					</blockquote>
+				) }
 			</div>
 		</>
 	);

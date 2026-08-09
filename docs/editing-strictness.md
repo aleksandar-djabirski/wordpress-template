@@ -8,41 +8,44 @@ before go-live (see `ops/launch-checklist.md`).
 
 ## The default editing model
 
-Customers hold `client_editor` (or `client_shop_manager`) and can edit
-**content only**:
+Customers hold `client_editor` (or `client_shop_manager`) and use the approved
+visual Site Editor surfaces:
 
-- They compose pages from an allow-list of blocks
-  (`EditorRestrictions::ALLOWED_BLOCKS`); every other block, including
-  `core/shortcode` and all `woocommerce/*` blocks, is hidden from them.
-- Structure and styles are locked: `agency-platform` sets
-  `canLockBlocks = false` and `codeEditingEnabled = false`, and the design
-  system (colors, fonts, spacing) is fixed in `theme.json` with user-facing
-  custom colors/font-sizes disabled.
-- Templates, parts, and block/pattern *definitions* live in Git and are
-  never editable from wp-admin; `wp agency check-overrides` fails if a
-  `wp_template`/`wp_template_part` or customized `wp_global_styles` row
-  appears in the database.
+- Customers compose pages **and edit templates, template parts, navigation and
+  Global Styles** in the Site Editor.
+- The insertable block set is derived from the registered blocks filtered to
+  `core/`, `agency/` and `woocommerce/`; `core/html`, `core/shortcode` and
+  `core/freeform` are permanently denied. `canLockBlocks = true`,
+  `codeEditingEnabled = false`.
+- The same policy is enforced **server side on save** through
+  `rest_pre_insert_*`, which also rejects registered shortcode tags anywhere in
+  the content and per-block custom CSS. Saves are rejected with a REST error,
+  never silently stripped.
 
 What the default does **not** do is validate the *block tree* a customer
-assembles server-side — a customer can still arrange the allow-listed blocks
-into layouts you might not have intended. That is deliberate: **spec §14
-defers server-side block-tree validation until real customer behavior proves
-the native editor restrictions insufficient**, rather than building a
-validator nobody has shown is needed. The dials below are the sanctioned way
-to tighten things when a specific project does need more.
+assembles server-side — a customer can still arrange the allowed blocks into
+layouts you might not have intended. That is deliberate: **spec §14 defers
+server-side block-tree validation — which blocks may nest inside which — until
+real customer behavior proves it is needed**, rather than building a validator
+nobody has shown is needed. The dials below are the sanctioned way to tighten
+things when a specific project does need more.
 
-## Dial 1 — trim layout-bearing blocks (content-only customers)
+## Dial 1 — trim the block set
 
-For customers who should place text and media but never touch layout, drop
-the layout-bearing blocks from the allow-list in
-`web/app/mu-plugins/agency-platform/src/Editor/EditorRestrictions.php`
-(`EditorRestrictions::ALLOWED_BLOCKS`). Remove `core/group`, `core/columns`,
-`core/column`, `core/buttons`, `core/button`, `core/spacer`, and
-`core/separator`, leaving just the content primitives (`core/paragraph`,
-`core/heading`, `core/list`/`core/list-item`, `core/image`, `core/gallery`,
-`core/quote`, `core/table`) plus your own `agency/*` blocks. The constant is
-unit-tested, so the change is caught by the suite if a downstream test still
-expects a removed block.
+For a project that needs a smaller insertable set, use the
+`agency_platform_allowed_block_namespaces`, `agency_platform_allowed_blocks`
+and `agency_platform_disallowed_blocks` filters. For example:
+
+```php
+add_filter(
+	'agency_platform_disallowed_blocks',
+	array( SiteCore\Editor\BlockDials::class, 'deny_layout_blocks' )
+);
+```
+
+The callback must be a named method; `HookOwnershipTest` forbids closures in
+production code. `BlockPolicy::ALWAYS_DENIED` cannot be re-opened by any
+filter.
 
 ## Dial 2 — lock page composition per post type
 
@@ -104,6 +107,12 @@ a clean sweep) to `NEVER_GRANT`, and they are stripped on the next `init`
 re-sync — including from `client_shop_manager`, which builds on the same
 baseline.
 
+## Dial 4 — tighten the admin-screen boundary
+
+Add or remove screens only through `AdminScreenPolicy::DENIED_SCREENS`. The
+theme-side screens deliberately left open are `site-editor.php` and
+`font-library.php`; the latter is the Site Editor's own font surface.
+
 ## Commerce role dial
 
 Only relevant with the commerce profile active.
@@ -112,7 +121,17 @@ Only relevant with the commerce profile active.
 WooCommerce is present — is `client_editor` plus a workflow-complete set of
 WooCommerce catalogue/order/coupon capabilities (the full product lifecycle
 including editing/deleting published products, product-term assignment, orders,
-and coupons). One of them is `manage_woocommerce`, which (matching core's own
+and coupons). Because it builds on the `client_editor` baseline
+(`ShopRole::capabilities()` starts from
+`RolesProvider::client_editor_capabilities()`), it inherits `edit_theme_options`
+and with it the same Site Editor access — templates, template parts,
+navigation and Global Styles — bounded by the same block policy and
+admin-screen boundary. Dropping the Site Editor for shop managers is a
+per-project dial with a named cost: `edit_theme_options` is granted in
+`RolesProvider::ALWAYS_GRANT`, which both roles share, so removing it strips
+the Site Editor from that role wholesale (there is no per-role lever today),
+and both roles are re-synced from their computed sets on every `init`. One of
+them is `manage_woocommerce`, which (matching core's own
 `shop_manager`) grants access to **WooCommerce → Settings** and **Status**; a
 shop manager reaching Settings is pinned live by
 `tests/commerce/e2e/shop-manager-admin.spec.ts`. To lock Settings down for a
@@ -134,7 +153,8 @@ or restructure categories. Record the choice on the launch checklist
 
 ## Why the default is looser
 
-One line, restated: **spec §14 defers server-side block-tree validation
-until real customer behavior proves the native editor restrictions
-insufficient** — so the starter ships the native allow-list and lock flags,
-and leaves the dials above for the projects that turn out to need them.
+One line, restated: the block policy is enforced in the inserter and on REST
+saves. **Spec §14 defers server-side block-tree validation** — which blocks may
+nest inside which — until real customer behavior proves it is needed. The
+starter ships the policy and lock flags, and leaves the dials above for the
+projects that need them.

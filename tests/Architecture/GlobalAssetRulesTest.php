@@ -1,8 +1,8 @@
 <?php
 /**
  * Enforces the theme's asset-locality rules: assets/global/ holds only the
- * two genuinely global stylesheets, block-specific CSS stays inside its
- * block directory, and each part's CSS/JS is named after the part.
+ * three deliberately split global stylesheets, and block-specific CSS stays
+ * inside its block directory.
  *
  * @package Tests\Architecture
  */
@@ -20,13 +20,13 @@ final class GlobalAssetRulesTest extends TestCase {
 
 	use FormatsArchitectureFailures;
 
-	private const ALLOWED_GLOBAL_CSS = array( 'base.css', 'typography.css' );
+	private const ALLOWED_GLOBAL_CSS = array( 'frontend-reset.css', 'shared.css', 'editor.css' );
 
 	private function theme(): string {
 		return $this->repo_root() . '/web/app/themes/site-theme';
 	}
 
-	public function test_global_stylesheet_directory_holds_only_base_and_typography(): void {
+	public function test_global_stylesheet_directory_holds_only_the_three_split_files(): void {
 		$global  = $this->theme() . '/assets/global';
 		$entries = is_dir( $global ) ? scandir( $global ) : false;
 
@@ -43,7 +43,7 @@ final class GlobalAssetRulesTest extends TestCase {
 				$this->architecture_failure(
 					'Unexpected file in assets/global/',
 					$this->to_relative( $global ) . '/' . $entry,
-					'assets/global/ is reserved for truly global styles (base.css, typography.css); block and part styles belong co-located with their code.',
+					'assets/global/ is reserved for the three split global stylesheets; block styles belong co-located with their code.',
 					'Move this stylesheet next to the block/part it styles. A genuinely global addition requires deliberately extending this test\'s allow-list.'
 				)
 			);
@@ -108,44 +108,35 @@ final class GlobalAssetRulesTest extends TestCase {
 		return $slugs;
 	}
 
-	public function test_part_assets_are_named_after_their_part(): void {
-		$parts_dir = $this->theme() . '/parts';
-		$entries   = is_dir( $parts_dir ) ? scandir( $parts_dir ) : false;
 
-		self::assertIsArray( $entries, 'parts/ should exist.' );
+	public function test_frontend_reset_css_is_never_registered_as_an_editor_style(): void {
+		self::assertNotContains(
+			'assets/global/frontend-reset.css',
+			\SiteTheme\Bootstrap\ThemeBootstrap::EDITOR_STYLESHEETS,
+			$this->architecture_failure(
+				'Frontend reset CSS is loaded into the editor canvas',
+				'web/app/themes/site-theme/src/Bootstrap/ThemeBootstrap.php',
+				'frontend-reset.css is a document-level reset; inside the editor canvas it fights core\'s own canvas layout and makes the editor stop matching the frontend.',
+				'Keep frontend-reset.css in FRONTEND_STYLESHEETS only; put editor-safe rules in assets/global/shared.css.'
+			)
+		);
+	}
 
-		foreach ( $entries as $part ) {
-			$part_dir = $parts_dir . '/' . $part;
+	public function test_every_declared_global_stylesheet_exists_on_disk(): void {
+		$declared = array_merge(
+			array_values( \SiteTheme\Bootstrap\ThemeBootstrap::FRONTEND_STYLESHEETS ),
+			\SiteTheme\Bootstrap\ThemeBootstrap::EDITOR_STYLESHEETS
+		);
 
-			if ( '.' === $part || '..' === $part || ! is_dir( $part_dir ) ) {
-				continue;
-			}
-
-			$assets = scandir( $part_dir );
-
-			if ( false === $assets ) {
-				continue;
-			}
-
-			foreach ( $assets as $asset ) {
-				$extension = strtolower( pathinfo( $asset, PATHINFO_EXTENSION ) );
-
-				if ( 'css' !== $extension && 'js' !== $extension ) {
-					continue;
-				}
-
-				self::assertSame(
-					$part . '.' . $extension,
-					$asset,
-					$this->architecture_failure(
-						'Part asset is not named after its part',
-						$this->to_relative( $part_dir ) . '/' . $asset,
-						'Parts::assets() resolves a part\'s CSS/JS by the convention <part>/<part>.css|js; an off-name file is silently never enqueued.',
-						'Rename the file to ' . $part . '.' . $extension . ' (one CSS and/or one JS per part).'
-					)
-				);
-			}
+		foreach ( array_unique( $declared ) as $relative_path ) {
+			self::assertStringStartsWith( 'assets/global/', $relative_path );
+			self::assertFileExists( $this->theme() . '/' . $relative_path );
 		}
+	}
+
+	public function test_the_shared_stylesheet_is_loaded_on_both_sides(): void {
+		self::assertContains( 'assets/global/shared.css', array_values( \SiteTheme\Bootstrap\ThemeBootstrap::FRONTEND_STYLESHEETS ) );
+		self::assertContains( 'assets/global/shared.css', \SiteTheme\Bootstrap\ThemeBootstrap::EDITOR_STYLESHEETS );
 	}
 
 	/**

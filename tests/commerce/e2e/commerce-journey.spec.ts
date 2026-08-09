@@ -1,4 +1,12 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
+import {
+	addSimpleProductToCart,
+	checkoutLocators,
+	fillBlockCheckoutWithCod,
+	placeOrderAndReadNumber,
+	SIMPLE_PRODUCT_SLUG,
+	VARIABLE_PRODUCT_SLUG,
+} from './helpers/checkout';
 
 /**
  * Commerce-profile e2e journeys. These run only when a project has enabled the
@@ -9,12 +17,14 @@ import { test, expect, type Page } from '@playwright/test';
  *
  * Run with: COMMERCE=1 npx playwright test tests/commerce/e2e
  *
- * Selectors target WooCommerce's CLASSIC (shortcode) cart/checkout templates,
- * which scripts/enable-commerce switches the cart/checkout pages to. The block
- * Cart/Checkout render their fields client-side after hydration; the classic
- * templates are server-rendered, so their selectors are stable and the
- * automated checkout is deterministic. All selectors here were verified against
- * a live `scripts/enable-commerce` install, not from memory.
+ * The storefront runs on the NATIVE BLOCK store: scripts/enable-commerce seeds
+ * the cart and checkout pages with WooCommerce's block content (and hard-fails
+ * if either ever falls back to a shortcode), and the header Mini-Cart renders
+ * from a site-header template-part override. The block Cart and Checkout
+ * hydrate client-side, so controls are addressed by accessible role and label
+ * text — the policy is stated in helpers/checkout.ts and its contract is
+ * enforced by locators.spec.ts, which fails with a named locator the moment a
+ * WooCommerce release renames a control.
  *
  * Fixtures (created by scripts/enable-commerce):
  *   - "Test Simple Product"   simple,   $19.99, in stock
@@ -23,67 +33,12 @@ import { test, expect, type Page } from '@playwright/test';
  *   - user test-customer / test-customer (role: customer)
  */
 
-const SIMPLE_PRODUCT_SLUG = 'test-simple-product';
-const VARIABLE_PRODUCT_SLUG = 'test-variable-product';
-
 // Local-only credential created by scripts/enable-commerce (LOCAL/CI throwaway,
 // never valid outside a freshly enabled commerce install).
 const TEST_CUSTOMER = { user: 'test-customer', pass: 'test-customer' } as const;
 
 function isMobileProject(): boolean {
 	return test.info().project.name === 'chromium-mobile';
-}
-
-/**
- * Puts one Test Simple Product in the cart via WooCommerce's add-to-cart query
- * parameter — a fast, reliable way to seed cart state without driving the PDP,
- * used by the cart/checkout journeys that are about what happens AFTER the cart
- * has an item.
- */
-async function addSimpleProductToCart( page: Page ): Promise<void> {
-	await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
-	await page.locator( '.single_add_to_cart_button' ).click();
-	// Classic single-product add-to-cart reloads to a success notice.
-	await expect( page.locator( '.woocommerce-message, .wc-block-components-notice-banner' ).first() ).toBeVisible();
-}
-
-/**
- * Fills the classic checkout billing form with deterministic data and selects
- * Cash on Delivery. Country/state are set on the underlying <select> elements
- * (WooCommerce enhances them with select2, but selectOption drives the real
- * control), which also triggers the update_order_review AJAX that refreshes the
- * payment methods — so COD is checked after the fields are populated.
- */
-async function fillCheckoutBillingWithCod( page: Page ): Promise<void> {
-	await page.locator( '#billing_first_name' ).fill( 'Test' );
-	await page.locator( '#billing_last_name' ).fill( 'Buyer' );
-	await page.locator( '#billing_country' ).selectOption( 'US' );
-	await page.locator( '#billing_address_1' ).fill( '123 Test Street' );
-	await page.locator( '#billing_city' ).fill( 'Los Angeles' );
-	await page.locator( '#billing_state' ).selectOption( 'CA' );
-	await page.locator( '#billing_postcode' ).fill( '90001' );
-	await page.locator( '#billing_phone' ).fill( '5550100' );
-	await page.locator( '#billing_email' ).fill( 'test-buyer@example.invalid' );
-
-	// COD lives in the payment panel that update_order_review re-renders; check
-	// it last. Playwright waits out the .blockOverlay the AJAX refresh paints.
-	await page.locator( '#payment_method_cod' ).check();
-}
-
-/**
- * Places the order and returns the WooCommerce order number from the
- * order-received (thank-you) page.
- */
-async function placeOrderAndReadNumber( page: Page ): Promise<string> {
-	await page.locator( '#place_order' ).click();
-
-	await page.waitForURL( /order-received/ );
-	await expect( page.locator( '.woocommerce-order' ) ).toBeVisible();
-
-	const orderNumber = ( await page.locator( '.woocommerce-order-overview__order strong' ).innerText() ).trim();
-	expect( orderNumber ).not.toEqual( '' );
-
-	return orderNumber;
 }
 
 test.describe( 'commerce journeys', () => {
@@ -110,12 +65,15 @@ test.describe( 'commerce journeys', () => {
 
 		await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
 
-		await expect( page.locator( 'p.price' ) ).toContainText( '19.99' );
-		await page.locator( '.single_add_to_cart_button' ).click();
-		await expect( page.locator( '.woocommerce-message, .wc-block-components-notice-banner' ).first() ).toContainText( /added to (your|the) cart/i );
+		// The derived single-product template embeds WooCommerce's legacy
+		// product markup, which renders a second <main> (id="main" class="site-main")
+		// nested inside the theme's; the theme main is first and contains it.
+		await expect( page.locator( 'main' ).first() ).toContainText( '19.99' );
+		await checkoutLocators.addToCart( page ).click();
+		await expect( page.locator( 'main' ).first() ).toContainText( /added to (your|the) cart/i );
 
 		await page.goto( '/cart/' );
-		await expect( page.locator( '.woocommerce-cart-form' ) ).toContainText( 'Test Simple Product' );
+		await expect( page.locator( 'main' ).first() ).toContainText( 'Test Simple Product' );
 	} );
 
 	test( 'variable product: selecting a variation updates the price, then adds', async ( { page } ) => {
@@ -124,18 +82,18 @@ test.describe( 'commerce journeys', () => {
 		await page.goto( `/product/${ VARIABLE_PRODUCT_SLUG }/` );
 
 		// Add-to-cart is gated until a variation is chosen.
-		await expect( page.locator( '.single_add_to_cart_button' ) ).toHaveClass( /disabled/ );
+		await expect( checkoutLocators.addToCart( page ) ).toHaveClass( /disabled/ );
 
 		await page.locator( 'select#size' ).selectOption( 'M' );
 
 		await expect( page.locator( '.woocommerce-variation-price' ) ).toContainText( '29.99' );
-		await expect( page.locator( '.single_add_to_cart_button' ) ).not.toHaveClass( /disabled/ );
+		await expect( checkoutLocators.addToCart( page ) ).not.toHaveClass( /disabled/ );
 
-		await page.locator( '.single_add_to_cart_button' ).click();
+		await checkoutLocators.addToCart( page ).click();
 		await expect( page.locator( '.woocommerce-message, .wc-block-components-notice-banner' ).first() ).toBeVisible();
 
 		await page.goto( '/cart/' );
-		await expect( page.locator( '.woocommerce-cart-form' ) ).toContainText( 'Test Variable Product' );
+		await expect( page.locator( 'main' ).first() ).toContainText( 'Test Variable Product' );
 	} );
 
 	test( 'cart: updating quantity and applying TESTCOUPON lowers the total', async ( { page } ) => {
@@ -144,18 +102,17 @@ test.describe( 'commerce journeys', () => {
 		await addSimpleProductToCart( page );
 		await page.goto( '/cart/' );
 
-		// Quantity 2 -> subtotal 2 x $19.99 = $39.98.
-		await page.locator( '.woocommerce-cart-form input.qty' ).first().fill( '2' );
-		await page.locator( 'button[name="update_cart"]' ).click();
-		await expect( page.locator( '.cart-subtotal' ) ).toContainText( '39.98' );
+		// Quantity 2 -> subtotal 2 x $19.99 = $39.98. The block cart pushes the
+		// change through the Store API, so the totals take a moment to catch up.
+		await page.getByLabel( /quantity/i ).first().fill( '2' );
+		await expect( page.locator( 'main' ) ).toContainText( '39.98', { timeout: 15_000 } );
 
 		// TESTCOUPON (10% off) adds a discount row and lowers the order total.
-		await page.locator( '#coupon_code' ).fill( 'TESTCOUPON' );
-		await page.locator( 'button[name="apply_coupon"]' ).click();
+		await page.getByRole( 'button', { name: /add coupons?/i } ).first().click();
+		await page.getByLabel( /enter code/i ).fill( 'TESTCOUPON' );
+		await page.getByRole( 'button', { name: /apply/i } ).click();
 
-		await expect( page.locator( '.woocommerce-message' ) ).toContainText( /coupon code applied successfully/i );
-		await expect( page.locator( '.cart-discount' ) ).toBeVisible();
-		await expect( page.locator( '.order-total' ) ).toContainText( '35.98' );
+		await expect( page.locator( 'main' ) ).toContainText( '35.98', { timeout: 15_000 } );
 	} );
 
 	test( 'checkout: a guest COD order reaches the order-received page', async ( { page } ) => {
@@ -165,7 +122,7 @@ test.describe( 'commerce journeys', () => {
 		await addSimpleProductToCart( page );
 		await page.goto( '/checkout/' );
 
-		await fillCheckoutBillingWithCod( page );
+		await fillBlockCheckoutWithCod( page, 'test-buyer@example.com' );
 		const orderNumber = await placeOrderAndReadNumber( page );
 
 		expect( orderNumber ).toMatch( /\d+/ );
@@ -187,10 +144,55 @@ test.describe( 'commerce journeys', () => {
 
 		await addSimpleProductToCart( page );
 		await page.goto( '/checkout/' );
-		await fillCheckoutBillingWithCod( page );
+
+		// A returning customer's checkout can render the saved shipping address
+		// as a summary instead of the editable fields (WooCommerce 11.0.0 block
+		// checkout: toggling "Edit shipping address" leaves the form unable to
+		// submit, so the summary is used as-is). A new customer gets the
+		// editable form. Both states are legitimate; wait for hydration, then
+		// branch on which one is showing.
+		await expect( checkoutLocators.email( page ) ).toBeVisible( { timeout: 30_000 } );
+		if ( await checkoutLocators.firstName( page ).isVisible() ) {
+			await fillBlockCheckoutWithCod( page, 'test-customer@example.com' );
+		} else {
+			await expect( checkoutLocators.cashOnDelivery( page ) ).toBeVisible( { timeout: 30_000 } );
+			await checkoutLocators.cashOnDelivery( page ).check();
+		}
 		const orderNumber = await placeOrderAndReadNumber( page );
 
 		await page.goto( '/my-account/orders/' );
 		await expect( page.locator( '.woocommerce-orders-table' ) ).toContainText( orderNumber );
+	} );
+
+	test( 'the block theme renders the shop archive inside the theme header and footer', async ( { page } ) => {
+		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+
+		await page.goto( '/shop/' );
+
+		// The whole justification for templates/archive-product.html is that the
+		// upstream template references header/footer parts this theme does not
+		// have. Without the override these two assertions fail.
+		await expect( page.locator( 'header' ).first() ).toBeVisible();
+		await expect( page.locator( 'footer' ).first() ).toBeVisible();
+	} );
+
+	test( 'the header Mini-Cart reflects the cart contents', async ( { page } ) => {
+		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+
+		await page.goto( '/' );
+		// Seeded by scripts/enable-commerce as a site-header template-part
+		// override, so it is present on every storefront page.
+		await expect( checkoutLocators.miniCart( page ) ).toBeVisible();
+		// The Mini-Cart button's ACCESSIBLE NAME carries the count. Assert the
+		// empty state too, so the "1" assertion below cannot pass vacuously.
+		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName( /Number of items in the cart:\s*0\b/ );
+
+		await addSimpleProductToCart( page );
+		await page.goto( '/' );
+
+		// One fixture product is in the cart. The Mini-Cart button's ACCESSIBLE
+		// NAME carries the count, so assert the transition 0 -> 1 rather than the
+		// button's visible text.
+		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName( /Number of items in the cart:\s*1\b/ );
 	} );
 } );

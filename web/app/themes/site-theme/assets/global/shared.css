@@ -1,0 +1,177 @@
+/*
+ * Editor-safe design-system classes. Loaded on the frontend by
+ * ThemeBootstrap::enqueue_assets() and into the editor canvas by
+ * add_editor_style() — that shared load is what makes the Site Editor canvas
+ * match the frontend.
+ *
+ * Colors, spacing and typography come exclusively from theme.json design
+ * tokens. Git-authored templates and parts carry NO inline style attributes
+ * (hand-writing a block's serialized style output is how "unexpected or
+ * invalid content" warnings happen); everything visual lives here, keyed off
+ * the className the block markup sets.
+ */
+
+body {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.6;
+}
+
+#site-main {
+	max-width: var(--wp--style--global--content-size);
+	margin-inline: auto;
+	padding-inline: var(--wp--preset--spacing--30);
+}
+
+.wp-block-post-content blockquote,
+.editor-styles-wrapper .wp-block-post-content blockquote {
+	margin-inline: var(--wp--preset--spacing--40) !important;
+	margin-left: var(--wp--preset--spacing--40) !important;
+	margin-right: var(--wp--preset--spacing--40) !important;
+}
+
+.wp-block-post-content > * {
+	margin-block: 1em 0 !important;
+}
+
+.wp-block-post-content > :first-child {
+	margin-block-start: 0.25em !important;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: var(--wp--preset--font-family--sans);
+	line-height: 1.2;
+}
+
+.is-style-hero,
+.is-style-cta {
+	padding: var(--wp--preset--spacing--50) var(--wp--preset--spacing--40);
+	border-radius: var(--wp--custom--radius-medium);
+}
+
+.is-style-hero {
+	background-color: var(--wp--preset--color--neutral-100);
+	border: 1px solid var(--wp--preset--color--neutral-300);
+}
+
+.is-style-hero > .wp-block-heading {
+	max-width: 18ch;
+	font-size: var(--wp--preset--font-size--xx-large);
+}
+
+.is-style-hero > .wp-block-paragraph {
+	max-width: 50ch;
+}
+
+.is-style-cta {
+	background-color: var(--wp--preset--color--primary-dark);
+	color: var(--wp--preset--color--base);
+}
+
+.is-style-cta .wp-block-heading,
+.is-style-cta .wp-block-paragraph {
+	color: var(--wp--preset--color--base);
+}
+
+.is-style-cta .wp-block-button__link {
+	background-color: var(--wp--preset--color--accent);
+	color: var(--wp--preset--color--neutral-900);
+}
+
+/* .site-header is the <header> the core/template-part block emits (the
+   template sets tagName + className); .site-header__inner is the group inside
+   the part file. Only one of the two emits the landmark element. */
+.site-header {
+	display: block;
+	padding: var(--wp--preset--spacing--20) var(--wp--preset--spacing--30);
+	background-color: var(--wp--preset--color--base);
+	border-bottom: 1px solid var(--wp--preset--color--neutral-300);
+}
+
+/* Flex lives here rather than in a block `layout` attribute: a layout
+   attribute makes WordPress generate a .wp-container-core-group-is-layout-*
+   rule whose class name is unstable and whose specificity fights this file.
+   shared.css loads in the editor canvas too, so plain CSS renders identically
+   on both sides and stays under our control. */
+.site-header__inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--wp--preset--spacing--20);
+}
+
+.site-header__branding {
+	display: flex;
+	flex-direction: column;
+}
+
+.site-header__nav a {
+	color: var(--wp--preset--color--neutral-900);
+	text-decoration: none;
+}
+
+.site-header__branding .wp-block-site-title {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--large);
+	font-weight: 650;
+}
+
+.site-header__branding .wp-block-site-title a {
+	color: var(--wp--preset--color--neutral-900);
+	text-decoration: none;
+}
+
+.site-header__branding .wp-block-site-tagline {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--small);
+	color: var(--wp--preset--color--neutral-700);
+}
+
+.site-footer {
+	display: block;
+	padding: var(--wp--preset--spacing--30);
+	background-color: var(--wp--preset--color--primary-dark);
+	color: var(--wp--preset--color--base);
+}
+
+.site-footer__inner {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--wp--preset--spacing--20);
+}
+
+.site-footer__copyright {
+	margin: 0;
+	font-size: var(--wp--preset--font-size--small);
+}
+
+/* Mobile-only geometry parity, declared last so it beats the base rules the
+   block theme ships (the core layout classes and the .site-footer padding).
+   The classic header laid its nav below the 782px collapse with no per-child
+   top margin and a full-size 40px toggle, so it measured 261px here rather
+   than the 270px the block theme emitted (its navigation inherited a 24px
+   layout margin and a smaller open button). The classic footer sat flush and
+   ended 20px taller than the block theme's single-line version. These restore
+   the classic positions without touching the desktop layout, which passes. */
+@media (width <= 781px) {
+	.site-header__inner .site-header__nav {
+		margin-block-start: 0;
+	}
+
+	.site-header__inner .wp-block-navigation__responsive-container-open {
+		width: 2.5rem;
+		height: 2.5rem;
+	}
+
+	.site-footer {
+		margin-block-start: 21px;
+		padding-block: 33.5px;
+	}
+}

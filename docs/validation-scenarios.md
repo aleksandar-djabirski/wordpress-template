@@ -1,6 +1,6 @@
 # Validation Scenarios
 
-Twelve deliberate mutations that each break one guardrail this starter
+Twenty-four deliberate mutations that each break one guardrail this starter
 enforces, the exact command to trigger the check, the failure signature the
 mutation should produce, and how to revert. Use these to prove a guardrail
 actually fails closed (not just that it exists) — for example after
@@ -12,11 +12,13 @@ five-line shape (see `tests/support/FormatsArchitectureFailures.php`):
 `Where the code belongs` / `How to validate the fix`. That shape is quoted
 verbatim below wherever the check is a PHPUnit architecture test.
 
-Scenarios 1–7 and 12 run with no database and are the same checks CI's
-`php-qa`/`frontend` jobs run on every push — **proven in this repo's CI**.
-Scenarios 8–11 need a live WordPress install (DDEV); scenario 11
-additionally relies on the committed, Linux-CI-authoritative visual
-baselines — **requires DDEV/CI context**.
+Scenarios 1–7, 12, 14, 15, 16, 17 and 19 run with no database and are the
+same checks CI's `php-qa`/`frontend` jobs run on every push — **proven in
+this repo's CI**. Scenarios 8–10, 13 and 21–24 need a live WordPress install
+(DDEV); scenario 11 additionally relies on the committed,
+Linux-CI-authoritative visual baselines — **requires DDEV/CI context**.
+Scenarios 18 and 20 need the commerce profile — WooCommerce installed via
+`bash scripts/enable-commerce`.
 
 ---
 
@@ -125,7 +127,7 @@ Expected failure (`WooCommerceIsolationTest::test_no_woocommerce_symbols_outside
 ```
 Architecture rule broken: WooCommerce symbol found outside the commerce boundary
 Offending file:           web/app/plugins/site-core/src/Plugin.php:<line> uses 'WooCommerce'
-Why this rule exists:     The base profile must run without WooCommerce; commerce code belongs only in site-commerce and the theme woocommerce/ overrides.
+Why this rule exists:     The base profile must run without WooCommerce; commerce PHP belongs only in site-commerce and the commerce-owned theme override locations.
 Where the code belongs:   Move the code into web/app/plugins/site-commerce/, or — if it is a reviewed exception — add it to tests/Architecture/woocommerce-allowlist.php with a reason.
 How to validate the fix:  ddev composer test:architecture
 ```
@@ -169,7 +171,7 @@ Revert: change `"file:./styles.css"` back to `"file:./style.css"`.
 
 ## 6. Raw hex color in block CSS
 
-**Proven in CI** (`frontend` / `npm run lint:css`).
+**Proven in CI** (`frontend` / `npm run lint`).
 
 Mutation — add to `web/app/themes/site-theme/blocks/reference-callout/style.css`:
 ```css
@@ -221,14 +223,19 @@ Revert: remove the added line.
 
 ---
 
-## 8. Unexpected database template record
+## 8. Database template record drift
 
 **Requires DDEV/CI context** — needs a live database.
 
-Mutation:
+Mutation. The `wp_theme` term is NOT optional: `TemplatesState::posts_for_name()`
+queries `wp_template` rows through a mandatory `wp_theme` tax_query on the active
+stylesheet, so a row created without that term is invisible to the differ and the
+report will not change.
+
 ```sh
 ddev wp post create --post_type=wp_template --post_status=publish \
-  --post_title="Custom Front Page" --post_name=front-page --porcelain
+  --post_title="Custom Front Page" --post_name=front-page \
+  --tax_input='{"wp_theme":["site-theme"]}' --porcelain
 ```
 
 Check:
@@ -236,15 +243,41 @@ Check:
 ddev wp agency check-overrides
 ```
 
-Expected failure (`AgencyPlatform\Cli\AgencyCommands::check_overrides`):
+Expected report (`AgencyPlatform\State\StateCommandRunner::overrides()`; the
+command is a thin delegate at `AgencyCommands::check_overrides`):
 ```
-Template/template-part overrides: 1
-  - front-page (wp_template) [publish]
-Expected core-generated global-styles records: <N>
-Synced patterns (informational only): <N>
-Error: Database overrides found — Git owns templates/template-parts. Reconcile or intentionally re-export them to disk.
+promotable: 1, db-owned: 5, forbidden: 0, unresolved: 0, unchanged: 16
+content:page-2 (added, db-owned)
+content:page-3 (added, db-owned)
+content:page-6 (added, db-owned)
+content:post-1 (added, db-owned)
+custom-css:custom-css-post (unchanged, unchanged)
+custom-css:global-styles (unchanged, unchanged)
+navigation:primary (added, db-owned)
+templates:front-page (added, promotable)
+1 record(s) differ from the Git baseline. Database overrides are expected under the block-theme editing model; this report is informational.
 ```
-Exits non-zero (`WP_CLI::error()`).
+and on STDERR:
+```
+Warning: check-overrides is deprecated. Use `wp agency state-diff` for the machine-readable report.
+```
+Exits **zero**. A database template row is a legitimate client edit under the
+block-theme editing model, not a guardrail breach. The exact counts depend on
+what else the site holds; the load-bearing part is that the new record appears
+as `templates:front-page (added, promotable)` and the exit code stays 0.
+
+Gate check:
+```sh
+ddev wp agency check-overrides --fail-on-drift
+```
+
+Expected failure, on STDERR:
+```
+Warning: 1 record(s) differ from the Git baseline (--fail-on-drift).
+```
+The full report still prints on STDOUT. Exits **1** —
+`CliOutput::emit()` calls `WP_CLI::halt( StateException::EXIT_HARD_ERROR )`,
+not `WP_CLI::error()`.
 
 Revert:
 ```sh
@@ -443,3 +476,344 @@ git checkout -- web/app/themes/site-theme/blocks/reference-callout/block.json
 # or, having intentionally kept the block.json change:
 php scripts/generate-block-index
 ```
+
+---
+
+## 13. Forbidden block saved through REST
+
+**Requires DDEV/CI context** — needs a live WordPress install and the
+`client-editor` user.
+
+Mutation — send a REST page update as `client-editor` with a `core/html` block:
+```sh
+ddev wp eval '
+$page = get_page_by_path( "demo" );
+$before = $page->post_content;
+$user = get_user_by( "login", "client-editor" );
+wp_set_current_user( $user->ID );
+$request = new WP_REST_Request( "POST", "/wp/v2/pages/" . $page->ID );
+$request->set_body_params( array( "content" => "<!-- wp:html -->bad<!-- /wp:html -->" ) );
+$response = rest_do_request( $request );
+echo wp_json_encode( array(
+	"status" => $response->get_status(),
+	"data" => $response->get_data(),
+	"unchanged" => $before === get_post_field( "post_content", $page->ID ),
+) );
+'
+```
+
+Check: the REST response.
+
+Expected failure:
+```text
+HTTP 403
+code: agency_platform_forbidden_block
+violations[0].block: core/html
+unchanged: true
+```
+
+Guardrail: `AgencyPlatform\Editor\SaveValidation`.
+
+Revert: no revert is needed; the rejected request leaves the page unchanged.
+
+---
+
+## 14. Classic PHP template reintroduced
+
+Mutation:
+```powershell
+New-Item -ItemType File -Path web/app/themes/site-theme/index.php
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure:
+```text
+ThemeBootstrapTest::test_no_classic_root_template_files_remain
+DirectoryRulesTest::test_theme_top_level_files_are_on_the_whitelist
+```
+
+Revert:
+```powershell
+Remove-Item -LiteralPath web/app/themes/site-theme/index.php
+```
+
+---
+
+## 15. Hard-coded navigation ref in a Git-owned part
+
+Mutation — change `parts/site-header.html`'s navigation block to:
+```html
+<!-- wp:navigation {"ref":42} /-->
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure:
+```text
+BlockThemeStructureTest::test_no_hardcoded_database_refs_in_git_owned_markup
+```
+
+Revert: restore the original navigation block in `parts/site-header.html`.
+
+---
+
+## 16. Commerce block markup in a base template, template part, or pattern
+
+**Proven in CI** (`php-qa` / `test:architecture`).
+
+Mutation — add a commerce block to a base template. Append to
+`web/app/themes/site-theme/templates/page.html`:
+```html
+<!-- wp:woocommerce/cart /-->
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure (`CommerceBoundaryTest::test_commerce_blocks_only_appear_in_declared_commerce_templates`):
+```
+Architecture rule broken: Commerce block markup outside the declared commerce templates
+Offending file:           templates/page.html
+Why this rule exists:     The base profile must run with no commerce plugin installed; a commerce block in a base template, part, or pattern renders as a broken block there.
+Where the code belongs:   Move the markup into a declared commerce template, or register it as a pattern from web/app/plugins/site-commerce/.
+How to validate the fix:  ddev composer test:architecture
+```
+(The same violation in a template part or a theme pattern is reported by
+`CommerceBoundaryTest::test_parts_and_patterns_carry_no_commerce_blocks`.)
+
+Revert: remove the added line.
+
+---
+
+## 17. A declared commerce template loses a theme part
+
+**Proven in CI** (`php-qa` / `test:architecture`).
+
+Mutation — remove the site-header template part from a declared commerce
+template. In `web/app/themes/site-theme/templates/single-product.html`,
+delete:
+```html
+<!-- wp:template-part {"slug":"site-header","tagName":"header"} /-->
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure (`CommerceBoundaryTest::test_declared_commerce_templates_render_the_theme_chrome`):
+```
+Architecture rule broken: A commerce template does not render the theme chrome
+Offending file:           single-product -> site-header
+Why this rule exists:     Rendering the theme header/footer parts is the ONLY reason these overrides exist; a template without them is worse than no override at all.
+Where the code belongs:   Re-derive the file from the upstream template, rewrite only the header/footer template-part slugs, and remove environment-specific template-part theme attributes.
+How to validate the fix:  ddev composer test:architecture
+```
+
+Revert: `git checkout -- web/app/themes/site-theme/templates/single-product.html`.
+
+---
+
+## 18. The commerce plugin ships a new template slug
+
+**Requires the commerce profile** — needs WooCommerce installed
+(`bash scripts/enable-commerce`).
+
+Mutation — remove one deliberate exclusion so an upstream slug becomes
+unaccounted for. In `tests/Architecture/commerce-template-list.php`, delete
+the `page-checkout` entry from the `excluded` list.
+
+Check:
+```sh
+ddev composer test:integration:commerce
+```
+
+Expected failure
+(`CommerceBlockTemplatesTest::test_no_upstream_commerce_template_slug_is_unaccounted_for`):
+```
+The commerce plugin ships block template slugs this theme has never decided about:
+page-checkout
+Add each to tests/Architecture/commerce-template-list.php — either as an owned template or as an excluded slug with a reason.
+```
+The failure stays until the slug is owned (`templates`) or deliberately
+excluded with a reason.
+
+Revert: restore the `page-checkout` exclusion.
+
+---
+
+## 19. The classic `site-theme/woocommerce/` override directory is recreated
+
+**Proven in CI** (`php-qa` / `test:architecture`).
+
+Mutation:
+```powershell
+New-Item -ItemType Directory -Path web/app/themes/site-theme/woocommerce
+```
+
+Check:
+```sh
+ddev composer test:architecture
+```
+
+Expected failure (`CommerceBoundaryTest::test_classic_override_directory_is_gone`):
+```
+Architecture rule broken: The classic commerce template override directory is back
+Offending file:           web/app/themes/site-theme/woocommerce
+Why this rule exists:     A block theme has one rendering path. Classic PHP template overrides would reintroduce the second path the migration removed.
+Where the code belongs:   Override through templates/<slug>.html or a commerce hook in site-commerce instead; see docs/adding-commerce-behaviour.md.
+How to validate the fix:  ddev composer test:architecture
+```
+
+Revert:
+```powershell
+Remove-Item -LiteralPath web/app/themes/site-theme/woocommerce
+```
+
+---
+
+## 20. `scripts/enable-commerce` against a store whose checkout is not block-based
+
+**Requires the commerce profile** — needs WooCommerce installed.
+
+Mutation — replace the checkout page's content with plain text that lacks
+the block:
+```sh
+ddev wp post update "$(ddev wp option get woocommerce_checkout_page_id)" \
+  --post_content="plain text"
+```
+
+Check:
+```sh
+bash scripts/enable-commerce
+```
+
+Expected failure — the script's own step 4 verification
+(`scripts/enable-commerce:257-266`), exit 1 before the store is configured
+further:
+```
+FAILED: the checkout page does not hold the native block content.
+  Expected a 'wp:woocommerce/checkout' block in page #<id>.
+  The commerce suites must exercise the block checkout, not a shortcode fallback.
+```
+
+Revert:
+```sh
+ddev wp post delete "$(ddev wp option get woocommerce_checkout_page_id)" --force
+bash scripts/enable-commerce   # install_pages recreates the page with block content
+```
+
+---
+
+## 21. Tampered state bundle or manifest
+
+**Requires DDEV/CI context** — needs a live database and a signed bundle.
+
+Mutation — export a signed bundle, then change one character inside it:
+```sh
+ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency state-export --output=var/agency-state/probe-bundle.json
+# then edit any value inside var/agency-state/probe-bundle.json
+```
+
+Check:
+```sh
+ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency state-diff --source=var/agency-state/probe-bundle.json
+```
+
+Expected failure — exit 4 (tamper), nothing read: `StateBundle::load()`
+schema-validates, verifies the signature, then recomputes the `stateHash`
+before any record is touched:
+```
+The HMAC does not match: the document was modified, or it was not signed for this purpose.
+```
+A manifest edited the same way is refused by `--finalize` with the same
+exit 4, before any guard or mutation runs. (Without the keyring
+environment, both commands exit 1 with
+`AGENCY_PROMOTION_HMAC_KEYS is not set: no HMAC key is available.` instead — that is the missing-keyring
+failure, not the tamper path.)
+
+Revert: re-export the pristine bundle.
+
+---
+
+## 22. Two deployments finalising overlapping records
+
+**Requires DDEV/CI context** — needs a live database and two sealed
+manifests covering the same record.
+
+Mutation — promotion A finalizes `templates:page` and stays unconfirmed
+(its per-record locks are held); promotion B, prepared from a newer bundle
+over the same record, attempts to finalize.
+
+Check:
+```sh
+ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha-B> AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-b-manifest.json
+```
+
+Expected failure — exit 3 (lock conflict), and B releases every lock its
+own attempt already acquired:
+```
+Record "templates:page" is locked by promotion <A's id> (owner <owner>) until <expiresAtUtc>.
+```
+(Message from `RecordLockManager::acquire`; see
+`docs/state-reconciliation.md`'s exit-code table.)
+
+Revert: settle A (`--confirm` or `--rollback`), then finalize B.
+
+---
+
+## 23. A client edit after export: finalise refuses the record
+
+**Requires DDEV/CI context** — needs a live database and a sealed manifest.
+
+Mutation — export, prepare and seal a promotion for `templates:page` (steps
+1–9 of the verification proof in `docs/state-reconciliation.md`), then edit
+the template in the Site Editor and save it — the live row no longer matches
+the exported record.
+
+Check:
+```sh
+ddev exec env AGENCY_DEPLOY_COMMIT=<deploy-sha> AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --finalize --manifest=var/agency-state/proof-manifest.json
+```
+
+Expected failure — exit 1 (zero successes, one refusal), the refusal reason
+`concurrent-edit` written into the manifest report:
+```
+The database override changed between export and finalisation; re-export before promoting.
+```
+
+Revert: re-export the bundle, then re-prepare and re-seal.
+
+---
+
+## 24. Rollback of a record a newer promotion changed
+
+**Requires DDEV/CI context** — needs a live database and two manifests over
+the same record.
+
+Mutation — promotion A finalizes `templates:page`; promotion B later
+finalizes the same record (steps 12–14 of the verification proof in
+`docs/state-reconciliation.md`); roll A back.
+
+Check:
+```sh
+ddev exec env AGENCY_PROMOTION_HMAC_KEYS='{"2026-01":"<32+ random characters>"}' AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID=2026-01 wp agency promote-overrides --rollback --manifest=var/agency-state/proof-manifest.json
+```
+
+Expected failure — exit 1, the refusal reason
+`claimed-by-newer-promotion`:
+```
+A newer promotion (<B's id>) has claimed this record; refusing to roll it back.
+```
+
+Revert: confirm B (or resolve the newer promotion first and then roll back
+deliberately).

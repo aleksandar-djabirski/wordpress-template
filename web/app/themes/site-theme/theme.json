@@ -1,12 +1,16 @@
 {
   "$schema": "https://schemas.wp.org/trunk/theme.json",
   "version": 3,
+  "templateParts": [
+    { "name": "site-header", "title": "Site Header", "area": "header" },
+    { "name": "site-footer", "title": "Site Footer", "area": "footer" }
+  ],
   "settings": {
-    "appearanceTools": false,
+    "appearanceTools": true,
     "useRootPaddingAwareAlignments": true,
     "color": {
-      "custom": false,
-      "customGradient": false,
+      "custom": true,
+      "customGradient": true,
       "defaultPalette": false,
       "palette": [
         { "slug": "primary", "name": "Primary", "color": "#1a3c34" },
@@ -20,7 +24,7 @@
       ]
     },
     "typography": {
-      "customFontSize": false,
+      "customFontSize": true,
       "lineHeight": true,
       "fontFamilies": [
         {
@@ -43,7 +47,6 @@
       ]
     },
     "spacing": {
-      "custom": false,
       "defaultSpacingSizes": false,
       "blockGap": true,
       "units": [ "px", "rem", "em", "%" ],

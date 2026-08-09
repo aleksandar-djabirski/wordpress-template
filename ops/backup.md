@@ -10,15 +10,21 @@ doesn't count.
 - **Database**: the full WordPress database (`wp db export` or the host's
   equivalent). This is the only home for content that Git doesn't own —
   posts, pages, testimonials, WooCommerce orders/products (commerce
-  profile), user accounts, and any database template/style overrides
-  `wp agency check-overrides` would report (see `docs/architecture.md`'s
-  source-of-truth table).
+  profile), user accounts, and the database template, template-part, and
+  Global Styles overrides clients make in the Site Editor — expected state
+  under the source-of-truth model, not corruption (see
+  `docs/state-reconciliation.md`).
 - **Uploads**: `web/app/uploads/` (media library). Never covered by Git —
   `.gitignore` excludes it by design.
 - **`.env`**: back up separately, encrypted, and restricted — it holds
   database credentials and auth salts. Losing it is a secrets-rotation
   event, not just a data-loss event; never store it alongside routine
   content backups with the same access controls.
+- **Promotion backups are not a substitute for database backups.** The
+  protected promotion backups `wp agency promote-overrides --finalize` writes
+  cover only the records one promotion touched, and only until they are pruned.
+  They are a rollback mechanism only until the promotion is confirmed — not a
+  backup (see `docs/state-reconciliation.md`).
 
 ## What does NOT need backing up
 
@@ -44,8 +50,16 @@ copy that can silently diverge from `main`).
   automatically after each run; a silent backup failure is worse than an
   absent backup, because it looks like coverage that isn't there.
 
+## What must NOT be backed up into the repository
+
+State bundles (`wp agency state-export`) and promotion manifests contain
+customer content and internal site structure. They default to
+`var/agency-state/`, which is gitignored, and must stay out of Git and out of
+any shared artifact store without the same access controls as a database
+backup. Treat a leaked bundle as a data incident.
+
 ## Before a risky change
 
 Take an ad hoc, explicitly-labeled backup before: a major WordPress/plugin
-version bump, a database-affecting migration, or a manual production
-hotfix — don't rely solely on the next scheduled snapshot.
+version bump, a database-affecting migration, a promotion finalisation, or a
+manual production hotfix — don't rely solely on the next scheduled snapshot.

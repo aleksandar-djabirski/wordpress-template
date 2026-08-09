@@ -138,7 +138,9 @@ src/State/Promotion/
 ├── GitRepository.php                # root/branch/HEAD/dirty paths/commit blobs
 ├── PrepareLock.php                  # local filesystem lock for `--prepare`
 ├── ThemeDeclaredSlugs.php           # theme.json customTemplates/templateParts
+├── StagedPromotionEntry.php         # one staged file, two-phase commit/discard
 ├── PreparedFileWriter.php           # normalise + staged atomic write
+├── CanonicalJsonFileWriter.php      # staged canonical-JSON write (no block normalisation)
 ├── PreparablePromotionStrategy.php  # Task 3's extension of Task 2's interface
 ├── AbstractBlockTemplateStrategy.php# shared template/part strategy behaviour
 ├── TemplatePromotionStrategy.php    # provider slug `templates`
@@ -193,7 +195,7 @@ use AgencyPlatform\State\StateRecord;         // key(), provider_slug(), slug(),
 use AgencyPlatform\State\StateProvider;       // record_key(string):string; record(string $key, bool $with_references = true):?StateRecord; records():array; promotion_strategy():?PromotionStrategy
 use AgencyPlatform\State\StateRegistry;       // STATIC provider(string):?StateProvider; providers():array
 use AgencyPlatform\State\StateBundle;         // STATIC load(string $path, ?HmacSigner, ?SchemaValidator):self  <-- THE call to use
-use AgencyPlatform\State\PromotionStrategy;   // provider_slug(); prepare(StateRecord,string):StagedPromotionEntry; reset(StateRecord):void; restore(StateRecord,array):void; expected_post_reset_hash(StateRecord):string
+use AgencyPlatform\State\PromotionStrategy;   // provider_slug(); prepare(StateRecord,string):array{preparedPath:string,preparedHash:string,originalHash:string|null}; reset(StateRecord):void; restore(StateRecord,array):void; expected_post_reset_hash(StateRecord):string
 use AgencyPlatform\State\PromotionStrategies; // const FILTER; STATIC all():array; for_provider(string):?PromotionStrategy; reset():void
 use AgencyPlatform\State\ReferenceScanner;    // STATIC scan(string $markup, string $record_key):list<array>; KIND_*; RESOLUTION_*; is_unresolved(array):bool
 use AgencyPlatform\State\StateDirectory;      // STATIC ensure():string
@@ -832,7 +834,21 @@ public function load( string $path_or_dash ): PromotionManifest {
 
 `render()`: `$data = $manifest->to_array()`, `unset( $data['hmac'], $data['hmacKeyId'] )`, `sign_manifest()`, merge the returned pair back in, `validate_manifest_schema()` on the signed document (catches a schema break introduced by this code), then `$this->gateway->canonical_json_document( $data )` — Task 2's canonical encoder gives deterministic bytes plus exactly one trailing LF.
 
-`write()`: `wp_mkdir_p( dirname( $path ) )`, write `render()`'s output to `$path . '.' . wp_generate_uuid4() . '.tmp'` in the same directory, `fflush()`, `fclose()`, `chmod( $tmp, 0600 )`, `rename( $tmp, $path )`. On any failure `unlink()` the temp file and throw `PromotionException::hard()`. Every native call carries the approved `phpcs:ignore`. **`write()` rejects `-` with `PromotionException::hard()`; the command layer decides whether a document goes to STDOUT.**
+**CORRECTION (orchestrator, Unit 3A) — `write()` MUST go through the shared web-root guard.**
+
+As originally written this step took an operator-supplied `$path` and wrote to it with no containment check. That is a direct recurrence of Unit 2's twenty-third defect, the CRITICAL one its whole-unit review found: a second write path that bypassed the guard let customer state be written into the public web root, where everything is served over HTTP. A signed promotion manifest carries the target site UUID, every prepared file path and every content hash, so it must never land under `web/`.
+
+There is exactly ONE implementation of that rule and this task calls it rather than writing a second copy — two implementations of one security rule drifting apart is how the original defect arose:
+
+```php
+public static function StateDirectory::resolve_output( string $path, string $setting ): string;
+```
+
+It normalises backslashes, resolves a relative path against the repository root, collapses `.` and `..` lexically, resolves symlinks in existing components, and rejects anything landing inside `<repo root>/web`. **It returns the canonical path the caller must actually write**, so the guard and the write can never disagree. It is confirmed usable inside the DDEV container: `GitBaseline::repo_root()` reads `AGENCY_REPO_ROOT` or walks up from `ABSPATH` looking for `web/` plus `composer.json`, and never shells out to git.
+
+`write()`: first `$resolved = StateDirectory::resolve_output( $path, '--manifest' )`, wrapped so a `StateException` is rethrown through `PromotionException::from_state_exception()`. Then `wp_mkdir_p( dirname( $resolved ) )`, write `render()`'s output to `$resolved . '.' . wp_generate_uuid4() . '.tmp'` in the same directory, `fflush()`, `fclose()`, `chmod( $tmp, 0600 )`, `rename( $tmp, $resolved )`. **Every subsequent operation uses `$resolved`, never the raw `$path`.** On any failure `unlink()` the temp file and throw `PromotionException::hard()`. Every native call carries the approved `phpcs:ignore`. **`write()` rejects `-` with `PromotionException::hard()`; the command layer decides whether a document goes to STDOUT.** `write_canonical()` routes through `write()` so there is still only one write path.
+
+The guard must be proven BY ATTACK, not by reading the diff — that is how Unit 2 verified the original fix. `ManifestStoreTest` adds cases for an absolute path inside the web root, a relative path inside the web root, a `..` traversal that lands in the web root, a path nested deep under `web/app/uploads/`, and a legitimate `var/agency-state/` path that still writes. Each refusal asserts BOTH that it throws AND that `false === file_exists( $path )` — a test that only asserted the throw would pass even if the file had been written first.
 
 `canonical_path()` returns `$this->gateway->state_dir() . '/promotions/' . $promotion_id . '.json'`. `write_canonical()` creates that directory with `wp_mkdir_p()` and `chmod( $dir, 0700 )`. `load_canonical()` throws `PromotionException::hard( 'No finalized promotion found for <id>. Run --finalize on this host first.' )` when the file is absent.
 
@@ -905,7 +921,65 @@ One private method `run( array $argv ): array{stdout:string, exit:int}` using `p
 
 - [ ] **Step 3: Write and run the tests**
 
-`GitRepositoryTest` runs against the real repository. Its first assertion runs `git --version` and fails the test with `Git is required for the promotion release gate.` when Git is unavailable. It never skips. It asserts `head_commit()` is 40 hex characters, `root()` contains `composer.json`, `commit_exists( head_commit() )` is true, `commit_exists( str_repeat( '0', 40 ) )` is false, and `file_at_commit( head_commit(), 'composer.json' )` contains `"agency/agency-starter"`. Add a discovery assertion with `AGENCY_REPO_ROOT` unset: `GitRepository::discover()->root()` equals `realpath( dirname( __DIR__, 7 ) )`; this prevents another wrong parent count.
+**CORRECTION (orchestrator, Unit 3A pre-Task-1 audit) — this test may NOT use the ambient repository.**
+
+The original text said "`GitRepositoryTest` runs against the real repository". That gate is red by
+construction in this engagement's own environment and was proven so before Task 1 started. Unit 3A
+works in a git worktree at `C:\Users\Aleksandar\Projects\wt\bt-task-3`, whose `.git` is a FILE
+reading `gitdir: C:/Users/Aleksandar/Projects/wordpress-template/.git/worktrees/bt-task-3`. That
+Windows path is outside the DDEV mount, so inside the container — where the integration suite runs
+— every git command fails:
+
+```text
+$ ddev exec git status --porcelain
+fatal: not a git repository: /var/www/html/C:/Users/Aleksandar/Projects/wordpress-template/.git/worktrees/bt-task-3
+```
+
+`git` itself is present at `/usr/bin/git`; only the repository is unreachable. An ambient-repository
+test would also be non-deterministic even where it did run, because it would assert over whatever
+branch, HEAD and dirty state the developer happens to have.
+
+`GitRepositoryTest` therefore builds a **throwaway fixture repository** and runs `GitRepository`
+against it. This is the same pattern Task 10's `PromotionPreparerTest` already uses (`git init`,
+one commit), so the plan becomes self-consistent rather than acquiring a new convention.
+
+- `set_up()` creates a temp directory, runs `git init`, `git config user.email`, `git config
+  user.name`, and `git -c commit.gpgsign=false commit` of a small fixture tree containing a
+  `composer.json` whose `name` is `agency/agency-starter` and a `templates/page.html`. Set
+  `GIT_CONFIG_GLOBAL=/dev/null` and `GIT_CONFIG_SYSTEM=/dev/null` for every fixture git call so a
+  host `~/.gitconfig` (hooks, `init.defaultBranch`, signing) cannot change the result.
+- `tear_down()` removes the temp directory.
+- The first assertion runs `git --version` and FAILS the test with `Git is required for the
+  promotion release gate.` when Git is unavailable. It never skips, and a missing environment
+  stays a failed gate.
+- Assertions against the fixture: `head_commit()` is 40 hex characters; `root()` contains
+  `composer.json`; `commit_exists( head_commit() )` is true; `commit_exists( str_repeat( '0', 40 ) )`
+  is false; `file_at_commit( head_commit(), 'composer.json' )` contains `"agency/agency-starter"`;
+  `file_at_commit( head_commit(), 'no/such/file' )` is `null`.
+- `current_branch()` returns the fixture's branch name, and after `git checkout --detach` it
+  returns `null`. Assert BOTH — a `current_branch()` that always returned `null` would otherwise
+  pass.
+- `dirty_paths()` is empty on the fresh fixture; after writing an untracked file it contains that
+  path; after modifying a tracked file it contains that path. Assert all three — an implementation
+  that always returned an empty array would otherwise pass, and the run-level dirty-tree refusal in
+  Task 10 depends entirely on this method.
+- `relative_path()` / `absolute_path()` round-trip inside the fixture, and `relative_path()` throws
+  for a path outside the root.
+
+**The discovery assertion is kept but corrected.** The original required
+`GitRepository::discover()->root()` to equal `realpath( dirname( __DIR__, 7 ) )`. `__DIR__` in
+`tests/Integration/Promotion/` is three levels below the repository root, not seven, so that
+assertion was wrong by five levels; seven is the correct count only from the SOURCE file
+`src/State/Promotion/GitRepository.php`. Assert the parent count where it is actually used, without
+depending on the ambient repository being a git repository:
+
+- Set `AGENCY_REPO_ROOT` to the fixture path and assert `GitRepository::discover()->root()` is the
+  fixture path. This proves the override branch.
+- Assert the fallback branch's parent count by reflection over the constant rather than by running
+  git: compute `dirname( ( new \ReflectionClass( GitRepository::class ) )->getFileName(), 7 )` and
+  assert it equals `realpath( dirname( __DIR__, 3 ) )` — the repository root as seen from the test
+  file. This is what stops another wrong parent count, and it holds in the container, in a git
+  worktree, and in CI alike.
 
 `PrepareLockTest` asserts a second `acquire()` from a second instance on the same file throws with exit code 3, and succeeds after `release()`.
 
@@ -966,9 +1040,10 @@ git commit -m "feat: add promotion git context and prepare lock"
       public function __construct( private StateGateway $gateway, private string $theme_dir ) {}
       /** Normalised, promotion-safe body for the exported markup. */
       public function render( string $exported_markup ): string;
-      /** @return array{themeRelativePath:string, absolutePath:string, tempPath:string,
-       *                preparedFileHash:string, originalFileHash:string|null,
-       *                expectedPostResetHash:string, previousBytes:string|null} */
+      /** The returned entry's manifest_fields() carries:
+       *  array{themeRelativePath:string, absolutePath:string, tempPath:string,
+       *        preparedFileHash:string, originalFileHash:string|null,
+       *        expectedPostResetHash:string, previousBytes:string|null} */
       public function stage( string $theme_relative_path, string $exported_markup, string $promotion_id ): StagedPromotionEntry;
       /** @param list<StagedPromotionEntry> $staged */
       public function commit_all( array $staged ): void;
@@ -1093,8 +1168,16 @@ This task is the Release 3/Release 4 boundary. `PromotionStrategies::all()` ship
    * strategy that only implements the base one.
    */
   interface PreparablePromotionStrategy extends PromotionStrategy {
-      /** Task 2's corrected prepare contract. The strategy owns how it stages its output. */
-      public function prepare( StateRecord $record, string $theme_root ): StagedPromotionEntry;
+      /**
+       * The two-phase staging entry point this task actually uses.
+       *
+       * It does NOT redeclare Task 2's inherited `prepare( StateRecord, string ): array`.
+       * PHP return types are invariant for non-class types, so narrowing that
+       * `array` to `StagedPromotionEntry` is a fatal declaration-compatibility
+       * error, and Task 2's interface is merged and out of this task's grant.
+       * See the CORRECTION note under Step 1 for how `prepare()` is implemented.
+       */
+      public function stage( StateRecord $record, string $theme_root ): StagedPromotionEntry;
       public function theme_relative_path( string $record_slug ): string;
       public function declares( ThemeDeclaredSlugs $declared, string $record_slug ): bool;
       /** 'absent' when finalisation deletes the row; 'present' when it resets one in place. */
@@ -1124,6 +1207,39 @@ This task is the Release 3/Release 4 boundary. `PromotionStrategies::all()` ship
       public function register(): void;                 // registrar always; CLI only under WP_CLI
   }
   ```
+
+**CORRECTION (orchestrator, Unit 3A pre-Task-1 audit) — the inherited `prepare()`.**
+
+The merged Task 2 interface declares `prepare( StateRecord $record, string $target_path ): array`
+returning `array{preparedPath: string, preparedHash: string, originalHash: string|null}`.
+Verified in `web/app/mu-plugins/agency-platform/src/State/PromotionStrategy.php`. The plan
+previously narrowed that return type to `StagedPromotionEntry` in the sub-interface, which PHP
+rejects at class-load time with a fatal declaration-compatibility error, so Task 7's gate was red
+by construction. `StagedPromotionEntry` is a Task 6 type and Task 2's file is out of this task's
+ownership grant, so the sub-interface adds `stage()` instead and leaves `prepare()` alone.
+
+`AbstractBlockTemplateStrategy::prepare()` therefore exists only to satisfy the inherited
+signature and MUST refuse:
+
+```php
+public function prepare( StateRecord $record, string $target_path ): array {
+	throw PromotionException::hard(
+		'PromotionStrategy::prepare() is not the promotion entry point; the lifecycle stages '
+		. 'every record with stage() and commits the run through PreparedFileWriter::commit_all(). '
+		. 'Called for ' . $record->key() . '.'
+	);
+}
+```
+
+The reason it refuses rather than delegating to `stage()` + `commit()` is the Unit 2 lesson
+recorded in the tracking file: a second write path that reaches the filesystem outside the
+run-level transaction is how the `--output` web-root leak happened. A single-record commit would
+silently break the all-or-nothing guarantee `commit_all()` exists to provide. Refusing is
+fail-closed and testable.
+
+`BlockTemplateStrategyTest` must carry a test proving the refusal — assert the thrown
+`PromotionException`, assert `exit_code()` is `PromotionExitCode::HARD_ERROR`, and assert the
+message names `stage()`. A test that only asserts "an exception was thrown" is not acceptable.
 
 - [ ] **Step 1: Write the failing registrar test**
 
@@ -1176,8 +1292,8 @@ Shared behaviour in `AbstractBlockTemplateStrategy`:
 
 - `post_finalize_record_state()` returns `'absent'`; `defers_expected_hash()` returns `false`.
 - `theme_relative_path()` rejects a slug that does not match `/^[a-z0-9][a-z0-9_-]*$/`, so nothing can escape the theme directory.
-- `prepare( StateRecord $record, string $theme_root ): StagedPromotionEntry` creates a `PreparedFileWriter` for `$theme_root`, calls `stage()` with `theme_relative_path( $record->slug() )` and `$record->content()['markup']`, and returns that entry. It must not publish files itself. `PromotionPreparer`, not the template strategy, owns the all-record commit/discard decision.
-- `expected_post_reset_hash( StateRecord $record ): string` is read from the staged entry's `manifest_fields()['expectedPostResetHash']`, cached by canonical record key for the current prepare attempt. Calling it before `prepare()` is a hard error.
+- `stage( StateRecord $record, string $theme_root ): StagedPromotionEntry` creates a `PreparedFileWriter` for `$theme_root`, calls the writer's `stage()` with `theme_relative_path( $record->slug() )` and `$record->content()['markup']`, and returns that entry. It must not publish files itself. `PromotionPreparer`, not the template strategy, owns the all-record commit/discard decision. **This bullet said `prepare(…)` before the CORRECTION above; the inherited `prepare()` refuses.**
+- `expected_post_reset_hash( StateRecord $record ): string` is read from the staged entry's `manifest_fields()['expectedPostResetHash']`, cached by canonical record key for the current prepare attempt. Calling it before `stage()` is a hard error.
 - `resolve_current_hash( string $record_slug ): ?string` calls `get_block_template( get_stylesheet() . '//' . $record_slug, $this->post_type() )`, returns `null` when that is `null`, and otherwise `$gateway->hash_markup( $gateway->normalize_block_markup( (string) $template->content ) )`. The gateway strips the injected `theme` attribute on this side too, so it is comparable with `expected_post_reset_hash()`.
 - `capture_backup( StateRecord $record ): array` returns
   ```php
@@ -2173,7 +2289,7 @@ git commit -m "feat: add chunked promotion backups with retention"
 ### Task 14: `PromotionFinalizer` (§7.8)
 
 **Files:**
-- Create: `src/State/Promotion/PromotionFinalizer.php`
+- Modify: `src/State/Promotion/PromotionFinalizer.php` — **the file already exists.** Task 9's Steps 5 and 6 require `resolve_navigation_fallback()` to be implemented and driven by `NavigationResolutionTest`, while Task 9's Files list omitted the class. Task 9 therefore created it holding ONLY the gateway constructor and that one method, and reported the deviation. Add the finalize loop here; do not rewrite or re-derive `resolve_navigation_fallback()`, which is already proven by execution against three published navigations, an ignored draft and an ignored future-dated post.
 - Test: `tests/Integration/Promotion/PromotionFinalizerTest.php`
 
 **Interfaces:**
@@ -2617,6 +2733,8 @@ git commit -m "test: prove the template and part promotion workflow end to end"
 ---
 
 ### Task 17: The CLI surface — one result, one STDOUT writer
+
+**CARRIED FORWARD FROM TASK 7 — close this here.** `PromotionSubsystem::register()` currently reaches `Cli\PromotionCommands` through a STRING class name plus `class_exists()`, because the class did not exist when Task 7 shipped and the plan's literal text (`new PromotionCommands()`) fails PHPStan with `class.notFound`. The `defined( 'WP_CLI' ) && WP_CLI` guard does NOT protect it: PHPStan does not fold `defined()` to false. That workaround is correct for the intermediate commits and WRONG to keep — a string reference is invisible to static analysis, so a later rename would break the CLI silently. Once `src/Cli/PromotionCommands.php` exists in this task, **replace the string and the `class_exists()` check with a direct `use` and `new PromotionCommands()`**, keeping only the `WP_CLI` guard, and confirm PHPStan is clean. Also add `src/State/Promotion/PromotionSubsystem.php` to this task's owned-file list for that one edit.
 
 **Files:**
 - Create: `src/State/Promotion/PromotionCommandRunner.php`
@@ -3280,6 +3398,91 @@ Until Task 23's gate passes, `PromotionStrategyRegistrar` registers no `global-s
 
 ### Task 22: Theme JSON adapter with an injectable, fail-closed capability probe (§7.6)
 
+> **CORRECTION — Unit 3B orchestrator, 2026-08-07. Everything in this block
+> OVERRIDES the task text below it. Every item was proven by EXECUTING code
+> against WordPress 7.0.2 and the shipped `web/app/themes/site-theme/theme.json`
+> BEFORE any worker was dispatched.**
+>
+> **C1. `REQUIRED_METHODS['WP_Theme_JSON']` becomes `array( 'get_raw_data', 'get_data', 'merge' )`.**
+> `get_data()` is load-bearing under C2 and C4. Probe: every other symbol in
+> `REQUIRED_CLASSES`, `REQUIRED_METHODS`, `REQUIRED_FUNCTIONS` and
+> `REQUIRED_CONSTANTS` exists in WordPress 7.0.2, and
+> `WP_Theme_JSON::LATEST_SCHEMA` is `3`, so
+> `test_the_adapter_supports_the_locked_wordpress_version()` can pass.
+>
+> **C2. CRITICAL — `merge_user_into_theme()` must build its result from
+> `$merged->get_data()`, NEVER from `$merged->get_raw_data()`.**
+> `get_raw_data()` returns the INTERNAL representation, in which every preset
+> node is keyed by ORIGIN. Probe against the shipped theme:
+> `settings.spacing.spacingSizes` came back as `{"theme":[…]}` instead of a
+> list, and `settings.color.palette` as `{"theme":[…],"custom":[…]}`. That shape
+> is not valid `theme.json` INPUT. Writing it and re-reading it produced FOUR
+> `Undefined array key "slug"` warnings from
+> `wp-includes/class-wp-theme-json.php:3451` and mis-registered every preset;
+> the shipped `theme.json` alone produces ZERO. `get_data()` flattens each
+> preset node back to a single list in origin order, merges the user's presets
+> into it, re-parses with zero warnings, and is idempotent on a second pass.
+> This is the same species as defect 19: the specified rule produced an artefact
+> the release cannot ship.
+>
+> **C3. `validate_theme_json()` must NOT assert that every input key survives.**
+> Probe: the SHIPPED `theme.json` loses `settings.appearanceTools` (core
+> legitimately EXPANDS it into the individual settings it enables) and
+> `settings.spacing.custom` (not a valid v3 property, so core drops it). The
+> specified assertion therefore refuses the shipped theme outright and makes
+> Release 4 dead by construction. Assert instead, following the Unit 3A
+> defect-19 fix: (a) `version` is an integer; (b)
+> `new \WP_Theme_JSON( $data, 'theme' )` does not throw; (c) **stability** —
+> `get_data()` of the reparsed document equals `get_data()` of the document, so
+> a document `WP_Theme_JSON` cannot represent losslessly is refused. Proven
+> stable for the shipped theme. The property the plan actually wanted — no user
+> intent lost — is enforced by Task 23's resolved-output-equivalence gate, which
+> is a far stronger check.
+>
+> **C4. CRITICAL — `resolved()` must return
+> `WP_Theme_JSON_Resolver::get_merged_data()->get_data()`, split into `settings`
+> and `styles`. It must NOT use `wp_get_global_settings()` +
+> `wp_get_global_styles()`.** Those return the origin-keyed internal shape, and
+> promotion legitimately MOVES a user preset from the `custom` origin to the
+> `theme` origin — that is what promotion IS. Probe with a user-defined colour
+> preset: `settings.color.palette.custom[0]` became
+> `settings.color.palette.theme[8]` — same slug, same name, same colour — and
+> the gate reported drift. With `get_merged_data()->get_data()` all six probed
+> customisation shapes (plain style override, user colour preset, element and
+> block styles, typography override, user font-size preset, and no
+> customisation at all) compare EQUIVALENT, while the negative control — reset
+> the user origin WITHOUT promoting anything — still reports drift.
+> `wp_get_global_settings` and `wp_get_global_styles` stay in
+> `REQUIRED_FUNCTIONS`; they are still the probe's compatibility tripwire.
+>
+> **C5. CRITICAL — `refresh_caches()` must also clear
+> `WP_Theme_JSON_Resolver::$theme_json_file_cache`.**
+> `clean_cached_data()` does NOT clear it, and neither does
+> `wp_clean_theme_json_cache()`. It is a `protected static` array keyed by file
+> path, populated by `read_json_file()`. Probe: a process that resolved BEFORE
+> `theme.json` changed kept resolving the OLD theme file through
+> `clean_cached_data()`, producing a FALSE drift verdict; clearing the property
+> by reflection made the resolver see the new file immediately. `refresh_caches()`
+> therefore calls `wp_clean_theme_json_cache()` when it exists, then
+> `\WP_Theme_JSON_Resolver::clean_cached_data()`, then clears
+> `theme_json_file_cache` by reflection GUARDED with
+> `property_exists( \WP_Theme_JSON_Resolver::class, 'theme_json_file_cache' )`
+> so a future WordPress that removes the property degrades to a no-op rather
+> than fataling, then `wp_cache_flush_runtime()` when it exists. This stays
+> inside the adapter, which is the only file allowed to name Theme JSON
+> internals.
+>
+> **C6. `resolved_without_user_origin()` uses the same canonical view as C4.**
+>
+> **C7. "Every public method calls `require_support()` first" excludes
+> `supported()`, `missing_symbols()` and `require_support()` itself** — those
+> three ARE the probe.
+>
+> **C8. Note for whoever owns `theme.json` (Unit 1 / Unit 4B), NOT for this
+> unit:** `settings.spacing.custom` in the shipped `theme.json` is not a valid
+> theme.json v3 property and core silently drops it. Harmless today, but it is
+> dead configuration.
+
 `WP_Theme_JSON_Resolver` is documented as an internal Core API not intended for plugin use. **This class is the ONLY file in the project allowed to name any Theme JSON internal — including its cache-clearing calls.** `GlobalStylesPromotionStrategy` must never call `clean_cached_data()` itself.
 
 **Files:**
@@ -3446,6 +3649,126 @@ git commit -m "feat: add fail-closed theme json adapter"
 ---
 
 ### Task 23: Global Styles promotion strategy and the resolved-output-equivalence gate — Release 4 gate
+
+> **CORRECTION — Unit 3B orchestrator, 2026-08-07. Everything in this block
+> OVERRIDES the task text below it. Every signature was read from the MERGED
+> source, never from this plan.**
+>
+> **D1. The class implements `stage()`, NOT `prepare()`.** The `Produces` block
+> below declares `prepare( StateRecord $record, string $theme_root ): StagedPromotionEntry`.
+> That is impossible: `PromotionStrategy::prepare()` returns `array`, PHP return
+> types are invariant, and narrowing it is a fatal declaration-compatibility
+> error. `PreparablePromotionStrategy` requires
+> `stage( StateRecord $record, string $theme_root ): StagedPromotionEntry`, and
+> `PromotionPreparer` calls `stage()`. Implement `prepare()` exactly as
+> `AbstractBlockTemplateStrategy::prepare()` does — throw
+> `PromotionException::hard()` naming the record — and put the real work in
+> `stage()`. This is the same correction Task 10 already recorded.
+>
+> **D2. The `Produces` block omits `validate_for_promotion( array $bundle_record, BundleView $bundle, array $selected_keys ): array`,
+> which `PreparablePromotionStrategy` REQUIRES.** Without it the class is
+> abstract and cannot be instantiated. Global Styles carries no block markup and
+> no template-part references, so it returns `array()`; unresolved font-file
+> references are already refused generically by `ReferenceRefusalPolicy` inside
+> `PromotionPreparer`, before the strategy is reached. Say that in the docblock
+> so the empty return is not mistaken for a stub.
+>
+> **D3. `capture_pre_reset_state()` and `verify_resolved_equivalence()` are NOT
+> on `PreparablePromotionStrategy`, and `PromotionFinalizer` types its
+> `$strategy` as that interface.** Calling them there is a PHPStan level-6
+> error, and adding them to `PreparablePromotionStrategy` would force the two
+> merged Release 3 strategies to implement them, which is outside this unit's
+> grant. **Create
+> `src/State/Promotion/DeferredHashPromotionStrategy.php`**, an interface
+> extending `PreparablePromotionStrategy` and declaring exactly
+> `capture_pre_reset_state(): array` and
+> `verify_resolved_equivalence( array $expected_resolved ): array`.
+> `GlobalStylesPromotionStrategy` implements it. In the finalizer, guard with
+> `$strategy instanceof DeferredHashPromotionStrategy` and refuse the record
+> (never fatal) when a strategy defers its hash without implementing the
+> interface. Add this file to the **Files:** list and to the Step 6 `git add`.
+>
+> **D4. Build the `CanonicalJsonFileWriter` from `$theme_root` inside `stage()`;
+> do not inject it.** `PromotionPreparer` calls
+> `$strategy->stage( $state_record, get_stylesheet_directory() )`, and
+> `AbstractBlockTemplateStrategy::stage()` sets the precedent with
+> `new PreparedFileWriter( $this->gateway, $theme_root )`. Injecting a writer
+> that carries its own theme directory creates two sources of truth for where
+> `theme.json` is written. The constructor becomes
+> `__construct( private ThemeJsonAdapter $adapter, private StateGateway $gateway )`,
+> and Step 4's registrar line becomes
+> `$strategies['global-styles'] = new GlobalStylesPromotionStrategy( new ThemeJsonAdapter(), new StateGateway() );`.
+> `stage()` reads the theme origin from `$theme_root . '/theme.json'` and stages
+> through `new CanonicalJsonFileWriter( $theme_root )`. The promotion id passed
+> to `stage()` must be a bare UUID (`wp_generate_uuid4()`); anything else is
+> refused by the writer.
+>
+> **D5. Step 1's test code calls the wrong method with the wrong argument.**
+> `$this->strategy->prepare( $record, $this->theme_json_path )` must become
+> `$this->strategy->stage( $record, $theme_root_directory )` — the second
+> argument is a theme ROOT DIRECTORY, never a file path. `stage()` returns a
+> `StagedPromotionEntry`, which is an OBJECT: the staged bytes are reached
+> through `manifest_fields()`, not through `$prepared['preparedPath']`.
+> `StagedJsonFile::manifest_fields()` returns `themeRelativePath`,
+> `absolutePath`, `preparedFileHash`, `originalFileHash` and
+> `expectedPostResetHash => null`. Nothing lands at `absolutePath` until
+> `commit()` is called.
+>
+> **D6. The exported user origin carries NO `version` key.**
+> `GlobalStylesState::records()` strips `version` and
+> `isGlobalStylesUserThemeJSON`, strips every `css` key at every depth, then
+> prunes empty values and key-sorts. So `$record->content()` is the stripped,
+> pruned, key-sorted user origin, and `merge_user_into_theme()` must supply
+> `WP_Theme_JSON::LATEST_SCHEMA` itself. Verified against the merged provider.
+>
+> **D7. `resolved_hash()` needs no hand-rolled preset flattening** once Task 22
+> correction C4 makes `resolved()` return
+> `WP_Theme_JSON_Resolver::get_merged_data()->get_data()`. Recursive `ksort()`
+> through `$this->gateway->hash_content()` is then sufficient AND correct. Record
+> in the docblock WHY: the origin-keyed internal shape would report drift for
+> every user-defined preset, because promotion moves a preset from the `custom`
+> origin to the `theme` origin by design. Proven by probe before dispatch.
+>
+> **D8. The equivalence tests MUST resolve against the ACTIVE theme.**
+> "Operate on a COPY of the theme in a temp directory" is correct for the
+> `stage()` tests, and impossible for
+> `capture_pre_reset_state()`/`verify_resolved_equivalence()`, which resolve
+> through `WP_Theme_JSON_Resolver` against whatever theme is active. Prefer
+> copying the shipped theme into a temp directory, `register_theme_directory()`,
+> and `switch_theme()` to it. If that cannot be made to resolve, the fallback is
+> to write the prepared bytes over the ACTIVE `theme.json` and restore the
+> original bytes in `tear_down()` AND from a `register_shutdown_function()`
+> safety net, asserting the restore is byte-identical. Report which route you
+> used, and prove `git status --porcelain` is empty afterwards. The orchestrator
+> ran the write-over-and-restore route seven times during the pre-dispatch audit
+> and every restore was byte-identical, so it is workable — but it is the
+> fallback, not the default.
+>
+> **D9. Step 6's `git add` list is incomplete** — it omits
+> `PromotionFinalizer.php` and the new `DeferredHashPromotionStrategy.php`,
+> while Step 6 then asserts `git status --porcelain` is empty. Add both.
+>
+> **D10. Step 5 as written is not a commit gate.** Run `ddev composer verify`
+> and `ddev composer test:integration`. The local full `npm run test:e2e` shows
+> 11–13 `reauth=1` login failures on this host's DDEV database that reproduce on
+> pure HEAD; they are environmental and must not block the commit. The
+> orchestrator runs the Playwright suites at the unit gate, not the worker.
+>
+> **D11. The finalizer already does most of Step 3.** It re-reads the live row,
+> runs the concurrency check and the navigation expectation, captures AND
+> verifies the backup is retrievable, resets, flushes the runtime cache, calls
+> `resolve_current_hash()` (a null result restores from the backup and refuses
+> `post-reset-unresolved`), and only skips the `expectedPostResetHash`
+> comparison when `defers_expected_hash()` is true. `postFinalizeSemanticHash`
+> is already set from `resolve_current_hash()` and `postFinalizeModifiedGmt`
+> from the re-read record when the state is `present`, so no change is needed
+> for either. What Step 3 must ADD is exactly two things: the
+> `capture_pre_reset_state()` call plus the `preResetResolvedHash` record change
+> between the navigation expectation and the backup, and the
+> `verify_resolved_equivalence()` branch after the reset that calls the existing
+> `restore_and_refuse( … 'resolved-output-drift' … )` helper. No manifest schema
+> change is needed or permitted: `preResetResolvedHash` already allows
+> `sha256|null` and `finalizeRefusalReason` already allows any string.
 
 **The data-flow contract, stated once.** Master spec §7.6 step 3 requires the fully resolved settings/styles to be recorded BEFORE promotion. The bundle cannot carry them (Task 2 exports the user origin, not a resolved snapshot, and this task may not change that). The contract is therefore **target-side**: at finalize, AFTER the concurrency check has proven the live user origin still matches the exported record, the adapter records the current resolved output on the production host. That snapshot is provably produced by the same origin the bundle exported, so it is a valid "before" state. It is held in memory across the reset and its hash is persisted as `preResetResolvedHash` for audit and rollback. `expectedPostResetHash` stays `null` for this record, which is why `defers_expected_hash()` exists and why the schema allows null.
 
