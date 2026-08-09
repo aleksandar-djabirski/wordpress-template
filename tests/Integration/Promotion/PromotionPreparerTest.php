@@ -703,8 +703,9 @@ final class PromotionPreparerTest extends IntegrationTestCase {
 
 		$signature = ( new HmacSigner( array( self::KEY_ID => str_repeat( 'k', 40 ) ), self::KEY_ID ) )->sign( $document, HmacSigner::PURPOSE_BUNDLE );
 
-		$document['hmacKeyId'] = $signature['hmacKeyId'];
-		$document['hmac']      = $signature['hmac'];
+		$document['hmacKeyId']   = $signature['hmacKeyId'];
+		$document['hmacVersion'] = $signature['hmacVersion'];
+		$document['hmac']        = $signature['hmac'];
 
 		$this->write_json_document( $this->bundle_path, $document );
 	}
