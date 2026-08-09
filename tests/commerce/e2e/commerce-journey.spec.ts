@@ -42,7 +42,10 @@ function isMobileProject(): boolean {
 }
 
 test.describe( 'commerce journeys', () => {
-	test.skip( process.env.COMMERCE !== '1', 'commerce profile only — set COMMERCE=1 to run' );
+	test.skip(
+		process.env.COMMERCE !== '1',
+		'commerce profile only — set COMMERCE=1 to run'
+	);
 
 	// These journeys are multi-step (login + AJAX checkout + order history), so
 	// give them headroom over Playwright's 30s default — the account journey in
@@ -52,16 +55,32 @@ test.describe( 'commerce journeys', () => {
 	} );
 
 	test( 'product archive lists the fixture products', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await page.goto( '/shop/' );
 
-		await expect( page.locator( '.woocommerce-loop-product__title', { hasText: 'Test Simple Product' } ) ).toBeVisible();
-		await expect( page.locator( '.woocommerce-loop-product__title', { hasText: 'Test Variable Product' } ) ).toBeVisible();
+		await expect(
+			page.locator( '.woocommerce-loop-product__title', {
+				hasText: 'Test Simple Product',
+			} )
+		).toBeVisible();
+		await expect(
+			page.locator( '.woocommerce-loop-product__title', {
+				hasText: 'Test Variable Product',
+			} )
+		).toBeVisible();
 	} );
 
-	test( 'simple product: PDP renders price and adds to the cart', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+	test( 'simple product: PDP renders price and adds to the cart', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
 
@@ -70,52 +89,92 @@ test.describe( 'commerce journeys', () => {
 		// nested inside the theme's; the theme main is first and contains it.
 		await expect( page.locator( 'main' ).first() ).toContainText( '19.99' );
 		await checkoutLocators.addToCart( page ).click();
-		await expect( page.locator( 'main' ).first() ).toContainText( /added to (your|the) cart/i );
+		await expect( page.locator( 'main' ).first() ).toContainText(
+			/added to (your|the) cart/i
+		);
 
 		await page.goto( '/cart/' );
-		await expect( page.locator( 'main' ).first() ).toContainText( 'Test Simple Product' );
+		await expect( page.locator( 'main' ).first() ).toContainText(
+			'Test Simple Product'
+		);
 	} );
 
-	test( 'variable product: selecting a variation updates the price, then adds', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+	test( 'variable product: selecting a variation updates the price, then adds', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await page.goto( `/product/${ VARIABLE_PRODUCT_SLUG }/` );
 
 		// Add-to-cart is gated until a variation is chosen.
-		await expect( checkoutLocators.addToCart( page ) ).toHaveClass( /disabled/ );
+		await expect( checkoutLocators.addToCart( page ) ).toHaveClass(
+			/disabled/
+		);
 
 		await page.locator( 'select#size' ).selectOption( 'M' );
 
-		await expect( page.locator( '.woocommerce-variation-price' ) ).toContainText( '29.99' );
-		await expect( checkoutLocators.addToCart( page ) ).not.toHaveClass( /disabled/ );
+		await expect(
+			page.locator( '.woocommerce-variation-price' )
+		).toContainText( '29.99' );
+		await expect( checkoutLocators.addToCart( page ) ).not.toHaveClass(
+			/disabled/
+		);
 
 		await checkoutLocators.addToCart( page ).click();
-		await expect( page.locator( '.woocommerce-message, .wc-block-components-notice-banner' ).first() ).toBeVisible();
+		await expect(
+			page
+				.locator(
+					'.woocommerce-message, .wc-block-components-notice-banner'
+				)
+				.first()
+		).toBeVisible();
 
 		await page.goto( '/cart/' );
-		await expect( page.locator( 'main' ).first() ).toContainText( 'Test Variable Product' );
+		await expect( page.locator( 'main' ).first() ).toContainText(
+			'Test Variable Product'
+		);
 	} );
 
-	test( 'cart: updating quantity and applying TESTCOUPON lowers the total', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+	test( 'cart: updating quantity and applying TESTCOUPON lowers the total', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await addSimpleProductToCart( page );
 		await page.goto( '/cart/' );
 
 		// Quantity 2 -> subtotal 2 x $19.99 = $39.98. The block cart pushes the
 		// change through the Store API, so the totals take a moment to catch up.
-		await page.getByLabel( /quantity/i ).first().fill( '2' );
-		await expect( page.locator( 'main' ) ).toContainText( '39.98', { timeout: 15_000 } );
+		await page
+			.getByLabel( /quantity/i )
+			.first()
+			.fill( '2' );
+		await expect( page.locator( 'main' ) ).toContainText( '39.98', {
+			timeout: 15_000,
+		} );
 
 		// TESTCOUPON (10% off) adds a discount row and lowers the order total.
-		await page.getByRole( 'button', { name: /add coupons?/i } ).first().click();
+		await page
+			.getByRole( 'button', { name: /add coupons?/i } )
+			.first()
+			.click();
 		await page.getByLabel( /enter code/i ).fill( 'TESTCOUPON' );
 		await page.getByRole( 'button', { name: /apply/i } ).click();
 
-		await expect( page.locator( 'main' ) ).toContainText( '35.98', { timeout: 15_000 } );
+		await expect( page.locator( 'main' ) ).toContainText( '35.98', {
+			timeout: 15_000,
+		} );
 	} );
 
-	test( 'checkout: a guest COD order reaches the order-received page', async ( { page } ) => {
+	test( 'checkout: a guest COD order reaches the order-received page', async ( {
+		page,
+	} ) => {
 		// This is also the mobile project's checkout smoke — it runs on every
 		// configured project, proving the checkout selectors work on a mobile
 		// viewport too.
@@ -129,11 +188,18 @@ test.describe( 'commerce journeys', () => {
 		// MailGuard suppresses the WooCommerce order email outside production;
 		// reaching this page proves the order completed anyway — the whole point
 		// of MailGuard is that a suppressed email never blocks the transaction.
-		await expect( page.getByText( /order has been received|thank you/i ).first() ).toBeVisible();
+		await expect(
+			page.getByText( /order has been received|thank you/i ).first()
+		).toBeVisible();
 	} );
 
-	test( 'account: a logged-in customer sees the order in their history', async ( { page } ) => {
-		test.skip( isMobileProject(), 'account-history journey runs on desktop only (login race + mobile is a checkout smoke)' );
+	test( 'account: a logged-in customer sees the order in their history', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'account-history journey runs on desktop only (login race + mobile is a checkout smoke)'
+		);
 
 		// Log in first so the order is tied to the account, then check it out.
 		await page.goto( '/wp/wp-login.php' );
@@ -151,21 +217,32 @@ test.describe( 'commerce journeys', () => {
 		// submit, so the summary is used as-is). A new customer gets the
 		// editable form. Both states are legitimate; wait for hydration, then
 		// branch on which one is showing.
-		await expect( checkoutLocators.email( page ) ).toBeVisible( { timeout: 30_000 } );
+		await expect( checkoutLocators.email( page ) ).toBeVisible( {
+			timeout: 30_000,
+		} );
 		if ( await checkoutLocators.firstName( page ).isVisible() ) {
 			await fillBlockCheckoutWithCod( page, 'test-customer@example.com' );
 		} else {
-			await expect( checkoutLocators.cashOnDelivery( page ) ).toBeVisible( { timeout: 30_000 } );
+			await expect( checkoutLocators.cashOnDelivery( page ) ).toBeVisible(
+				{ timeout: 30_000 }
+			);
 			await checkoutLocators.cashOnDelivery( page ).check();
 		}
 		const orderNumber = await placeOrderAndReadNumber( page );
 
 		await page.goto( '/my-account/orders/' );
-		await expect( page.locator( '.woocommerce-orders-table' ) ).toContainText( orderNumber );
+		await expect(
+			page.locator( '.woocommerce-orders-table' )
+		).toContainText( orderNumber );
 	} );
 
-	test( 'the block theme renders the shop archive inside the theme header and footer', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+	test( 'the block theme renders the shop archive inside the theme header and footer', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await page.goto( '/shop/' );
 
@@ -176,8 +253,13 @@ test.describe( 'commerce journeys', () => {
 		await expect( page.locator( 'footer' ).first() ).toBeVisible();
 	} );
 
-	test( 'the header Mini-Cart reflects the cart contents', async ( { page } ) => {
-		test.skip( isMobileProject(), 'desktop journey; the mobile project runs the checkout smoke only' );
+	test( 'the header Mini-Cart reflects the cart contents', async ( {
+		page,
+	} ) => {
+		test.skip(
+			isMobileProject(),
+			'desktop journey; the mobile project runs the checkout smoke only'
+		);
 
 		await page.goto( '/' );
 		// Seeded by scripts/enable-commerce as a site-header template-part
@@ -185,7 +267,9 @@ test.describe( 'commerce journeys', () => {
 		await expect( checkoutLocators.miniCart( page ) ).toBeVisible();
 		// The Mini-Cart button's ACCESSIBLE NAME carries the count. Assert the
 		// empty state too, so the "1" assertion below cannot pass vacuously.
-		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName( /Number of items in the cart:\s*0\b/ );
+		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName(
+			/Number of items in the cart:\s*0\b/
+		);
 
 		await addSimpleProductToCart( page );
 		await page.goto( '/' );
@@ -193,6 +277,8 @@ test.describe( 'commerce journeys', () => {
 		// One fixture product is in the cart. The Mini-Cart button's ACCESSIBLE
 		// NAME carries the count, so assert the transition 0 -> 1 rather than the
 		// button's visible text.
-		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName( /Number of items in the cart:\s*1\b/ );
+		await expect( checkoutLocators.miniCart( page ) ).toHaveAccessibleName(
+			/Number of items in the cart:\s*1\b/
+		);
 	} );
 } );

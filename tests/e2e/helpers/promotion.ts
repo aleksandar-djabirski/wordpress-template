@@ -22,12 +22,16 @@ type WpResolution = {
  * Runs a WP-CLI command against the site under test. Resolves `wp` on PATH
  * first (CI/DDEV container), then falls back to `ddev wp` (host runs).
  * `env` is merged into the child process environment.
+ * @param args The WP-CLI arguments to execute.
+ * @param env  Environment variables to merge into the WP-CLI process.
  */
 export function wpCli( args: string[], env: NodeJS.ProcessEnv = {} ): string {
 	const wp = resolveWp();
 
 	if ( wp === null ) {
-		throw new Error( 'WP-CLI is required for the promotion lifecycle gate.' );
+		throw new Error(
+			'WP-CLI is required for the promotion lifecycle gate.'
+		);
 	}
 
 	// When WP-CLI runs through `ddev`, the command executes INSIDE the
@@ -59,7 +63,9 @@ export function wpCli( args: string[], env: NodeJS.ProcessEnv = {} ): string {
 	if ( result.status !== 0 ) {
 		const stderr = ( result.stderr ?? '' ).trim();
 		throw new Error(
-			`wp ${ args.join( ' ' ) } exited with code ${ result.status ?? 'null' }${ stderr ? `: ${ stderr }` : '' }`
+			`wp ${ args.join( ' ' ) } exited with code ${
+				result.status ?? 'null'
+			}${ stderr ? `: ${ stderr }` : '' }`
 		);
 	}
 
@@ -77,10 +83,14 @@ export function wpCliAvailable(): boolean {
  * True when `git status --porcelain` is empty — the precondition for mutating the checkout.
  */
 export function repoIsClean(): boolean {
-	const result = spawnSync( 'git', [ 'status', '--porcelain' ], { encoding: 'utf8' } );
+	const result = spawnSync( 'git', [ 'status', '--porcelain' ], {
+		encoding: 'utf8',
+	} );
 
 	if ( result.status !== 0 ) {
-		throw new Error( `git status failed: ${ ( result.stderr ?? '' ).trim() }` );
+		throw new Error(
+			`git status failed: ${ ( result.stderr ?? '' ).trim() }`
+		);
 	}
 
 	return ( result.stdout ?? '' ).trim() === '';
@@ -125,6 +135,7 @@ export function themeDir(): string {
 
 /**
  * Current bytes of a theme-relative file, for later restoration.
+ * @param themeRelativePath The file path relative to the active theme.
  */
 export function capturePartFile( themeRelativePath: string ): string {
 	return readFileSync( join( themeDir(), themeRelativePath ), 'utf8' );
@@ -132,8 +143,13 @@ export function capturePartFile( themeRelativePath: string ): string {
 
 /**
  * Writes previously captured bytes back into the theme.
+ * @param themeRelativePath The file path relative to the active theme.
+ * @param contents          The file contents captured before the test changed them.
  */
-export function restoreOriginalPartFile( themeRelativePath: string, contents: string ): void {
+export function restoreOriginalPartFile(
+	themeRelativePath: string,
+	contents: string
+): void {
 	writeFileSync( join( themeDir(), themeRelativePath ), contents );
 }
 
@@ -143,11 +159,16 @@ export function restoreOriginalPartFile( themeRelativePath: string, contents: st
  * The commit identity and signing are pinned inline so the commit works on
  * any host, configured or not; only the one file is ever staged — never
  * the whole theme directory.
+ * @param themeRelativePath The file path relative to the active theme to stage.
  */
 export function commitPreparedFile( themeRelativePath: string ): string {
 	const directory = themeDir();
 
-	const stage = spawnSync( 'git', [ '-C', directory, 'add', '--', themeRelativePath ], { encoding: 'utf8' } );
+	const stage = spawnSync(
+		'git',
+		[ '-C', directory, 'add', '--', themeRelativePath ],
+		{ encoding: 'utf8' }
+	);
 
 	if ( stage.status !== 0 ) {
 		throw new Error( `git add failed: ${ ( stage.stderr ?? '' ).trim() }` );
@@ -172,13 +193,19 @@ export function commitPreparedFile( themeRelativePath: string ): string {
 	);
 
 	if ( commit.status !== 0 ) {
-		throw new Error( `git commit failed: ${ ( commit.stderr ?? '' ).trim() }` );
+		throw new Error(
+			`git commit failed: ${ ( commit.stderr ?? '' ).trim() }`
+		);
 	}
 
-	const head = spawnSync( 'git', [ '-C', directory, 'rev-parse', 'HEAD' ], { encoding: 'utf8' } );
+	const head = spawnSync( 'git', [ '-C', directory, 'rev-parse', 'HEAD' ], {
+		encoding: 'utf8',
+	} );
 
 	if ( head.status !== 0 ) {
-		throw new Error( `git rev-parse failed: ${ ( head.stderr ?? '' ).trim() }` );
+		throw new Error(
+			`git rev-parse failed: ${ ( head.stderr ?? '' ).trim() }`
+		);
 	}
 
 	const sha = ( head.stdout ?? '' ).trim();
@@ -206,7 +233,9 @@ export function commitPreparedFile( themeRelativePath: string ): string {
  * mounted at /var/www/html.
  */
 export function ensureStateDir(): void {
-	mkdirSync( join( process.cwd(), 'var', 'agency-state' ), { recursive: true } );
+	mkdirSync( join( process.cwd(), 'var', 'agency-state' ), {
+		recursive: true,
+	} );
 }
 
 /**
@@ -218,9 +247,15 @@ export function promotionEnv(): NodeJS.ProcessEnv {
 	ensureStateDir();
 
 	return {
-		AGENCY_PROMOTION_HMAC_KEYS: JSON.stringify( { 'e2e': 'e2e-promotion-key-that-is-long-enough-32+' } ),
+		AGENCY_PROMOTION_HMAC_KEYS: JSON.stringify( {
+			e2e: 'e2e-promotion-key-that-is-long-enough-32+',
+		} ),
 		AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID: 'e2e',
-		AGENCY_TARGET_SITE_UUID: wpCli( [ 'option', 'get', 'agency_platform_site_uuid' ] ).trim(),
+		AGENCY_TARGET_SITE_UUID: wpCli( [
+			'option',
+			'get',
+			'agency_platform_site_uuid',
+		] ).trim(),
 		AGENCY_STATE_DIR: 'var/agency-state',
 		// The MIRROR IMAGE of themeDir(). That helper needs the path as the
 		// Playwright process sees it, because Node reads and writes the theme
@@ -253,7 +288,9 @@ function resolveWp(): WpResolution | null {
 		return { command: 'wp', args: [] };
 	}
 
-	const ddev = spawnSync( 'ddev', [ 'wp', '--version' ], { encoding: 'utf8' } );
+	const ddev = spawnSync( 'ddev', [ 'wp', '--version' ], {
+		encoding: 'utf8',
+	} );
 
 	if ( ddev.status === 0 ) {
 		return { command: 'ddev', args: [ 'wp' ] };

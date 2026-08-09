@@ -28,21 +28,25 @@ declare global {
 	var wp: {
 		data: {
 			select: ( store: string ) => {
-				getBlocks: () => Array<{ name: string; clientId: string }>;
+				getBlocks: () => Array< { name: string; clientId: string } >;
 				getTemplateLock: ( clientId?: string ) => string | false;
 			};
 		};
 	};
 }
 
-test( 'client_editor can insert the locked landing-section pattern, which stays template-locked', async ( { page } ) => {
+test( 'client_editor can insert the locked landing-section pattern, which stays template-locked', async ( {
+	page,
+} ) => {
 	await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 	await page.goto( adminUrl( 'post-new.php?post_type=page' ) );
 
 	await openBlockInserter( page );
 	await searchInserter( page, 'Reference Landing Section' );
 
-	const patternResult = page.getByText( 'Reference Landing Section', { exact: true } ).first();
+	const patternResult = page
+		.getByText( 'Reference Landing Section', { exact: true } )
+		.first();
 	await expect( patternResult ).toBeVisible();
 	await patternResult.click();
 
@@ -50,14 +54,20 @@ test( 'client_editor can insert the locked landing-section pattern, which stays 
 	// the store until the group block lands rather than asserting once.
 	await expect( async () => {
 		const groupCount = await page.evaluate(
-			() => wp.data.select( 'core/block-editor' ).getBlocks().filter( ( block ) => block.name === 'core/group' ).length
+			() =>
+				wp.data
+					.select( 'core/block-editor' )
+					.getBlocks()
+					.filter( ( block ) => block.name === 'core/group' ).length
 		);
 		expect( groupCount ).toBeGreaterThan( 0 );
 	} ).toPass();
 
 	const templateLock = await page.evaluate( () => {
 		const editorStore = wp.data.select( 'core/block-editor' );
-		const group = editorStore.getBlocks().find( ( block ) => block.name === 'core/group' );
+		const group = editorStore
+			.getBlocks()
+			.find( ( block ) => block.name === 'core/group' );
 		return group ? editorStore.getTemplateLock( group.clientId ) : null;
 	} );
 

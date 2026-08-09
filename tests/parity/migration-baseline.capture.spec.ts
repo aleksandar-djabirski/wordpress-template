@@ -1,7 +1,11 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from '@playwright/test';
-import { MIGRATION_BASELINE_DIR, MIGRATION_PARITY_PAGES, captureFrontend } from './helpers/parity';
+import {
+	MIGRATION_BASELINE_DIR,
+	MIGRATION_PARITY_PAGES,
+	captureFrontend,
+} from './helpers/parity';
 
 /**
  * Writes the IMMUTABLE pre-migration baselines. Deliberately writes PNGs with
@@ -18,7 +22,11 @@ test.describe( 'migration baseline capture', () => {
 
 	for ( const parityPage of MIGRATION_PARITY_PAGES ) {
 		test( `capture ${ parityPage.name }`, async ( { page }, testInfo ) => {
-			const buffer = await captureFrontend( page, parityPage.path, parityPage.maskSelectors );
+			const buffer = await captureFrontend(
+				page,
+				parityPage.path,
+				parityPage.maskSelectors
+			);
 			const dir = join( MIGRATION_BASELINE_DIR, testInfo.project.name );
 			mkdirSync( dir, { recursive: true } );
 			writeFileSync( join( dir, `${ parityPage.name }.png` ), buffer );
