@@ -13,6 +13,23 @@ namespace AgencyPlatform\State;
  * from the environment, so a misconfigured environment fails at sign or
  * verify time with a message naming the missing setting — never silently
  * degrades to WordPress salts.
+ *
+ * The canonicalisation used to build the signed bytes is LOSSLESS
+ * (canonicalize_lossless()), not the lossy, diff-friendly Normalizer::
+ * canonical_json() that the rest of the state subsystem uses for drift
+ * detection. Normalizer::canonical_json() collapses trailing whitespace,
+ * CR/CRLF, and integral floats on purpose, so two distinct documents can
+ * canonicalise to identical bytes and therefore share a signature — the
+ * signature would authenticate the normalised form, not the document. A
+ * signature must authenticate exactly what was signed.
+ *
+ * Every new signature carries hmacVersion = CURRENT_VERSION, included in
+ * the signed bytes themselves (so it cannot be stripped or downgraded
+ * without invalidating the signature). verify() dispatches on the
+ * document's own hmacVersion: CURRENT_VERSION verifies losslessly; an
+ * absent field, or an explicit LEGACY_VERSION, verifies through the old
+ * lossy canonicaliser — a bundle or manifest already signed and sitting in
+ * its retention window keeps verifying, with no migration and no flag day.
  */
 final class HmacSigner {
 
@@ -23,6 +40,9 @@ final class HmacSigner {
 	public const SETTING_SIGNING_KEY_ID = 'AGENCY_PROMOTION_HMAC_SIGNING_KEY_ID';
 
 	public const MINIMUM_KEY_LENGTH = 32;
+
+	public const LEGACY_VERSION  = 1;
+	public const CURRENT_VERSION = 2;
 
 	/**
 	 * @var array<string, string>|null
@@ -47,11 +67,15 @@ final class HmacSigner {
 	/**
 	 * Signs a payload for one purpose, returning the signature fields a
 	 * bundle or manifest carries alongside it. The signature covers the
-	 * payload with hmac and hmacKeyId stripped, so a signature never covers
-	 * itself.
+	 * payload (plus the version tag below) with hmac and hmacKeyId
+	 * stripped, so a signature never covers itself. Every new signature is
+	 * CURRENT_VERSION, built over the LOSSLESS canonical form, and the
+	 * version tag itself is part of the signed bytes — it cannot be
+	 * stripped or downgraded to the legacy check without invalidating the
+	 * signature.
 	 *
 	 * @param array<string, mixed> $payload
-	 * @return array{hmacKeyId: string, hmac: string}
+	 * @return array{hmacKeyId: string, hmacVersion: int, hmac: string}
 	 */
 	public function sign( array $payload, string $purpose ): array {
 		$keyring = $this->keyring();
@@ -61,9 +85,13 @@ final class HmacSigner {
 			throw StateException::hard_error( 'The signing key id "' . $key_id . '" is not present in ' . self::SETTING_KEYS . '.' );
 		}
 
+		$versioned_payload                = $payload;
+		$versioned_payload['hmacVersion'] = self::CURRENT_VERSION;
+
 		return array(
-			'hmacKeyId' => $key_id,
-			'hmac'      => hash_hmac( 'sha256', $purpose . $this->canonicalize( $payload ), $keyring[ $key_id ] ),
+			'hmacKeyId'   => $key_id,
+			'hmacVersion' => self::CURRENT_VERSION,
+			'hmac'        => hash_hmac( 'sha256', $purpose . $this->canonicalize_lossless( $versioned_payload ), $keyring[ $key_id ] ),
 		);
 	}
 
@@ -72,8 +100,17 @@ final class HmacSigner {
 	 * the document's own hmacKeyId, so any key id present in the keyring is
 	 * accepted — rotation only ever changes which id signs new documents.
 	 *
+	 * Dispatches on the document's own hmacVersion: CURRENT_VERSION is
+	 * re-hashed through the lossless canonicaliser, an absent field or an
+	 * explicit LEGACY_VERSION through the old lossy one. The field is never
+	 * trusted blindly — it is hashed as part of the document either way, so
+	 * a document signed as CURRENT_VERSION cannot be re-labelled
+	 * LEGACY_VERSION (or have the field dropped) to fall back onto the
+	 * weaker check: that would change the signed bytes and the signature
+	 * would no longer match.
+	 *
 	 * @param array<string, mixed> $document A signed document including hmac + hmacKeyId.
-	 * @throws StateException Exit 4 on a bad/absent signature, exit 1 on keyring misconfiguration.
+	 * @throws StateException Exit 4 on a bad/absent/unsupported-version signature, exit 1 on keyring misconfiguration.
 	 */
 	public function verify( array $document, string $purpose ): void {
 		$signature = $document['hmac'] ?? null;
@@ -89,7 +126,17 @@ final class HmacSigner {
 			throw StateException::tamper( 'The document carries the unknown HMAC key id "' . $key_id . '".' );
 		}
 
-		$expected = hash_hmac( 'sha256', $purpose . $this->canonicalize( $document ), $keyring[ $key_id ] );
+		$version = $document['hmacVersion'] ?? self::LEGACY_VERSION;
+
+		if ( ! is_int( $version ) || ( self::LEGACY_VERSION !== $version && self::CURRENT_VERSION !== $version ) ) {
+			throw StateException::tamper( 'The document carries an unsupported HMAC version.' );
+		}
+
+		$canonical = self::CURRENT_VERSION === $version
+			? $this->canonicalize_lossless( $document )
+			: $this->canonicalize( $document );
+
+		$expected = hash_hmac( 'sha256', $purpose . $canonical, $keyring[ $key_id ] );
 
 		if ( ! hash_equals( $signature, $expected ) ) {
 			throw StateException::tamper( 'The HMAC does not match: the document was modified, or it was not signed for this purpose.' );
@@ -97,14 +144,51 @@ final class HmacSigner {
 	}
 
 	/**
-	 * Canonical JSON of the payload with the signature fields stripped, so
-	 * the signed string is identical whether it came from a payload or from
-	 * a full signed document.
+	 * Legacy (lossy) canonical JSON of the payload with the signature
+	 * fields stripped: Normalizer::canonical_json() collapses trailing
+	 * whitespace, CR/CRLF, and integral floats, which is what the
+	 * malleability finding exploits. Kept only for LEGACY_VERSION
+	 * verification of documents signed before this canonicaliser existed;
+	 * sign() never uses it.
 	 *
 	 * @param array<string, mixed> $payload
 	 */
 	public function canonicalize( array $payload ): string {
 		return Normalizer::canonical_json( $this->strip_signature( $payload ) );
+	}
+
+	/**
+	 * Lossless canonical JSON of the payload with the signature fields
+	 * stripped: keys are sorted for build-order independence (matching the
+	 * legacy canonicaliser), but every scalar is encoded exactly as given —
+	 * no trailing-whitespace or line-ending collapsing, no integral-float
+	 * coercion — so two payloads that differ can never canonicalise to the
+	 * same bytes. serialize_precision is pinned to -1 for the same reason
+	 * Normalizer::canonical_json() pins it: deterministic float encoding,
+	 * restored in the finally so the process-wide setting is never left
+	 * changed.
+	 *
+	 * @param array<string, mixed> $payload
+	 */
+	private function canonicalize_lossless( array $payload ): string {
+		$previous = ini_get( 'serialize_precision' );
+		// phpcs:ignore WordPress.PHP.IniSet.Risky -- pinning serialize_precision to -1 is what makes float encoding deterministic; the previous value is restored in the finally below, so the process-wide setting is never left changed.
+		ini_set( 'serialize_precision', '-1' );
+
+		try {
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.json_encode_json_encode -- canonicalisation must not depend on WordPress being loaded; the unit suite covers this method with no WordPress present.
+			$encoded = json_encode(
+				Normalizer::sort_recursive( $this->strip_signature( $payload ) ),
+				JSON_PRESERVE_ZERO_FRACTION | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+			);
+		} catch ( \JsonException $error ) {
+			throw StateException::hard_error( 'The payload could not be canonicalised as JSON: ' . $error->getMessage(), $error );
+		} finally {
+			// phpcs:ignore WordPress.PHP.IniSet.Risky -- the finally guarantees the process-wide serialize_precision is never left changed by the deterministic-float pin above.
+			ini_set( 'serialize_precision', false === $previous ? '-1' : $previous );
+		}
+
+		return $encoded;
 	}
 
 	/**

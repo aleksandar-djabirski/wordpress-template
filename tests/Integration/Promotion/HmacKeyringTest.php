@@ -122,8 +122,9 @@ final class HmacKeyringTest extends IntegrationTestCase {
 			'2025-01'
 		) )->sign( $document, HmacSigner::PURPOSE_MANIFEST );
 
-		$document['hmacKeyId'] = $signature['hmacKeyId'];
-		$document['hmac']      = $signature['hmac'];
+		$document['hmacKeyId']   = $signature['hmacKeyId'];
+		$document['hmacVersion'] = $signature['hmacVersion'];
+		$document['hmac']        = $signature['hmac'];
 
 		// The keyring still holds the old key; the signing key has advanced.
 		putenv(
@@ -191,8 +192,9 @@ final class HmacKeyringTest extends IntegrationTestCase {
 
 		$signature = ( new HmacSigner( array( self::KEY_ID => str_repeat( 'k', 40 ) ), self::KEY_ID ) )->sign( $document, HmacSigner::PURPOSE_MANIFEST );
 
-		$document['hmacKeyId'] = $signature['hmacKeyId'];
-		$document['hmac']      = $signature['hmac'];
+		$document['hmacKeyId']   = $signature['hmacKeyId'];
+		$document['hmacVersion'] = $signature['hmacVersion'];
+		$document['hmac']        = $signature['hmac'];
 
 		$path = $this->tmp_file( $document );
 
@@ -242,8 +244,9 @@ final class HmacKeyringTest extends IntegrationTestCase {
 		$document  = $this->manifest_document();
 		$signature = ( new HmacSigner( array( self::KEY_ID => str_repeat( 'k', 40 ) ), self::KEY_ID ) )->sign( $document, HmacSigner::PURPOSE_MANIFEST );
 
-		$document['hmacKeyId'] = $signature['hmacKeyId'];
-		$document['hmac']      = $signature['hmac'];
+		$document['hmacKeyId']   = $signature['hmacKeyId'];
+		$document['hmacVersion'] = $signature['hmacVersion'];
+		$document['hmac']        = $signature['hmac'];
 
 		return $document;
 	}

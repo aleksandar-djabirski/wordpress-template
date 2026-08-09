@@ -187,7 +187,7 @@ final class StateGateway {
 	 * promotion-manifest purpose.
 	 *
 	 * @param array<string, mixed> $payload
-	 * @return array{hmacKeyId: string, hmac: string}
+	 * @return array{hmacKeyId: string, hmacVersion: int, hmac: string}
 	 */
 	public function sign_manifest( array $payload ): array {
 		try {
