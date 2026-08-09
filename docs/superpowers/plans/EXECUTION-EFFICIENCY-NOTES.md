@@ -690,3 +690,45 @@ state as a test input and repair it before a repeat run.
 An empty artifact directory does not prove that an opencode run is hung. The
 reliable liveness signal is whether the work product is growing. Inspect the
 work product before dispatching a replacement.
+
+### 13.6 Three of the four closed limitations, and why the fourth was refused
+
+Run after the ship, as four parallel `gpt-5.6-luna` xhigh packages.
+
+**Closed.** The backup-index mutex on the delete path; the non-idempotent e2e
+suite; and the `lint:js` scope.
+
+**Refused: the versioned HMAC.** Its finding was REAL and the agent proved it —
+its own test demonstrates the old lossy normalisation collapsing two distinct
+documents onto one signature — and its design was the right shape: sign as v2,
+verify v1 and v2, so manifests in retention keep working with no migration.
+
+It was still refused, and the reasoning is the transferable part. Reverting its
+production file ALONE cleared both unit failures, including the one the agent
+had attributed to a different package. And it had downgraded two documented
+exit codes: tamper **4 to 1**, and lock conflict **3 to 1**. Exit 4 is stated in
+the runbook, in `docs/validation-scenarios.md` and in the promotion proof.
+
+**An unreviewed change to a signing format, made after the final review, that
+breaks tamper detection on its first run, is not worth shipping to close a
+malleability nothing is exploiting.** The finding is now better documented than
+before — demonstrated exploitable, with a working design and a passing test in
+the record — which makes the follow-up cheap for someone with a proper review
+cycle. Deferring twice, with better evidence each time, beats shipping once
+without review.
+
+### 13.7 Widening a linter can break an architecture guard
+
+`lint:js` had never covered `tests/`. Widening it made prettier want to reflow
+the `ParityPage` literals in `tests/parity/helpers/parity.ts` onto several
+lines. `MigrationBaselineGuardTest` matches each of them with a SINGLE-LINE
+`/m` regex, and its failure message says exactly why: "A computed value or
+object spread can bypass the ratio ceiling."
+
+So a blanket auto-fix would have disabled a guard that exists to stop anyone
+quietly loosening the visual-diff threshold. The fix is four scoped
+`prettier-ignore` comments, with the rule left enabled everywhere else.
+
+Before widening any linter or formatter over a directory it has never touched,
+ask which tests READ those files as text. Architecture tests that parse source
+with a regex are invisible to a formatter and will not warn you.

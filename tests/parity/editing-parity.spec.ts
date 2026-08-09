@@ -23,7 +23,9 @@ import { CREDS, loginAs } from '../e2e/helpers/auth';
  * separately verifies that the preview remains available to editors.
  */
 for ( const parityPage of EDITING_PARITY_PAGES ) {
-	test( `editing parity: ${ parityPage.name }`, async ( { page }, testInfo ) => {
+	test( `editing parity: ${ parityPage.name }`, async ( {
+		page,
+	}, testInfo ) => {
 		test.setTimeout( 120_000 );
 
 		const frontendContentSelector = 'main#site-main .wp-block-post-content';
@@ -47,8 +49,15 @@ for ( const parityPage of EDITING_PARITY_PAGES ) {
 			parityPage.maskSelectors,
 			frontendContentSelector
 		);
-		const frontendWidth = await layoutWidth( page, frontendContentSelector );
-		const frontendStyles = await computedStyles( page, frontendContentSelector, styleProperties );
+		const frontendWidth = await layoutWidth(
+			page,
+			frontendContentSelector
+		);
+		const frontendStyles = await computedStyles(
+			page,
+			frontendContentSelector,
+			styleProperties
+		);
 
 		await loginAs( page, CREDS.clientEditor.u, CREDS.clientEditor.p );
 
@@ -62,24 +71,50 @@ for ( const parityPage of EDITING_PARITY_PAGES ) {
 			EDITING_EDITOR_ONLY_SELECTORS[ parityPage.name ] ?? []
 		);
 		const canvas = page.frameLocator( 'iframe[name="editor-canvas"]' );
-		const canvasWidth = await effectiveCanvasWidth( page, editorContentSelector );
+		const canvasWidth = await effectiveCanvasWidth(
+			page,
+			editorContentSelector
+		);
 
 		expect(
 			Math.abs( canvasWidth - frontendWidth ),
 			`${ parityPage.name }: the editor canvas is ${ canvasWidth }px wide but the frontend captured at ${ frontendWidth }px. Geometry cannot be compared across different layout widths.`
 		).toBeLessThanOrEqual( 1 );
 
-		const canvasStyles = await computedStyles( canvas, editorContentSelector, styleProperties );
+		const canvasStyles = await computedStyles(
+			canvas,
+			editorContentSelector,
+			styleProperties
+		);
 
-		await testInfo.attach( `${ parityPage.name }-frontend`, { body: frontend, contentType: 'image/png' } );
-		await testInfo.attach( `${ parityPage.name }-canvas`, { body: canvasShot, contentType: 'image/png' } );
+		await testInfo.attach( `${ parityPage.name }-frontend`, {
+			body: frontend,
+			contentType: 'image/png',
+		} );
+		await testInfo.attach( `${ parityPage.name }-canvas`, {
+			body: canvasShot,
+			contentType: 'image/png',
+		} );
 
-		const diffOut = testInfo.outputPath( `${ parityPage.name }-editing-diff.png` );
-		const { diffRatio } = compareBuffers( frontend, canvasShot, parityPage.maxDiffRatio, diffOut );
+		const diffOut = testInfo.outputPath(
+			`${ parityPage.name }-editing-diff.png`
+		);
+		const { diffRatio } = compareBuffers(
+			frontend,
+			canvasShot,
+			parityPage.maxDiffRatio,
+			diffOut
+		);
 
 		expect(
 			diffRatio,
-			`${ parityPage.name }: the Site Editor canvas differs from the frontend by ${ ( diffRatio * 100 ).toFixed( 2 ) }% (limit ${ ( parityPage.maxDiffRatio * 100 ).toFixed( 2 ) }%). Diff written to ${ diffOut }.`
+			`${
+				parityPage.name
+			}: the Site Editor canvas differs from the frontend by ${ (
+				diffRatio * 100
+			).toFixed( 2 ) }% (limit ${ (
+				parityPage.maxDiffRatio * 100
+			).toFixed( 2 ) }%). Diff written to ${ diffOut }.`
 		).toBeLessThanOrEqual( parityPage.maxDiffRatio );
 
 		expect( canvasStyles ).toEqual( frontendStyles );

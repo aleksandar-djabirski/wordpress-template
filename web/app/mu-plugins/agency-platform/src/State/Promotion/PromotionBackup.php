@@ -34,6 +34,13 @@ final class PromotionBackup {
 	private const INDEX_LOCK_RETRIES      = 10;
 	private const INDEX_LOCK_RETRY_USLEEP = 200000;
 
+	/**
+	 * Test-only mutex override; null uses the WordPress lock API.
+	 *
+	 * @var callable(callable(array<string, array<string, mixed>>): array<string, array<string, mixed>>): void|null
+	 */
+	private static $index_mutex_override = null;
+
 	public function __construct( private string $promotion_id ) {}
 
 	/**
@@ -456,6 +463,13 @@ final class PromotionBackup {
 	 * @throws PromotionException Exit 3 when the index mutex cannot be won.
 	 */
 	private function update_index( callable $mutation ): void {
+		if ( null !== self::$index_mutex_override ) {
+			$index_mutex = self::$index_mutex_override;
+			$index_mutex( $mutation );
+
+			return;
+		}
+
 		if ( ! class_exists( 'WP_Upgrader' ) ) {
 			require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
 		}
@@ -495,28 +509,41 @@ final class PromotionBackup {
 	}
 
 	/**
+	 * Test-only mutex override. Null restores the real WordPress lock API.
+	 *
+	 * @param callable(callable(array<string, array<string, mixed>>): array<string, array<string, mixed>>): void|null $override
+	 */
+	public static function override_index_mutex( ?callable $override ): void {
+		self::$index_mutex_override = $override;
+	}
+
+	/**
 	 * Deletes every chunk, the meta option and the index entry of one
 	 * promotion, then its canonical manifest on the host.
 	 *
 	 * @param list<string> $record_keys
 	 */
 	private static function delete_backup( string $promotion_id, array $record_keys ): void {
-		foreach ( $record_keys as $record_key ) {
-			$prefix = self::option_prefix( $promotion_id, $record_key );
-			$meta   = get_option( $prefix . '_meta' );
+		( new self( $promotion_id ) )->update_index(
+			static function ( array $index ) use ( $promotion_id, $record_keys ): array {
+				foreach ( $record_keys as $record_key ) {
+					$prefix = self::option_prefix( $promotion_id, $record_key );
+					$meta   = get_option( $prefix . '_meta' );
 
-			if ( is_array( $meta ) && is_int( $meta['chunks'] ?? null ) ) {
-				for ( $index = 0; $index < $meta['chunks']; $index++ ) {
-					delete_option( $prefix . self::chunk_suffix( $index ) );
+					if ( is_array( $meta ) && is_int( $meta['chunks'] ?? null ) ) {
+						for ( $chunk_index = 0; $chunk_index < $meta['chunks']; $chunk_index++ ) {
+							delete_option( $prefix . self::chunk_suffix( $chunk_index ) );
+						}
+					}
+
+					delete_option( $prefix . '_meta' );
 				}
+
+				unset( $index[ $promotion_id ] );
+
+				return $index;
 			}
-
-			delete_option( $prefix . '_meta' );
-		}
-
-		$index = self::read_index();
-		unset( $index[ $promotion_id ] );
-		self::write_index( $index );
+		);
 
 		self::delete_canonical_manifest( $promotion_id );
 	}

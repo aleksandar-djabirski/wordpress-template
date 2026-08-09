@@ -26,28 +26,40 @@ export const VARIABLE_PRODUCT_SLUG = 'test-variable-product';
 export const checkoutLocators = {
 	addToCart: ( page: Page ): Locator =>
 		page.getByRole( 'button', { name: /add to cart/i } ).first(),
-	email: ( page: Page ): Locator => page.getByLabel( /email address/i ).first(),
-	firstName: ( page: Page ): Locator => page.getByLabel( /first name/i ).first(),
-	lastName: ( page: Page ): Locator => page.getByLabel( /last name/i ).first(),
-	country: ( page: Page ): Locator => page.getByLabel( /country\s*\/\s*region/i ).first(),
+	email: ( page: Page ): Locator =>
+		page.getByLabel( /email address/i ).first(),
+	firstName: ( page: Page ): Locator =>
+		page.getByLabel( /first name/i ).first(),
+	lastName: ( page: Page ): Locator =>
+		page.getByLabel( /last name/i ).first(),
+	country: ( page: Page ): Locator =>
+		page.getByLabel( /country\s*\/\s*region/i ).first(),
 	address: ( page: Page ): Locator => page.getByLabel( /^address/i ).first(),
 	city: ( page: Page ): Locator => page.getByLabel( /city/i ).first(),
-	state: ( page: Page ): Locator => page.getByLabel( /state|province|county/i ).first(),
-	postcode: ( page: Page ): Locator => page.getByLabel( /postcode|zip/i ).first(),
+	state: ( page: Page ): Locator =>
+		page.getByLabel( /state|province|county/i ).first(),
+	postcode: ( page: Page ): Locator =>
+		page.getByLabel( /postcode|zip/i ).first(),
 	cashOnDelivery: ( page: Page ): Locator =>
 		page.getByRole( 'radio', { name: /cash on delivery/i } ),
 	placeOrder: ( page: Page ): Locator =>
 		page.getByRole( 'button', { name: /place order/i } ),
 	miniCart: ( page: Page ): Locator =>
-		page.locator( 'header' ).getByRole( 'button', { name: /cart/i } ).first(),
+		page
+			.locator( 'header' )
+			.getByRole( 'button', { name: /cart/i } )
+			.first(),
 } as const;
 
 /**
  * Asserts every locator above resolves on the live store. Called by
  * tests/commerce/e2e/locators.spec.ts so a renamed label fails as a named
  * assertion rather than a timeout buried in a journey.
+ * @param page The Playwright page that hosts the commerce storefront.
  */
-export async function verifyBlockCheckoutLocators( page: Page ): Promise<void> {
+export async function verifyBlockCheckoutLocators(
+	page: Page
+): Promise< void > {
 	await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
 	await expect( checkoutLocators.addToCart( page ) ).toBeVisible();
 	await checkoutLocators.addToCart( page ).click();
@@ -111,7 +123,7 @@ export async function verifyBlockCheckoutLocators( page: Page ): Promise<void> {
 	).toBeVisible();
 }
 
-export async function addSimpleProductToCart( page: Page ): Promise<void> {
+export async function addSimpleProductToCart( page: Page ): Promise< void > {
 	await page.goto( `/product/${ SIMPLE_PRODUCT_SLUG }/` );
 	await checkoutLocators.addToCart( page ).click();
 	// The header Mini-Cart reflects cart state on every page, so it is the
@@ -119,8 +131,13 @@ export async function addSimpleProductToCart( page: Page ): Promise<void> {
 	await expect( checkoutLocators.miniCart( page ) ).toBeVisible();
 }
 
-export async function fillBlockCheckoutWithCod( page: Page, email: string ): Promise<void> {
-	await expect( checkoutLocators.email( page ) ).toBeVisible( { timeout: 30_000 } );
+export async function fillBlockCheckoutWithCod(
+	page: Page,
+	email: string
+): Promise< void > {
+	await expect( checkoutLocators.email( page ) ).toBeVisible( {
+		timeout: 30_000,
+	} );
 
 	await checkoutLocators.email( page ).fill( email );
 	await checkoutLocators.firstName( page ).fill( 'Test' );
@@ -136,7 +153,7 @@ export async function fillBlockCheckoutWithCod( page: Page, email: string ): Pro
 	await checkoutLocators.cashOnDelivery( page ).check();
 }
 
-export async function placeOrderAndReadNumber( page: Page ): Promise<string> {
+export async function placeOrderAndReadNumber( page: Page ): Promise< string > {
 	await checkoutLocators.placeOrder( page ).click();
 
 	await page.waitForURL( /order-received/ );
@@ -146,7 +163,10 @@ export async function placeOrderAndReadNumber( page: Page ): Promise<string> {
 	const summary = await page.locator( 'main' ).innerText();
 	const match = summary.match( /(?:order number|order)\D{0,20}?(\d+)/i );
 
-	expect( match, `could not read an order number from the confirmation page:\n${ summary }` ).not.toBeNull();
+	expect(
+		match,
+		`could not read an order number from the confirmation page:\n${ summary }`
+	).not.toBeNull();
 
 	return ( match as RegExpMatchArray )[ 1 ];
 }

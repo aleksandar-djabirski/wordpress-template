@@ -18,7 +18,11 @@ export type ParityPage = {
 	maxEdgeDeltaPx: number;
 };
 
-export const MIGRATION_BASELINE_DIR = resolve( __dirname, '..', '__migration_baselines__' );
+export const MIGRATION_BASELINE_DIR = resolve(
+	__dirname,
+	'..',
+	'__migration_baselines__'
+);
 
 /**
  * Both sides of every parity comparison are forced onto one libre font that
@@ -37,12 +41,16 @@ export const PARITY_FONT_CSS = `
 `;
 
 export const MIGRATION_PARITY_PAGES: ParityPage[] = [
+	// prettier-ignore
 	{ name: 'home', path: '/', maxDiffRatio: 0.02, maskSelectors: [], maxEdgeDeltaPx: 8 },
+	// prettier-ignore
 	{ name: 'sample-page', path: '/sample-page/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
 ];
 
 export const EDITING_PARITY_PAGES: ParityPage[] = [
+	// prettier-ignore
 	{ name: 'demo', path: '/demo/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
+	// prettier-ignore
 	{ name: 'sample-page', path: '/sample-page/', maxDiffRatio: 0.05, maskSelectors: [], maxEdgeDeltaPx: 8 },
 ];
 
@@ -55,7 +63,9 @@ export const EDITING_EDITOR_ONLY_SELECTORS: Record< string, string[] > = {
 	demo: [ '.reference-callout__testimonial--preview' ],
 };
 
-export async function applyParityFonts( target: Page | Frame ): Promise< void > {
+export async function applyParityFonts(
+	target: Page | Frame
+): Promise< void > {
 	await target.addStyleTag( { content: PARITY_FONT_CSS } );
 }
 
@@ -78,6 +88,12 @@ export async function captureFrontend(
 /**
  * Photographs one Site Editor canvas subtree with the editor chrome excluded.
  * Callers select the same content subtree that they capture on the frontend.
+ * @param page                 The Playwright page containing the Site Editor.
+ * @param route                The Site Editor route to open.
+ * @param maskSelectors        Selectors to mask in the captured image.
+ * @param rootSelector         Selector for the content subtree to capture.
+ * @param frontendContentWidth Optional frontend width to apply to the editor root.
+ * @param editorOnlySelectors  Selectors for editor-only content to remove.
  */
 export async function captureEditorCanvas(
 	page: Page,
@@ -89,15 +105,23 @@ export async function captureEditorCanvas(
 ): Promise< Buffer > {
 	const canvas = await openSiteEditorCanvas( page, route );
 	const root = canvas.locator( rootSelector ).first();
-	const editorGuideContinue = page.getByRole( 'dialog' ).getByRole( 'button', { name: /^continue$/i } ).first();
+	const editorGuideContinue = page
+		.getByRole( 'dialog' )
+		.getByRole( 'button', { name: /^continue$/i } )
+		.first();
 
 	if ( await editorGuideContinue.isVisible().catch( () => false ) ) {
 		await editorGuideContinue.click();
 	}
 
 	if ( undefined !== frontendContentWidth ) {
-		if ( ! Number.isFinite( frontendContentWidth ) || frontendContentWidth <= 0 ) {
-			throw new Error( `captureEditorCanvas: frontend content width must be a positive finite number, got ${ frontendContentWidth }.` );
+		if (
+			! Number.isFinite( frontendContentWidth ) ||
+			frontendContentWidth <= 0
+		) {
+			throw new Error(
+				`captureEditorCanvas: frontend content width must be a positive finite number, got ${ frontendContentWidth }.`
+			);
 		}
 
 		await root.evaluate( ( element, width ) => {
@@ -116,14 +140,17 @@ export async function captureEditorCanvas(
 	await root.evaluate( ( element ) => element.ownerDocument.fonts.ready );
 	await root.locator( 'img' ).evaluateAll( async ( images ) => {
 		await Promise.all(
-			images.map(
-				( image ) =>
-					image.complete
-						? image.decode().catch( () => undefined )
-						: new Promise< void >( ( resolve ) => {
-							image.addEventListener( 'load', () => resolve(), { once: true } );
-							image.addEventListener( 'error', () => resolve(), { once: true } );
-						} )
+			images.map( ( image ) =>
+				image.complete
+					? image.decode().catch( () => undefined )
+					: new Promise< void >( ( done ) => {
+							image.addEventListener( 'load', () => done(), {
+								once: true,
+							} );
+							image.addEventListener( 'error', () => done(), {
+								once: true,
+							} );
+					  } )
 			)
 		);
 	} );
@@ -132,10 +159,14 @@ export async function captureEditorCanvas(
 		const editorOnlyContent = root.locator( selector );
 
 		if ( 0 === ( await editorOnlyContent.count() ) ) {
-			throw new Error( `captureEditorCanvas: editor-only selector "${ selector }" was not found.` );
+			throw new Error(
+				`captureEditorCanvas: editor-only selector "${ selector }" was not found.`
+			);
 		}
 
-		await editorOnlyContent.evaluateAll( ( elements ) => elements.forEach( ( element ) => element.remove() ) );
+		await editorOnlyContent.evaluateAll( ( elements ) =>
+			elements.forEach( ( element ) => element.remove() )
+		);
 	}
 
 	const frame = page.locator( 'iframe[name="editor-canvas"]' );
@@ -143,7 +174,9 @@ export async function captureEditorCanvas(
 	const rootBox = await root.boundingBox();
 
 	if ( ! frameBox || ! rootBox ) {
-		throw new Error( 'captureEditorCanvas: the editor canvas or capture root is not visible.' );
+		throw new Error(
+			'captureEditorCanvas: the editor canvas or capture root is not visible.'
+		);
 	}
 
 	const geometry = await root.evaluate( ( element ) => {
@@ -164,12 +197,16 @@ export async function captureEditorCanvas(
 		return root.screenshot( {
 			animations: 'disabled',
 			caret: 'hide',
-			mask: maskSelectors.map( ( selector ) => canvas.locator( selector ) ),
+			mask: maskSelectors.map( ( selector ) =>
+				canvas.locator( selector )
+			),
 		} );
 	}
 
 	if ( maskSelectors.length > 0 ) {
-		throw new Error( 'captureEditorCanvas: tall canvas capture does not support masks.' );
+		throw new Error(
+			'captureEditorCanvas: tall canvas capture does not support masks.'
+		);
 	}
 
 	const width = Math.round( geometry.width );
@@ -179,22 +216,32 @@ export async function captureEditorCanvas(
 	let offset = 0;
 
 	while ( offset < height ) {
-		await root.evaluate( ( element, scrollTop ) => {
-			element.ownerDocument.defaultView?.scrollTo( 0, scrollTop );
-			return new Promise< void >( ( resolve ) => {
-				requestAnimationFrame( () => requestAnimationFrame( () => resolve() ) );
-			} );
-		}, Math.max( 0, geometry.top ) + offset );
+		await root.evaluate(
+			( element, scrollTop ) => {
+				element.ownerDocument.defaultView?.scrollTo( 0, scrollTop );
+				return new Promise< void >( ( done ) => {
+					requestAnimationFrame( () =>
+						requestAnimationFrame( () => done() )
+					);
+				} );
+			},
+			Math.max( 0, geometry.top ) + offset
+		);
 
 		const rootTop = await root.evaluate( ( element ) => ( {
 			top: element.getBoundingClientRect().top,
 		} ) );
 		const visibleRootOffset = Math.max( 0, -rootTop.top );
 		const clipOffset = offset - visibleRootOffset;
-		const tileHeight = Math.min( height - offset, Math.floor( viewportHeight - Math.max( 0, clipOffset ) ) );
+		const tileHeight = Math.min(
+			height - offset,
+			Math.floor( viewportHeight - Math.max( 0, clipOffset ) )
+		);
 
 		if ( clipOffset < -1 || tileHeight <= 0 ) {
-			throw new Error( 'captureEditorCanvas: the editor canvas has no visible tile area.' );
+			throw new Error(
+				'captureEditorCanvas: the editor canvas has no visible tile area.'
+			);
 		}
 
 		const tileBuffer = await page.screenshot( {
@@ -222,7 +269,9 @@ export async function captureEditorCanvas(
 		offset += tileHeight;
 	}
 
-	await root.evaluate( ( element ) => element.ownerDocument.defaultView?.scrollTo( 0, 0 ) );
+	await root.evaluate(
+		( element ) => element.ownerDocument.defaultView?.scrollTo( 0, 0 )
+	);
 
 	return PNG.sync.write( stitched );
 }
@@ -232,6 +281,9 @@ export type Box = { x: number; y: number; width: number; height: number };
 /**
  * Returns bounding boxes relative to the capture root's own origin. A missing
  * or unlaid-out selector throws so an absent section cannot pass as a zero box.
+ * @param scope        The page or frame locator used to query the layout.
+ * @param rootSelector Selector for the root used as the coordinate origin.
+ * @param selectors    Selectors whose bounding boxes must be measured.
  */
 export async function boundingBoxes(
 	scope: Page | FrameLocator,
@@ -241,7 +293,9 @@ export async function boundingBoxes(
 	const root = await scope.locator( rootSelector ).first().boundingBox();
 
 	if ( ! root ) {
-		throw new Error( `boundingBoxes: capture root "${ rootSelector }" was not found or is not visible.` );
+		throw new Error(
+			`boundingBoxes: capture root "${ rootSelector }" was not found or is not visible.`
+		);
 	}
 
 	const result: Record< string, Box > = {};
@@ -250,13 +304,17 @@ export async function boundingBoxes(
 		const target = scope.locator( selector ).first();
 
 		if ( ( await target.count() ) === 0 ) {
-			throw new Error( `boundingBoxes: "${ selector }" is missing. Editing parity cannot pass when a section is absent from one side.` );
+			throw new Error(
+				`boundingBoxes: "${ selector }" is missing. Editing parity cannot pass when a section is absent from one side.`
+			);
 		}
 
 		const box = await target.boundingBox();
 
 		if ( ! box ) {
-			throw new Error( `boundingBoxes: "${ selector }" exists but has no layout box (display:none?).` );
+			throw new Error(
+				`boundingBoxes: "${ selector }" exists but has no layout box (display:none?).`
+			);
 		}
 
 		result[ selector ] = {
@@ -273,6 +331,8 @@ export async function boundingBoxes(
 /**
  * Measures the editor canvas content width. The iframe width can differ from
  * the browser viewport when the Site Editor sidebars are open.
+ * @param page         The Playwright page containing the Site Editor canvas.
+ * @param rootSelector Selector for the editor content root.
  */
 export async function effectiveCanvasWidth(
 	page: Page,
@@ -285,17 +345,27 @@ export async function effectiveCanvasWidth(
 		.evaluate( ( element ) => element.getBoundingClientRect().width );
 
 	if ( ! Number.isFinite( width ) ) {
-		throw new Error( `effectiveCanvasWidth: expected a finite number, got ${ width }.` );
+		throw new Error(
+			`effectiveCanvasWidth: expected a finite number, got ${ width }.`
+		);
 	}
 
 	return width;
 }
 
-export async function layoutWidth( scope: Page | FrameLocator, selector: string ): Promise< number > {
-	const width = await scope.locator( selector ).first().evaluate( ( element ) => element.getBoundingClientRect().width );
+export async function layoutWidth(
+	scope: Page | FrameLocator,
+	selector: string
+): Promise< number > {
+	const width = await scope
+		.locator( selector )
+		.first()
+		.evaluate( ( element ) => element.getBoundingClientRect().width );
 
 	if ( ! Number.isFinite( width ) ) {
-		throw new Error( `layoutWidth: "${ selector }" returned a non-number width: ${ width }.` );
+		throw new Error(
+			`layoutWidth: "${ selector }" returned a non-number width: ${ width }.`
+		);
 	}
 
 	return width;
@@ -306,16 +376,20 @@ export async function computedStyles(
 	selector: string,
 	properties: string[]
 ): Promise< Record< string, string > > {
-	return scope.locator( selector ).first().evaluate( ( element, props ) => {
-		const styles = element.ownerDocument.defaultView!.getComputedStyle( element );
-		const out: Record< string, string > = {};
+	return scope
+		.locator( selector )
+		.first()
+		.evaluate( ( element, props ) => {
+			const styles =
+				element.ownerDocument.defaultView!.getComputedStyle( element );
+			const out: Record< string, string > = {};
 
-		for ( const prop of props ) {
-			out[ prop ] = styles.getPropertyValue( prop );
-		}
+			for ( const prop of props ) {
+				out[ prop ] = styles.getPropertyValue( prop );
+			}
 
-		return out;
-	}, properties );
+			return out;
+		}, properties );
 }
 
 export function compareToBaseline(
@@ -324,12 +398,21 @@ export function compareToBaseline(
 	maxDiffRatio: number,
 	diffOutPath: string
 ): { diffRatio: number } {
-	return compareBuffers( readFileSync( baselinePath ), actual, maxDiffRatio, diffOutPath );
+	return compareBuffers(
+		readFileSync( baselinePath ),
+		actual,
+		maxDiffRatio,
+		diffOutPath
+	);
 }
 
 /**
  * Captures a frontend region as an element screenshot so it uses the same
  * capture geometry as the Site Editor canvas screenshot.
+ * @param page          The Playwright page used to capture the frontend.
+ * @param path          Site-relative path to open before the capture.
+ * @param maskSelectors Selectors to mask in the captured image.
+ * @param rootSelector  Selector for the frontend region to capture.
  */
 export async function captureFrontendRegion(
 	page: Page,
@@ -341,15 +424,22 @@ export async function captureFrontendRegion(
 	await applyParityFonts( page );
 	await page.evaluate( () => document.fonts.ready );
 
-	return page.locator( rootSelector ).first().screenshot( {
-		animations: 'disabled',
-		caret: 'hide',
-		mask: maskSelectors.map( ( selector ) => page.locator( selector ) ),
-	} );
+	return page
+		.locator( rootSelector )
+		.first()
+		.screenshot( {
+			animations: 'disabled',
+			caret: 'hide',
+			mask: maskSelectors.map( ( selector ) => page.locator( selector ) ),
+		} );
 }
 
 /**
  * Compares two PNG buffers and counts a capture-size mismatch as difference.
+ * @param expectedBuffer The baseline PNG bytes.
+ * @param actualBuffer   The newly captured PNG bytes.
+ * @param maxDiffRatio   The maximum allowed differing-pixel ratio.
+ * @param diffOutPath    The path for a diagnostic diff image.
  */
 export function compareBuffers(
 	expectedBuffer: Buffer,
@@ -390,10 +480,17 @@ export function compareBuffers(
 /**
  * Resolves a page id through the REST API so a missing setup fixture fails with
  * a named error instead of an editor timeout.
+ * @param page The Playwright page used for the REST request.
+ * @param path Site-relative path whose page id must be resolved.
  */
-export async function resolvePageId( page: Page, path: string ): Promise< number > {
+export async function resolvePageId(
+	page: Page,
+	path: string
+): Promise< number > {
 	const slug = path.replace( /^\/|\/$/g, '' ) || 'home';
-	const response = await page.request.get( `/wp-json/wp/v2/pages?slug=${ encodeURIComponent( slug ) }` );
+	const response = await page.request.get(
+		`/wp-json/wp/v2/pages?slug=${ encodeURIComponent( slug ) }`
+	);
 	const results = ( await response.json() ) as Array< { id: number } >;
 
 	if ( ! Array.isArray( results ) || results.length === 0 ) {

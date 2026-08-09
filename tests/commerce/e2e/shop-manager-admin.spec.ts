@@ -44,8 +44,9 @@ function isMobileProject(): boolean {
  * page. Used to seed a deterministic order for the orders-screen test WITHOUT
  * depending on the journey suite having run first — the whole point is that
  * this spec is self-contained.
+ * @param page The Playwright page used for the storefront checkout.
  */
-async function placeGuestCodOrder( page: Page ): Promise<string> {
+async function placeGuestCodOrder( page: Page ): Promise< string > {
 	await addSimpleProductToCart( page );
 	await page.goto( '/checkout/' );
 	await fillBlockCheckoutWithCod( page, 'smoke-tester@example.com' );
@@ -56,10 +57,17 @@ async function placeGuestCodOrder( page: Page ): Promise<string> {
  * The numeric product id parsed from a products-list row's `<tr id="post-{id}">`.
  * Read off the row id rather than the title anchor's href so it does not depend
  * on how WordPress renders the edit link.
+ * @param page  The Playwright page containing the products table.
+ * @param title The product title to locate in the table row.
  */
-async function productIdFromRow( page: Page, title: string ): Promise<string> {
+async function productIdFromRow(
+	page: Page,
+	title: string
+): Promise< string > {
 	const trId = await page
-		.locator( 'tr', { has: page.locator( 'a.row-title', { hasText: title } ) } )
+		.locator( 'tr', {
+			has: page.locator( 'a.row-title', { hasText: title } ),
+		} )
 		.first()
 		.getAttribute( 'id' );
 
@@ -67,22 +75,34 @@ async function productIdFromRow( page: Page, title: string ): Promise<string> {
 }
 
 test.describe( 'shop-manager wp-admin smoke', () => {
-	test.skip( process.env.COMMERCE !== '1', 'commerce profile only — set COMMERCE=1 to run' );
+	test.skip(
+		process.env.COMMERCE !== '1',
+		'commerce profile only — set COMMERCE=1 to run'
+	);
 
 	test.beforeEach( () => {
-		test.skip( isMobileProject(), 'desktop-only admin smoke — wp-admin is not a mobile target' );
+		test.skip(
+			isMobileProject(),
+			'desktop-only admin smoke — wp-admin is not a mobile target'
+		);
 		// The orders test does a full storefront checkout AND an admin note
 		// round-trip; under parallel load that runs well past Playwright's 30s
 		// default, so give the whole describe generous headroom.
 		test.setTimeout( 90_000 );
 	} );
 
-	test( 'products list shows the fixtures and a published product opens for editing', async ( { page } ) => {
+	test( 'products list shows the fixtures and a published product opens for editing', async ( {
+		page,
+	} ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		await page.goto( adminUrl( 'edit.php?post_type=product' ) );
-		await expect( page.locator( 'a.row-title', { hasText: 'Test Simple Product' } ) ).toBeVisible();
-		await expect( page.locator( 'a.row-title', { hasText: 'Test Variable Product' } ) ).toBeVisible();
+		await expect(
+			page.locator( 'a.row-title', { hasText: 'Test Simple Product' } )
+		).toBeVisible();
+		await expect(
+			page.locator( 'a.row-title', { hasText: 'Test Variable Product' } )
+		).toBeVisible();
 
 		// Workflow proof: client_shop_manager is workflow-complete for the
 		// catalogue — ShopRole grants `edit_published_products` +
@@ -95,12 +115,18 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		const simpleId = await productIdFromRow( page, 'Test Simple Product' );
 		expect( simpleId ).toMatch( /\d+/ );
 
-		const response = await page.goto( adminUrl( `post.php?post=${ simpleId }&action=edit` ) );
+		const response = await page.goto(
+			adminUrl( `post.php?post=${ simpleId }&action=edit` )
+		);
 		expect( response?.status() ).toBe( 200 );
-		await expect( page.locator( 'input#title' ) ).toHaveValue( 'Test Simple Product' );
+		await expect( page.locator( 'input#title' ) ).toHaveValue(
+			'Test Simple Product'
+		);
 	} );
 
-	test( 'orders screen loads and a private order note round-trips', async ( { page } ) => {
+	test( 'orders screen loads and a private order note round-trips', async ( {
+		page,
+	} ) => {
 		// Deterministic precondition: place a guest COD order in THIS spec so the
 		// assertion never depends on the journey suite having run first. The page
 		// is logged out at this point, so it is a genuine guest checkout.
@@ -111,7 +137,9 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 
 		// HPOS orders admin lives at admin.php?page=wc-orders (verified live).
 		await page.goto( adminUrl( 'admin.php?page=wc-orders' ) );
-		await expect( page.locator( 'h1', { hasText: 'Orders' } ).first() ).toBeVisible();
+		await expect(
+			page.locator( 'h1', { hasText: 'Orders' } ).first()
+		).toBeVisible();
 		const ordersTable = page.locator( 'table.wp-list-table' );
 		await expect( ordersTable ).toBeVisible();
 		await expect( ordersTable ).toContainText( orderNumber );
@@ -119,14 +147,20 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		// Open the order we just placed and add a PRIVATE note. The order-note
 		// metabox's #order_note_type defaults to the empty value = "Private note",
 		// so the default selection is already the private path.
-		await page.goto( adminUrl( `admin.php?page=wc-orders&action=edit&id=${ orderNumber }` ) );
+		await page.goto(
+			adminUrl(
+				`admin.php?page=wc-orders&action=edit&id=${ orderNumber }`
+			)
+		);
 		const note = `W2 smoke private note ${ Date.now() }`;
 		await page.locator( '#add_order_note' ).fill( note );
 		await page.locator( 'button.add_note' ).click();
 
 		// The new note is prepended to the notes list via AJAX.
 		await expect(
-			page.locator( 'ul.order_notes li .note_content', { hasText: note } ).first()
+			page
+				.locator( 'ul.order_notes li .note_content', { hasText: note } )
+				.first()
 		).toBeVisible();
 	} );
 
@@ -136,10 +170,14 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		await page.goto( adminUrl( 'edit.php?post_type=shop_coupon' ) );
 		// The coupon's post title renders lower-cased ("testcoupon"); the coupon
 		// CODE applied at checkout is TESTCOUPON.
-		await expect( page.locator( 'a.row-title', { hasText: /testcoupon/i } ) ).toBeVisible();
+		await expect(
+			page.locator( 'a.row-title', { hasText: /testcoupon/i } )
+		).toBeVisible();
 	} );
 
-	test( 'wp-admin lockdown holds: no Plugins menu, and Appearance is replaced by Design', async ( { page } ) => {
+	test( 'wp-admin lockdown holds: no Plugins menu, and Appearance is replaced by Design', async ( {
+		page,
+	} ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
 		await page.goto( adminUrl() );
@@ -156,17 +194,27 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		).toBeVisible();
 
 		// No denied design screen is reachable from the menu at all.
-		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php', 'widgets.php', 'nav-menus.php' ] ) {
+		for ( const denied of [
+			'themes.php',
+			'theme-editor.php',
+			'customize.php',
+			'widgets.php',
+			'nav-menus.php',
+		] ) {
 			await expect(
 				page.locator( `#adminmenu a[href*="${ denied }"]` )
 			).toHaveCount( 0 );
 		}
 	} );
 
-	test( 'shop-manager CAN reach WooCommerce Settings (documented manage_woocommerce dial)', async ( { page } ) => {
+	test( 'shop-manager CAN reach WooCommerce Settings (documented manage_woocommerce dial)', async ( {
+		page,
+	} ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
-		const response = await page.goto( adminUrl( 'admin.php?page=wc-settings' ) );
+		const response = await page.goto(
+			adminUrl( 'admin.php?page=wc-settings' )
+		);
 
 		// DOCUMENTED DIAL: client_shop_manager carries `manage_woocommerce` (core
 		// shop_manager parity), which grants WooCommerce Settings access. This is
@@ -177,7 +225,9 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		expect( response?.status() ).toBe( 200 );
 		await expect( page.locator( 'a.nav-tab' ).first() ).toBeVisible();
 		await expect(
-			page.getByText( /you do not have sufficient permissions|not allowed to access this page/i )
+			page.getByText(
+				/you do not have sufficient permissions|not allowed to access this page/i
+			)
 		).toHaveCount( 0 );
 	} );
 
@@ -187,22 +237,38 @@ test.describe( 'shop-manager wp-admin smoke', () => {
 		const response = await page.goto( adminUrl( 'site-editor.php' ) );
 		expect( response?.status() ).toBe( 200 );
 		await expect(
-			page.getByText( /you do not have sufficient permissions|not allowed to access this page/i )
+			page.getByText(
+				/you do not have sufficient permissions|not allowed to access this page/i
+			)
 		).toHaveCount( 0 );
 
 		// The Site Editor canvas is an iframe; its presence is the proof the
 		// editor booted rather than rendering a permissions error.
-		await expect( page.locator( 'iframe[name="editor-canvas"], .edit-site-visual-editor' ).first() ).toBeVisible( { timeout: 30_000 } );
+		await expect(
+			page
+				.locator(
+					'iframe[name="editor-canvas"], .edit-site-visual-editor'
+				)
+				.first()
+		).toBeVisible( { timeout: 30_000 } );
 	} );
 
-	test( 'shop-manager is still refused the theme installer and the theme file editor', async ( { page } ) => {
+	test( 'shop-manager is still refused the theme installer and the theme file editor', async ( {
+		page,
+	} ) => {
 		await loginAs( page, SHOP_MANAGER.user, SHOP_MANAGER.pass );
 
-		for ( const denied of [ 'themes.php', 'theme-editor.php', 'customize.php' ] ) {
+		for ( const denied of [
+			'themes.php',
+			'theme-editor.php',
+			'customize.php',
+		] ) {
 			const response = await page.goto( adminUrl( denied ) );
 			expect( response?.status(), denied ).toBe( 403 );
 			await expect(
-				page.getByText( /higher level of permission|not allowed/i ).first()
+				page
+					.getByText( /higher level of permission|not allowed/i )
+					.first()
 			).toBeVisible();
 		}
 	} );
