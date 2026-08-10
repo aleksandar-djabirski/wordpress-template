@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.61.1",
+    "@playwright/test": "^1.62.1",
     "@types/pngjs": "^6.0.5",
     "@wordpress/block-editor": "^16.0.0",
     "@wordpress/blocks": "^15.24.0",
@@ -31,7 +31,7 @@
     "axe-core": "^4.12.1",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
-    "stylelint": "^17.14.0",
+    "stylelint": "^17.14.1",
     "stylelint-config-standard": "^40.0.0",
     "stylelint-declaration-strict-value": "^1.11.1"
   },
