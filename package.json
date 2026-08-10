@@ -28,7 +28,7 @@
     "@wordpress/components": "^37.0.0",
     "@wordpress/i18n": "^6.24.0",
     "@wordpress/scripts": "^33.0.0",
-    "axe-core": "^4.12.1",
+    "axe-core": "^4.13.0",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
     "stylelint": "^17.14.0",
