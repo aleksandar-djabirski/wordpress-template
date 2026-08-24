@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a844b39ae414311df5318c49b7e0340b",
+    "content-hash": "1854a256a37f4491f80ceca1cb6ade41",
     "packages": [
         {
             "name": "composer/installers",
@@ -1908,16 +1908,16 @@
         },
         {
             "name": "php-stubs/woocommerce-stubs",
-            "version": "v10.9.4",
+            "version": "v11.0.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/php-stubs/woocommerce-stubs.git",
-                "reference": "a569e43283b86178628beb7aa22cc34b4076b435"
+                "reference": "923dd29055713886efd7f85ea2510b9c6955a714"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/php-stubs/woocommerce-stubs/zipball/a569e43283b86178628beb7aa22cc34b4076b435",
-                "reference": "a569e43283b86178628beb7aa22cc34b4076b435",
+                "url": "https://api.github.com/repos/php-stubs/woocommerce-stubs/zipball/923dd29055713886efd7f85ea2510b9c6955a714",
+                "reference": "923dd29055713886efd7f85ea2510b9c6955a714",
                 "shasum": ""
             },
             "require": {
@@ -1946,9 +1946,9 @@
             ],
             "support": {
                 "issues": "https://github.com/php-stubs/woocommerce-stubs/issues",
-                "source": "https://github.com/php-stubs/woocommerce-stubs/tree/v10.9.4"
+                "source": "https://github.com/php-stubs/woocommerce-stubs/tree/v11.0.0"
             },
-            "time": "2026-07-16T18:17:41+00:00"
+            "time": "2026-08-04T19:31:58+00:00"
         },
         {
             "name": "php-stubs/wordpress-stubs",
@@ -2434,11 +2434,11 @@
         },
         {
             "name": "phpstan/phpstan",
-            "version": "2.2.5",
+            "version": "2.2.8",
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/909c1e5fef7989ac0d0c1c5c42e32a5c4f6198a0",
-                "reference": "909c1e5fef7989ac0d0c1c5c42e32a5c4f6198a0",
+                "url": "https://api.github.com/repos/phpstan/phpstan/zipball/e285254e60f33c21902efef4a926ca0987c06804",
+                "reference": "e285254e60f33c21902efef4a926ca0987c06804",
                 "shasum": ""
             },
             "require": {
@@ -2494,7 +2494,7 @@
                     "type": "github"
                 }
             ],
-            "time": "2026-07-05T06:31:06+00:00"
+            "time": "2026-08-04T22:21:45+00:00"
         },
         {
             "name": "phpunit/php-code-coverage",
@@ -5471,16 +5471,16 @@
         },
         {
             "name": "wp-phpunit/wp-phpunit",
-            "version": "7.0.2",
+            "version": "7.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/wp-phpunit/wp-phpunit.git",
-                "reference": "0d17335392d78b12b3e7e6b519cd53db728df52a"
+                "reference": "797edc710afc958854852d859c93d9aa1de6447d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/wp-phpunit/wp-phpunit/zipball/0d17335392d78b12b3e7e6b519cd53db728df52a",
-                "reference": "0d17335392d78b12b3e7e6b519cd53db728df52a",
+                "url": "https://api.github.com/repos/wp-phpunit/wp-phpunit/zipball/797edc710afc958854852d859c93d9aa1de6447d",
+                "reference": "797edc710afc958854852d859c93d9aa1de6447d",
                 "shasum": ""
             },
             "type": "library",
@@ -5515,7 +5515,7 @@
                 "issues": "https://github.com/wp-phpunit/issues",
                 "source": "https://github.com/wp-phpunit/wp-phpunit"
             },
-            "time": "2026-07-10T02:38:55+00:00"
+            "time": "2026-08-20T00:59:59+00:00"
         },
         {
             "name": "yoast/phpunit-polyfills",
