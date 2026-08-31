@@ -20,8 +20,8 @@
     "capture:migration-baseline": "playwright test tests/parity/migration-baseline.capture.spec.ts --project=parity-desktop --project=parity-mobile"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.12.1",
-    "@playwright/test": "^1.61.1",
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@types/pngjs": "^6.0.5",
     "@wordpress/block-editor": "^16.0.0",
     "@wordpress/blocks": "^15.24.0",
@@ -31,9 +31,9 @@
     "axe-core": "^4.12.1",
     "pixelmatch": "^6.0.0",
     "pngjs": "^7.0.0",
-    "stylelint": "^17.14.0",
+    "stylelint": "^17.14.1",
     "stylelint-config-standard": "^40.0.0",
-    "stylelint-declaration-strict-value": "^1.11.1"
+    "stylelint-declaration-strict-value": "^1.12.1"
   },
   "//overrides": "Dev-only security overrides for advisories in @wordpress/scripts' transitive tree. Production audit (npm audit --omit=dev) is already clean; these force patched versions of build-tooling deps that process repo/PR content. Every override here is verified to keep `npm ci` lock-sync, lint, and a byte-identical block build green (webpack-dev-server + uuid additionally verified by booting `npm run start`). Regenerate the lock with `npx -y npm@10 install` (see AGENTS.md). fast-uri and ip-address are tree-wide patches — each has exactly one copy in the tree and every consumer range accepts the patch. minimatch uses a version selector so only the vulnerable 3.x copy (markdownlint-cli's `~3.0.5`) is bumped; the 9.x and 10.x copies eslint and webpack tooling require are never forced backwards. IMPORTANT, because it silently wastes a cycle otherwise: a `name@range` selector is matched as a SUBSET of the range a parent REQUESTS, not against the version that gets resolved. `minimatch@<3.1.4` works because markdownlint-cli asks for `~3.0.5` and `>=3.0.5 <3.1.0` is inside `<3.1.4`; the same shape written as `brace-expansion@<1.1.18` matches NOTHING, because the parent asks for `^1.1.7` and `>=1.1.7 <2.0.0` is not inside it. Read the requested spec out of the lock (`packages[*].dependencies`) and use that spec verbatim as the selector — hence the `^1.1.7` / `^2.0.2` / `^5.0.5` and `^3.13.1` / `^4.1.0` / `^4.3.0` entries, one per distinct request in the tree.",
   "overrides": {
